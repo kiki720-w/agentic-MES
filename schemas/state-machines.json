@@ -1,0 +1,72 @@
+{
+  "version": "1.0",
+  "machines": {
+    "workOrder": {
+      "initial": "DRAFT",
+      "terminal": ["CLOSED", "CANCELLED"],
+      "transitions": [
+        {"from":"DRAFT","command":"release","event":"WorkOrderReleased","to":"RELEASED"},
+        {"from":"RELEASED","command":"start","event":"WorkOrderStarted","to":"IN_PROGRESS"},
+        {"from":"RELEASED","command":"suspend","event":"WorkOrderSuspended","to":"SUSPENDED"},
+        {"from":"IN_PROGRESS","command":"suspend","event":"WorkOrderSuspended","to":"SUSPENDED"},
+        {"from":"SUSPENDED","command":"resume","event":"WorkOrderResumed","to":"IN_PROGRESS"},
+        {"from":"IN_PROGRESS","command":"complete","event":"WorkOrderCompleted","to":"COMPLETED"},
+        {"from":"COMPLETED","command":"close","event":"WorkOrderClosed","to":"CLOSED"},
+        {"from":"DRAFT","command":"cancel","event":"WorkOrderCancelled","to":"CANCELLED"},
+        {"from":"RELEASED","command":"cancel","event":"WorkOrderCancelled","to":"CANCELLED"}
+      ]
+    },
+    "operationTask": {
+      "initial": "PENDING",
+      "terminal": ["COMPLETED", "FAILED", "CANCELLED"],
+      "transitions": [
+        {"from":"PENDING","command":"makeReady","event":"OperationBecameReady","to":"READY"},
+        {"from":"READY","command":"dispatch","event":"OperationDispatched","to":"DISPATCHED"},
+        {"from":"DISPATCHED","command":"start","event":"OperationStarted","to":"RUNNING"},
+        {"from":"RUNNING","command":"pause","event":"OperationPaused","to":"PAUSED"},
+        {"from":"PAUSED","command":"resume","event":"OperationResumed","to":"RUNNING"},
+        {"from":"RUNNING","command":"complete","event":"OperationCompleted","to":"COMPLETED"},
+        {"from":"RUNNING","command":"fail","event":"OperationFailed","to":"FAILED"},
+        {"from":"READY","command":"cancel","event":"OperationCancelled","to":"CANCELLED"},
+        {"from":"DISPATCHED","command":"cancel","event":"OperationCancelled","to":"CANCELLED"}
+      ]
+    },
+    "quality": {
+      "initial": "NOT_INSPECTED",
+      "terminal": ["ACCEPTED", "ACCEPTED_BY_CONCESSION", "SCRAPPED"],
+      "transitions": [
+        {"from":"NOT_INSPECTED","command":"requestInspection","event":"InspectionRequested","to":"INSPECTION_PENDING"},
+        {"from":"INSPECTION_PENDING","command":"accept","event":"InspectionAccepted","to":"ACCEPTED"},
+        {"from":"INSPECTION_PENDING","command":"reject","event":"QualityFailed","to":"REJECTED"},
+        {"from":"REJECTED","command":"hold","event":"ProductHeld","to":"HELD"},
+        {"from":"HELD","command":"approveRework","event":"ReworkCreated","to":"REWORK"},
+        {"from":"REWORK","command":"requestReinspection","event":"ReinspectionRequested","to":"REINSPECTION"},
+        {"from":"REINSPECTION","command":"accept","event":"InspectionAccepted","to":"ACCEPTED"},
+        {"from":"REINSPECTION","command":"reject","event":"ProductHeld","to":"HELD"},
+        {"from":"HELD","command":"scrap","event":"ProductScrapped","to":"SCRAPPED"},
+        {"from":"HELD","command":"concession","event":"ConcessionAccepted","to":"ACCEPTED_BY_CONCESSION"}
+      ]
+    },
+    "equipment": {
+      "initial": "OFFLINE",
+      "terminal": [],
+      "transitions": [
+        {"from":"OFFLINE","command":"connect","event":"MachineStateChanged","to":"IDLE"},
+        {"from":"IDLE","command":"beginSetup","event":"MachineStateChanged","to":"SETUP"},
+        {"from":"SETUP","command":"startRun","event":"MachineStateChanged","to":"RUNNING"},
+        {"from":"IDLE","command":"startRun","event":"MachineStateChanged","to":"RUNNING"},
+        {"from":"RUNNING","command":"starve","event":"MachineStateChanged","to":"STARVED"},
+        {"from":"RUNNING","command":"block","event":"MachineStateChanged","to":"BLOCKED"},
+        {"from":"RUNNING","command":"alarm","event":"MachineAlarmRaised","to":"DOWN"},
+        {"from":"SETUP","command":"alarm","event":"MachineAlarmRaised","to":"DOWN"},
+        {"from":"DOWN","command":"beginMaintenance","event":"MaintenanceStarted","to":"MAINTENANCE"},
+        {"from":"MAINTENANCE","command":"restore","event":"MachineRestored","to":"IDLE"},
+        {"from":"DOWN","command":"restore","event":"MachineRestored","to":"IDLE"},
+        {"from":"RUNNING","command":"finishRun","event":"MachineStateChanged","to":"IDLE"},
+        {"from":"STARVED","command":"resumeRun","event":"MachineStateChanged","to":"RUNNING"},
+        {"from":"BLOCKED","command":"resumeRun","event":"MachineStateChanged","to":"RUNNING"}
+      ]
+    }
+  }
+}
+

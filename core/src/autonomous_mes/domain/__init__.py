@@ -1,0 +1,2 @@
+"""Pure manufacturing domain model."""
+

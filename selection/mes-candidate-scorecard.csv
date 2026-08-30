@@ -1,0 +1,13 @@
+category,criterion,weight,hard_gate,OpenMES,point85_mes_ai,salbotics_ssd_mes,evidence,status
+Legal,Repository and dependency licenses fit commercial model,10,YES,1,0,5,"OpenMES AGPL-3.0; mes-ai no root license; SSD-MES MIT",reviewed
+Operations,Order-work-order-operation execution loop,10,YES,4,4,3,"README plus domain source tree; runtime verification pending",provisional
+Process,Versioned routing and operation definitions,8,NO,3,4,4,"Static implementation review",provisional
+Traceability,Serial or lot genealogy across man-machine-material-method-measurement,12,YES,4,4,4,"OpenMES audit/trace claims; mes-ai genealogy; SSD unit genealogy",provisional
+Quality,Inspection nonconformance hold rework and scrap,8,YES,3,3,1,"SSD lacks a complete quality disposition loop",provisional
+Integration,Stable documented API and event extension points,10,YES,4,4,4,"REST APIs present; OpenMES hooks; mes-ai plugins/events",provisional
+Equipment,OPC UA MQTT or gateway integration path,8,NO,4,4,0,"OpenMES MQTT/OPC UA gateway; mes-ai optional protocols; none in SSD",provisional
+Security,Authentication authorization audit and tenant isolation,10,YES,4,3,1,"OpenMES strongest static evidence; SSD sample-level security",provisional
+Data,Schema quality migration export and ownership,7,YES,4,3,3,"Static schema/persistence review; export test pending",provisional
+Architecture,Maintainability tests modularity and upgrade path,7,NO,4,4,4,"All have separation points; maturity differs",provisional
+Operations,Repeatable deployment backup monitoring and recovery,5,NO,4,2,2,"OpenMES compose exists; runtime verification pending",provisional
+Community,Recent maintenance issues releases and documentation,5,NO,4,3,2,"Commit timestamps and repository documentation",provisional

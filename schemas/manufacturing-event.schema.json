@@ -1,0 +1,51 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://autonomous-mes.local/schemas/manufacturing-event.schema.json",
+  "title": "ManufacturingEvent",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["eventId", "eventType", "eventTime", "receivedTime", "source", "factoryId", "payload"],
+  "properties": {
+    "eventId": { "type": "string", "minLength": 1 },
+    "eventType": {
+      "enum": [
+        "WorkOrderCreated", "WorkOrderReleased", "WorkOrderStarted",
+        "WorkOrderSuspended", "WorkOrderResumed", "WorkOrderCompleted",
+        "WorkOrderClosed", "WorkOrderCancelled", "OperationBecameReady",
+        "OperationDispatched", "OperationStarted", "OperationPaused",
+        "OperationResumed", "OperationCompleted", "OperationFailed",
+        "OperationCancelled", "MachineStateChanged", "MachineAlarmRaised",
+        "MaintenanceStarted", "MachineRestored", "MaterialConsumed",
+        "ToolLoaded", "ToolChanged", "InspectionRequested",
+        "InspectionCompleted", "InspectionAccepted", "QualityFailed",
+        "ProductHeld", "ReworkCreated", "ReinspectionRequested",
+        "ProductScrapped", "ConcessionAccepted",
+        "RecommendationDraftCreated", "RecommendationRejected",
+        "AgentToolCallRecorded"
+      ]
+    },
+    "schemaVersion": { "type": "string", "default": "1.0" },
+    "eventTime": { "type": "string", "format": "date-time" },
+    "receivedTime": { "type": "string", "format": "date-time" },
+    "factoryId": { "type": "string" },
+    "workshopId": { "type": ["string", "null"] },
+    "workOrderId": { "type": ["string", "null"] },
+    "operationId": { "type": ["string", "null"] },
+    "equipmentId": { "type": ["string", "null"] },
+    "productSerial": { "type": ["string", "null"] },
+    "operatorId": { "type": ["string", "null"] },
+    "correlationId": { "type": ["string", "null"] },
+    "causationId": { "type": ["string", "null"] },
+    "actor": {
+      "type": ["object", "null"],
+      "required": ["type", "id"],
+      "properties": {
+        "type": { "enum": ["HUMAN", "SYSTEM", "DEVICE", "AGENT"] },
+        "id": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+    "source": { "enum": ["ERP_SIM", "MES", "EDGE_SIM", "QMS", "AGENT", "MAINTENANCE"] },
+    "payload": { "type": "object" }
+  }
+}

@@ -1,0 +1,32 @@
+{
+  "factoryId": "F-01",
+  "workshop": { "id": "WS-MACH-01", "name": "精密机械加工虚拟车间" },
+  "equipment": [
+    { "id": "LATHE-01", "type": "CNC_LATHE", "capabilities": ["turning"] },
+    { "id": "LATHE-02", "type": "CNC_LATHE", "capabilities": ["turning"] },
+    { "id": "LATHE-03", "type": "CNC_LATHE", "capabilities": ["turning"] },
+    { "id": "MC-01", "type": "MACHINING_CENTER", "capabilities": ["milling", "drilling"] },
+    { "id": "MC-02", "type": "MACHINING_CENTER", "capabilities": ["milling", "drilling"] },
+    { "id": "MC-03", "type": "MACHINING_CENTER", "capabilities": ["milling", "drilling"] },
+    { "id": "MC-04", "type": "MACHINING_CENTER", "capabilities": ["milling", "drilling"] },
+    { "id": "GRIND-01", "type": "GRINDER", "capabilities": ["cylindrical_grinding"] },
+    { "id": "GRIND-02", "type": "GRINDER", "capabilities": ["surface_grinding"] },
+    { "id": "CMM-01", "type": "CMM", "capabilities": ["dimensional_inspection"] }
+  ],
+  "products": [
+    {
+      "id": "P-SHAFT-01", "name": "传动轴", "revision": "A",
+      "routing": ["sawing", "rough_turning", "finish_turning", "cylindrical_grinding", "final_inspection"]
+    },
+    {
+      "id": "P-VALVE-01", "name": "阀体", "revision": "A",
+      "routing": ["blank_receipt", "rough_milling", "drilling", "finish_milling", "deburring", "final_inspection"]
+    },
+    {
+      "id": "P-FLANGE-01", "name": "精密法兰", "revision": "A",
+      "routing": ["sawing", "turning", "drilling", "surface_grinding", "final_inspection"]
+    }
+  ],
+  "exceptionScenarios": ["rush_order", "machine_breakdown", "material_shortage", "quality_failure", "tool_anomaly"]
+}
+

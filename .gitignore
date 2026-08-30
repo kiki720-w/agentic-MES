@@ -1,0 +1,36 @@
+# Secrets and local configuration
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+dist/
+build/
+
+# IDE / OS
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
+# Microsoft Office lock files
+~$*
+
+# Third-party repositories used only for evaluation
+candidates/
+
+# Generated document render and visual-QA caches
+docx_render/
+docx_render_v2/
+docx_render_v3/
+docx_render_v4/
+docx_render_v5/
+
