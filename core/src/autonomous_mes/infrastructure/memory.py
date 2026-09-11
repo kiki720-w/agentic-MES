@@ -1,6 +1,6 @@
 from copy import deepcopy
 from threading import RLock
-from typing import Any, Dict, List, Optional, Set
+from typing import Any
 
 from autonomous_mes.application.ports import IdempotentResult
 from autonomous_mes.domain.errors import Forbidden, IdempotencyConflict, InvalidTransition
@@ -12,31 +12,31 @@ class InMemoryWorkOrderStore:
     """Atomic test adapter; PostgreSQL replaces this in the next slice."""
 
     def __init__(self) -> None:
-        self._orders: Dict[str, WorkOrder] = {}
-        self._human_codes: Dict[str, str] = {}
-        self._outbox: List[Dict[str, Any]] = []
-        self._idempotency: Dict[str, IdempotentResult] = {}
+        self._orders: dict[str, WorkOrder] = {}
+        self._human_codes: dict[str, str] = {}
+        self._outbox: list[dict[str, Any]] = []
+        self._idempotency: dict[str, IdempotentResult] = {}
         self._lock = RLock()
 
-    def get(self, work_order_id: str) -> Optional[WorkOrder]:
+    def get(self, work_order_id: str) -> WorkOrder | None:
         with self._lock:
             item = self._orders.get(work_order_id)
             return deepcopy(item) if item else None
 
-    def get_by_human_code(self, human_code: str) -> Optional[WorkOrder]:
+    def get_by_human_code(self, human_code: str) -> WorkOrder | None:
         with self._lock:
             work_order_id = self._human_codes.get(human_code)
             return self.get(work_order_id) if work_order_id else None
 
-    def get_idempotent_result(self, idempotency_key: str) -> Optional[IdempotentResult]:
+    def get_idempotent_result(self, idempotency_key: str) -> IdempotentResult | None:
         with self._lock:
             return self._idempotency.get(idempotency_key)
 
     def save_atomically(
         self,
         work_order: WorkOrder,
-        expected_stored_version: Optional[int],
-        events: List[DomainEvent],
+        expected_stored_version: int | None,
+        events: list[DomainEvent],
         idempotency_key: str,
         idempotent_result: IdempotentResult,
     ) -> IdempotentResult:
@@ -50,9 +50,10 @@ class InMemoryWorkOrderStore:
             stored = self._orders.get(work_order.work_order_id)
             if expected_stored_version is None and stored is not None:
                 raise InvalidTransition("work order already exists")
-            if expected_stored_version is not None:
-                if stored is None or stored.version != expected_stored_version:
-                    raise InvalidTransition("optimistic lock conflict")
+            if expected_stored_version is not None and (
+                stored is None or stored.version != expected_stored_version
+            ):
+                raise InvalidTransition("optimistic lock conflict")
 
             self._orders[work_order.work_order_id] = deepcopy(work_order)
             self._human_codes[work_order.human_code] = work_order.work_order_id
@@ -74,7 +75,7 @@ class InMemoryWorkOrderStore:
             self._idempotency[idempotency_key] = idempotent_result
             return idempotent_result
 
-    def list_outbox(self) -> List[Dict[str, Any]]:
+    def list_outbox(self) -> list[dict[str, Any]]:
         with self._lock:
             return deepcopy(self._outbox)
 
@@ -97,7 +98,7 @@ class InMemoryWorkOrderStore:
 
 
 class ScopedReadPolicy:
-    def __init__(self, grants: Dict[str, Set[str]]) -> None:
+    def __init__(self, grants: dict[str, set[str]]) -> None:
         self._grants = grants
 
     def require_workshop_read(self, subject_id: str, workshop_id: str) -> None:

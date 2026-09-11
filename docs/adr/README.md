@@ -13,6 +13,6 @@
 | 0007 | 模型网关与DeepSeek适配 | Accepted |
 | 0008 | 部署、可观测性与恢复 | Accepted |
 | 0009 | 测试、质量门禁与安全验证 | Accepted |
+| 0010 | 阶段一同步生产事务边界 | Accepted |
 
 ADR只能通过新增ADR取代，不能直接改掉历史结论。代码若偏离Accepted ADR，必须在合并前记录原因和迁移影响。
-

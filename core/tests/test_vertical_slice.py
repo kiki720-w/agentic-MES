@@ -1,7 +1,7 @@
 import os
 import sys
 import unittest
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "src")))
 
@@ -11,7 +11,12 @@ from autonomous_mes.application.work_orders import (
     ReleaseWorkOrderCommand,
     WorkOrderApplicationService,
 )
-from autonomous_mes.domain.errors import Forbidden, InvalidTransition, ValidationError
+from autonomous_mes.domain.errors import (
+    Forbidden,
+    IdempotencyConflict,
+    InvalidTransition,
+    ValidationError,
+)
 from autonomous_mes.infrastructure.memory import InMemoryWorkOrderStore, ScopedReadPolicy
 
 
@@ -23,7 +28,7 @@ def create_command(key="create-1"):
         production_order_id="PO-SHAFT-001",
         workshop_id="WS-MACH-01",
         quantity=10,
-        due_at=datetime.now(timezone.utc) + timedelta(days=7),
+        due_at=datetime.now(UTC) + timedelta(days=7),
         priority=80,
         product_revision_id="PR-SHAFT-A",
         routing_revision_id="RT-SHAFT-A",
@@ -47,10 +52,18 @@ class VerticalSliceTests(unittest.TestCase):
         self.assertEqual(created["workOrderId"], outbox[0]["aggregateId"])
 
     def test_create_is_idempotent(self):
-        first = self.service.create(create_command())
-        second = self.service.create(create_command())
+        command = create_command()
+        first = self.service.create(command)
+        second = self.service.create(command)
         self.assertEqual(first["workOrderId"], second["workOrderId"])
         self.assertEqual(1, len(self.store.list_outbox()))
+
+    def test_idempotency_key_rejects_changed_payload(self):
+        self.service.create(create_command())
+        changed = create_command()
+        changed = CreateWorkOrderCommand(**{**changed.__dict__, "quantity": 11})
+        with self.assertRaises(IdempotencyConflict):
+            self.service.create(changed)
 
     def test_release_freezes_revisions_and_writes_event(self):
         created = self.service.create(create_command())

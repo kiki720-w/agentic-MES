@@ -20,4 +20,3 @@ class Forbidden(DomainError):
 
 class IdempotencyConflict(DomainError):
     pass
-

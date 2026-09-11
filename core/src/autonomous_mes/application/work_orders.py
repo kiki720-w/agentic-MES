@@ -1,6 +1,8 @@
+import json
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any, Dict, List
+from hashlib import sha256
+from typing import Any
 
 from autonomous_mes.domain.errors import IdempotencyConflict, NotFound
 from autonomous_mes.domain.work_order import FrozenRevisions, WorkOrder
@@ -21,7 +23,7 @@ class CreateWorkOrderCommand:
     product_revision_id: str
     routing_revision_id: str
     bom_revision_id: str
-    drawing_revision_ids: List[str]
+    drawing_revision_ids: list[str]
 
 
 @dataclass(frozen=True)
@@ -37,11 +39,11 @@ class WorkOrderApplicationService:
     def __init__(self, store: WorkOrderStore) -> None:
         self._store = store
 
-    def create(self, command: CreateWorkOrderCommand) -> Dict[str, Any]:
+    def create(self, command: CreateWorkOrderCommand) -> dict[str, Any]:
+        request_hash = _command_hash(command)
         prior = self._store.get_idempotent_result(command.idempotency_key)
         if prior:
-            if prior.operation != "create_work_order":
-                raise IdempotencyConflict("idempotency key was used for another operation")
+            _require_same_request(prior, "create_work_order", request_hash)
             return self.get(prior.resource_id)
 
         if self._store.get_by_human_code(command.human_code):
@@ -62,7 +64,9 @@ class WorkOrderApplicationService:
             ),
             correlation_id=command.correlation_id,
         )
-        result = IdempotentResult("create_work_order", work_order.work_order_id, work_order.version)
+        result = IdempotentResult(
+            "create_work_order", work_order.work_order_id, work_order.version, request_hash
+        )
         self._store.save_atomically(
             work_order=work_order.clear_pending_events(),
             expected_stored_version=None,
@@ -72,11 +76,11 @@ class WorkOrderApplicationService:
         )
         return self.get(work_order.work_order_id)
 
-    def release(self, command: ReleaseWorkOrderCommand) -> Dict[str, Any]:
+    def release(self, command: ReleaseWorkOrderCommand) -> dict[str, Any]:
+        request_hash = _command_hash(command)
         prior = self._store.get_idempotent_result(command.idempotency_key)
         if prior:
-            if prior.operation != "release_work_order":
-                raise IdempotencyConflict("idempotency key was used for another operation")
+            _require_same_request(prior, "release_work_order", request_hash)
             return self.get(prior.resource_id)
 
         current = self._store.get(command.work_order_id)
@@ -87,7 +91,9 @@ class WorkOrderApplicationService:
             actor_id=command.actor_id,
             correlation_id=command.correlation_id,
         )
-        result = IdempotentResult("release_work_order", released.work_order_id, released.version)
+        result = IdempotentResult(
+            "release_work_order", released.work_order_id, released.version, request_hash
+        )
         self._store.save_atomically(
             work_order=released.clear_pending_events(),
             expected_stored_version=current.version,
@@ -97,7 +103,7 @@ class WorkOrderApplicationService:
         )
         return self.get(released.work_order_id)
 
-    def get(self, work_order_id: str) -> Dict[str, Any]:
+    def get(self, work_order_id: str) -> dict[str, Any]:
         item = self._store.get(work_order_id)
         if item is None:
             raise NotFound("work order not found")
@@ -122,3 +128,17 @@ class WorkOrderApplicationService:
             "sourceObjects": [{"type": "WorkOrder", "id": item.work_order_id}],
         }
 
+
+def _command_hash(command: object) -> str:
+    payload = {
+        key: value.isoformat() if isinstance(value, datetime) else value
+        for key, value in vars(command).items()
+        if key not in {"idempotency_key", "correlation_id"}
+    }
+    encoded = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
+    return sha256(encoded).hexdigest()
+
+
+def _require_same_request(prior: IdempotentResult, operation: str, request_hash: str) -> None:
+    if prior.operation != operation or prior.request_hash != request_hash:
+        raise IdempotencyConflict("idempotency key was used with a different request")

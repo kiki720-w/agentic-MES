@@ -1,11 +1,11 @@
 from dataclasses import dataclass
-from datetime import datetime, timezone
-from typing import Any, Dict, Optional
+from datetime import UTC, datetime
+from typing import Any
 from uuid import uuid4
 
 
 def utc_now() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 @dataclass(frozen=True)
@@ -15,9 +15,9 @@ class DomainEvent:
     aggregate_type: str
     aggregate_id: str
     occurred_at: datetime
-    payload: Dict[str, Any]
-    correlation_id: Optional[str] = None
-    causation_id: Optional[str] = None
+    payload: dict[str, Any]
+    correlation_id: str | None = None
+    causation_id: str | None = None
     schema_version: str = "1.0"
 
     @classmethod
@@ -26,9 +26,9 @@ class DomainEvent:
         event_type: str,
         aggregate_type: str,
         aggregate_id: str,
-        payload: Dict[str, Any],
-        correlation_id: Optional[str] = None,
-        causation_id: Optional[str] = None,
+        payload: dict[str, Any],
+        correlation_id: str | None = None,
+        causation_id: str | None = None,
     ) -> "DomainEvent":
         return cls(
             event_id=str(uuid4()),
@@ -40,4 +40,3 @@ class DomainEvent:
             correlation_id=correlation_id,
             causation_id=causation_id,
         )
-

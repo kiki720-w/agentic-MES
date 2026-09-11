@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from typing import Any, Dict
+from typing import Any
 
 from autonomous_mes.domain.errors import Forbidden, NotFound
 from autonomous_mes.domain.events import DomainEvent
@@ -32,7 +32,7 @@ class GetWorkOrderTool:
         self._audit_sink = audit_sink
         self._query = WorkOrderApplicationService(store)
 
-    def execute(self, context: ToolContext, work_order_id: str) -> Dict[str, Any]:
+    def execute(self, context: ToolContext, work_order_id: str) -> dict[str, Any]:
         item = self._store.get(work_order_id)
         if item is None:
             self._audit(context, work_order_id, "NOT_FOUND")

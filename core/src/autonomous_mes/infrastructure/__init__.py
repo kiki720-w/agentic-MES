@@ -1,2 +1,1 @@
 """Replaceable infrastructure adapters."""
-

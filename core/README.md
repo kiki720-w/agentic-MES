@@ -30,3 +30,13 @@ uvicorn autonomous_mes.api:app --app-dir src --reload
 
 当前API使用内存适配器，只用于验证领域切片；下一切片将增加PostgreSQL/Alembic适配器。模型网关尚未连接，Agent工具可直接进行确定性契约测试。
 
+## 数据库开发
+
+复制`.env.example`为`.env`并修改本地密码，然后执行：
+
+```powershell
+docker compose up -d postgres
+.\.venv\Scripts\alembic.exe upgrade head
+```
+
+首个迁移创建`work_orders`、`idempotency_records`、`event_outbox`和`agent_tool_audits`。`.env`不会进入Git。

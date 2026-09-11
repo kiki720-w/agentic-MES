@@ -1,19 +1,22 @@
 from datetime import datetime
-from typing import List
 from uuid import uuid4
 
-from fastapi import FastAPI, Header
+from fastapi import FastAPI, Header, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field
 
 from autonomous_mes.application.agent_tools import GetWorkOrderTool, ToolContext
+from autonomous_mes.application.ports import MesStore
 from autonomous_mes.application.work_orders import (
     CreateWorkOrderCommand,
     ReleaseWorkOrderCommand,
     WorkOrderApplicationService,
 )
+from autonomous_mes.config import Settings
 from autonomous_mes.domain.errors import DomainError, Forbidden, NotFound
+from autonomous_mes.infrastructure.database import build_engine, build_session_factory
 from autonomous_mes.infrastructure.memory import InMemoryWorkOrderStore, ScopedReadPolicy
+from autonomous_mes.infrastructure.sqlalchemy_store import SqlAlchemyWorkOrderStore
 
 
 class RevisionsBody(BaseModel):
@@ -21,7 +24,7 @@ class RevisionsBody(BaseModel):
     productRevisionId: str
     routingRevisionId: str
     bomRevisionId: str
-    drawingRevisionIds: List[str] = Field(default_factory=list)
+    drawingRevisionIds: list[str] = Field(default_factory=list)
 
 
 class CreateWorkOrderBody(BaseModel):
@@ -50,7 +53,19 @@ class AgentToolBody(BaseModel):
     workOrderId: str
 
 
-store = InMemoryWorkOrderStore()
+settings = Settings()
+
+
+def build_store() -> MesStore:
+    if settings.storage_backend == "memory":
+        return InMemoryWorkOrderStore()
+    if settings.storage_backend == "postgresql":
+        engine = build_engine(settings.database_url)
+        return SqlAlchemyWorkOrderStore(build_session_factory(engine))
+    raise RuntimeError(f"unsupported storage backend: {settings.storage_backend}")
+
+
+store = build_store()
 service = WorkOrderApplicationService(store)
 policy = ScopedReadPolicy({"demo-planner": {"WS-MACH-01"}})
 get_work_order_tool = GetWorkOrderTool(store, policy, store)
@@ -58,7 +73,7 @@ app = FastAPI(title="Autonomous MES Core", version="0.1.0")
 
 
 @app.exception_handler(DomainError)
-async def domain_error_handler(_, exc: DomainError):
+async def domain_error_handler(_: Request, exc: DomainError) -> JSONResponse:
     status = 404 if isinstance(exc, NotFound) else 403 if isinstance(exc, Forbidden) else 409
     return JSONResponse(
         status_code=status,
@@ -73,17 +88,23 @@ async def domain_error_handler(_, exc: DomainError):
 
 
 @app.get("/health/live")
-def live():
+def live() -> dict[str, str]:
     return {"status": "UP"}
 
 
 @app.get("/health/ready")
-def ready():
-    return {"status": "READY", "modelGateway": "NOT_REQUIRED"}
+def ready() -> dict[str, str]:
+    return {
+        "status": "READY",
+        "modelGateway": "NOT_REQUIRED",
+        "storageBackend": settings.storage_backend,
+    }
 
 
 @app.post("/api/v1/work-orders", status_code=201)
-def create_work_order(body: CreateWorkOrderBody, idempotency_key: str = Header(...)):
+def create_work_order(
+    body: CreateWorkOrderBody, idempotency_key: str = Header(...)
+) -> dict[str, object]:
     return service.create(
         CreateWorkOrderCommand(
             idempotency_key=idempotency_key,
@@ -107,7 +128,7 @@ def release_work_order(
     work_order_id: str,
     body: ReleaseWorkOrderBody,
     idempotency_key: str = Header(...),
-):
+) -> dict[str, object]:
     return service.release(
         ReleaseWorkOrderCommand(
             idempotency_key=idempotency_key,
@@ -120,12 +141,12 @@ def release_work_order(
 
 
 @app.get("/api/v1/work-orders/{work_order_id}")
-def get_work_order(work_order_id: str):
+def get_work_order(work_order_id: str) -> dict[str, object]:
     return service.get(work_order_id)
 
 
 @app.post("/api/v1/agent-tools/get-work-order")
-def agent_get_work_order(body: AgentToolBody):
+def agent_get_work_order(body: AgentToolBody) -> dict[str, object]:
     return get_work_order_tool.execute(
         ToolContext(
             request_id=body.requestId,

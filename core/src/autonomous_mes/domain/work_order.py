@@ -1,7 +1,6 @@
 from dataclasses import dataclass, field, replace
 from datetime import datetime
 from enum import Enum
-from typing import List
 from uuid import uuid4
 
 from .errors import InvalidTransition, ValidationError
@@ -23,7 +22,7 @@ class FrozenRevisions:
     product_revision_id: str
     routing_revision_id: str
     bom_revision_id: str
-    drawing_revision_ids: List[str]
+    drawing_revision_ids: list[str]
 
     def validate(self) -> None:
         required = (
@@ -49,7 +48,7 @@ class WorkOrder:
     version: int
     created_at: datetime
     updated_at: datetime
-    pending_events: List[DomainEvent] = field(default_factory=list, compare=False)
+    pending_events: list[DomainEvent] = field(default_factory=list, compare=False)
 
     @classmethod
     def create(
@@ -107,9 +106,7 @@ class WorkOrder:
 
     def release(self, expected_version: int, actor_id: str, correlation_id: str) -> "WorkOrder":
         if expected_version != self.version:
-            raise InvalidTransition(
-                "work order version changed; reload before attempting release"
-            )
+            raise InvalidTransition("work order version changed; reload before attempting release")
         if self.status is not WorkOrderStatus.DRAFT:
             raise InvalidTransition("only a DRAFT work order can be released")
         if not actor_id.strip():
@@ -140,4 +137,3 @@ class WorkOrder:
 
     def clear_pending_events(self) -> "WorkOrder":
         return replace(self, pending_events=[])
-
