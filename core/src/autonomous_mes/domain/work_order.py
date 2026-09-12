@@ -21,6 +21,7 @@ class OperationStatus(str, Enum):
     PENDING = "PENDING"
     DISPATCHED = "DISPATCHED"
     IN_PROGRESS = "IN_PROGRESS"
+    SUSPENDED = "SUSPENDED"
     COMPLETED = "COMPLETED"
 
 
@@ -274,6 +275,58 @@ class WorkOrder:
             correlation_id,
             {},
             work_order_status=WorkOrderStatus.COMPLETED if all_completed else WorkOrderStatus.RELEASED,
+        )
+
+    def suspend_for_equipment_incident(
+        self,
+        equipment_id: str,
+        equipment_code: str,
+        incident_state: str,
+        reason: str,
+        correlation_id: str,
+    ) -> "WorkOrder | None":
+        operation = next(
+            (
+                item
+                for item in self.operations
+                if item.status is OperationStatus.IN_PROGRESS
+                and item.assigned_resource_id in {equipment_id, equipment_code}
+            ),
+            None,
+        )
+        if operation is None:
+            return None
+        changed = replace(operation, status=OperationStatus.SUSPENDED)
+        return self._with_operation(
+            changed,
+            "OperationSuspendedByEquipmentIncident",
+            "system-equipment-monitor",
+            correlation_id,
+            {
+                "equipmentId": equipment_id,
+                "equipmentCode": equipment_code,
+                "incidentState": incident_state,
+                "reason": reason,
+            },
+            work_order_status=WorkOrderStatus.SUSPENDED,
+        )
+
+    def resume_operation(
+        self, sequence: int, actor_id: str, expected_version: int, correlation_id: str
+    ) -> "WorkOrder":
+        operation = self._operation_for_transition(sequence, expected_version)
+        if self.status is not WorkOrderStatus.SUSPENDED:
+            raise InvalidTransition("work order is not suspended")
+        if operation.status is not OperationStatus.SUSPENDED:
+            raise InvalidTransition("operation is not suspended")
+        changed = replace(operation, status=OperationStatus.IN_PROGRESS)
+        return self._with_operation(
+            changed,
+            "OperationResumed",
+            actor_id,
+            correlation_id,
+            {},
+            work_order_status=WorkOrderStatus.IN_PROGRESS,
         )
 
     def _operation_for_transition(

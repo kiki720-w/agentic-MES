@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import json
 from dataclasses import asdict, dataclass, field
 from datetime import datetime
@@ -56,6 +58,9 @@ class OperationCommand:
     resource_id: str | None = None
     good_quantity: int = 0
     scrap_quantity: int = 0
+
+
+StringList = list[str]
 
 
 class WorkOrderApplicationService:
@@ -189,6 +194,13 @@ class WorkOrderApplicationService:
                 command.expected_version,
                 command.correlation_id,
             )
+        elif command.action == "resume":
+            changed = current.resume_operation(
+                command.sequence,
+                command.actor_id,
+                command.expected_version,
+                command.correlation_id,
+            )
         else:
             raise ValidationError("unsupported operation action")
 
@@ -203,6 +215,47 @@ class WorkOrderApplicationService:
             idempotent_result=result,
         )
         return self.get(changed.work_order_id)
+
+    def handle_equipment_incident(
+        self,
+        equipment_id: str,
+        equipment_code: str,
+        incident_state: str,
+        reason: str,
+        sample_id: str,
+    ) -> StringList:
+        affected: StringList = []
+        for current in self._store.list_work_orders(500):
+            changed = current.suspend_for_equipment_incident(
+                equipment_id,
+                equipment_code,
+                incident_state,
+                reason,
+                sample_id,
+            )
+            if changed is None:
+                continue
+            request_hash = sha256(
+                f"{current.work_order_id}:{sample_id}:{incident_state}".encode()
+            ).hexdigest()
+            idempotency_key = f"equipment-incident:{sample_id}:{current.work_order_id}"
+            prior = self._store.get_idempotent_result(idempotency_key)
+            if prior is None:
+                result = IdempotentResult(
+                    "suspend_operation_for_equipment_incident",
+                    current.work_order_id,
+                    changed.version,
+                    request_hash,
+                )
+                self._store.save_atomically(
+                    changed.clear_pending_events(),
+                    current.version,
+                    changed.pending_events,
+                    idempotency_key,
+                    result,
+                )
+            affected.append(current.work_order_id)
+        return affected
 
 
 def _serialize(item: WorkOrder) -> dict[str, Any]:

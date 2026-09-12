@@ -7,6 +7,13 @@ from autonomous_mes.application.equipment import (
     RecordTelemetryCommand,
     RegisterEquipmentCommand,
 )
+from autonomous_mes.application.work_orders import (
+    CreateWorkOrderCommand,
+    OperationCommand,
+    OperationSpec,
+    ReleaseWorkOrderCommand,
+    WorkOrderApplicationService,
+)
 from autonomous_mes.domain.errors import InvalidTransition, ValidationError
 from autonomous_mes.infrastructure.memory import InMemoryWorkOrderStore
 
@@ -77,6 +84,67 @@ class EquipmentTests(unittest.TestCase):
             )
         with self.assertRaises(ValidationError):
             self._record(expected_version=first["version"], state="DOWN")
+
+    def test_equipment_alarm_suspends_bound_operation_until_explicit_resume(self) -> None:
+        running = self._record()
+        work_orders = WorkOrderApplicationService(self.store)
+        work_order = work_orders.create(
+            CreateWorkOrderCommand(
+                idempotency_key="linked-create",
+                correlation_id="linked-create",
+                human_code="WO-LINKED-001",
+                production_order_id="PO-LINKED-001",
+                workshop_id="WS-MACH-01",
+                quantity=10,
+                due_at=datetime.now(UTC) + timedelta(days=3),
+                priority=90,
+                product_revision_id="PR-A",
+                routing_revision_id="RT-A",
+                bom_revision_id="BOM-A",
+                drawing_revision_ids=["DWG-A"],
+                operations=[OperationSpec(10, "TURN", "车削", "WC-LATHE-01")],
+            )
+        )
+        work_order = work_orders.release(
+            ReleaseWorkOrderCommand(
+                "linked-release", "linked-release", work_order["workOrderId"], 1, "planner"
+            )
+        )
+        for action in ("dispatch", "start"):
+            work_order = work_orders.execute_operation(
+                OperationCommand(
+                    idempotency_key=f"linked-{action}",
+                    correlation_id=f"linked-{action}",
+                    work_order_id=work_order["workOrderId"],
+                    sequence=10,
+                    expected_version=work_order["version"],
+                    actor_id="operator",
+                    action=action,
+                    resource_id=running["equipmentId"] if action == "dispatch" else None,
+                )
+            )
+
+        alarm_sample = f"alarm-{uuid4().hex}"
+        alarmed = self._record(
+            expected_version=running["version"],
+            sample_id=alarm_sample,
+            state="ALARM",
+            alarm_code="SERVO-OVERLOAD",
+        )
+        affected = work_orders.handle_equipment_incident(
+            str(alarmed["equipmentId"]),
+            str(alarmed["code"]),
+            "ALARM",
+            "SERVO-OVERLOAD",
+            alarm_sample,
+        )
+        suspended = work_orders.get(work_order["workOrderId"])
+        self.assertEqual([work_order["workOrderId"]], affected)
+        self.assertEqual("SUSPENDED", suspended["status"])
+        self.assertEqual("SUSPENDED", suspended["operations"][0]["status"])
+        self.assertEqual(
+            "OperationSuspendedByEquipmentIncident", self.store.list_outbox()[-1]["eventType"]
+        )
 
 
 if __name__ == "__main__":

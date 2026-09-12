@@ -27,6 +27,7 @@ uvicorn autonomous_mes.api:app --app-dir src --reload
 - `POST /api/v1/work-orders/{workOrderId}/operations/{sequence}/start`
 - `POST /api/v1/work-orders/{workOrderId}/operations/{sequence}/report`
 - `POST /api/v1/work-orders/{workOrderId}/operations/{sequence}/complete`
+- `POST /api/v1/work-orders/{workOrderId}/operations/{sequence}/resume`
 - `GET /api/v1/work-orders/{workOrderId}`
 - `POST /api/v1/equipment`
 - `GET /api/v1/equipment`
@@ -58,6 +59,8 @@ docker compose up -d postgres
 Worker通过数据库租约领取事件；失败会指数退避，超过上限进入`QUARANTINED`，支持陈旧租约恢复和带操作者/原因的人工重放。
 
 启动服务后访问`http://127.0.0.1:8000/`，可以查看工单指标、制造事件流、设备状态，创建演示工单并模拟机床采集。遥测样本使用`sampleId`去重，旧时间戳不能覆盖当前状态；`DOWN`和`ALARM`必须携带停机原因或报警码。该页面使用原生HTML/CSS/JavaScript，无需Node构建环境。
+
+派工必须选择同一工作中心内状态为`IDLE`或`RUNNING`的已注册设备。绑定设备上报`DOWN`或`ALARM`后，正在执行的工序和工单会自动进入`SUSPENDED`并产生联锁事件。设备未恢复时禁止复工；恢复为健康状态后仍需由人员或受控Agent明确调用`resume`，系统不会因一次正常心跳自行恢复生产。
 
 ### 本机D盘免安装环境
 

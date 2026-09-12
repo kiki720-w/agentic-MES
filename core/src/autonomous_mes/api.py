@@ -21,7 +21,7 @@ from autonomous_mes.application.work_orders import (
     WorkOrderApplicationService,
 )
 from autonomous_mes.config import Settings
-from autonomous_mes.domain.errors import DomainError, Forbidden, NotFound
+from autonomous_mes.domain.errors import DomainError, Forbidden, NotFound, ValidationError
 from autonomous_mes.infrastructure.database import build_engine, build_session_factory
 from autonomous_mes.infrastructure.memory import InMemoryWorkOrderStore, ScopedReadPolicy
 from autonomous_mes.infrastructure.sqlalchemy_store import SqlAlchemyWorkOrderStore
@@ -222,7 +222,7 @@ def list_equipment(limit: int = 100) -> dict[str, object]:
 def record_equipment_telemetry(
     equipment_id: str, body: TelemetryBody
 ) -> dict[str, object]:
-    return equipment_service.record(
+    equipment = equipment_service.record(
         RecordTelemetryCommand(
             correlation_id=str(uuid4()),
             equipment_id=equipment_id,
@@ -236,6 +236,16 @@ def record_equipment_telemetry(
             downtime_reason=body.downtimeReason,
         )
     )
+    affected: list[str] = []
+    if body.state in {"DOWN", "ALARM"}:
+        affected = service.handle_equipment_incident(
+            equipment_id,
+            str(equipment["code"]),
+            body.state,
+            body.downtimeReason or body.alarmCode or "unspecified equipment incident",
+            body.sampleId,
+        )
+    return {**equipment, "affectedWorkOrderIds": affected}
 
 
 @app.post("/api/v1/work-orders/{work_order_id}/release")
@@ -268,6 +278,27 @@ def execute_operation(
     body: OperationActionBody,
     idempotency_key: str = Header(...),
 ) -> dict[str, object]:
+    current = service.get(work_order_id)
+    operation = next(
+        (item for item in current["operations"] if item["sequence"] == sequence), None
+    )
+    if operation is None:
+        raise ValidationError("operation was not found in the frozen route")
+    if action == "dispatch":
+        if not body.resourceId:
+            raise ValidationError("resourceId must identify a registered equipment")
+        equipment = equipment_service.get(body.resourceId)
+        if equipment["workCenterId"] != operation["workCenterId"]:
+            raise ValidationError("equipment does not belong to the operation work center")
+        if equipment["state"] not in {"IDLE", "RUNNING"}:
+            raise ValidationError("equipment must be online and healthy before dispatch")
+    if action == "resume":
+        resource_id = operation["assignedResourceId"]
+        if not resource_id:
+            raise ValidationError("suspended operation has no assigned equipment")
+        equipment = equipment_service.get(resource_id)
+        if equipment["state"] not in {"IDLE", "RUNNING"}:
+            raise ValidationError("equipment must recover before operation resume")
     return service.execute_operation(
         OperationCommand(
             idempotency_key=idempotency_key,

@@ -133,6 +133,94 @@ class ApiContractTests(unittest.TestCase):
         self.assertEqual("RUNNING", recorded.json()["state"])
         self.assertGreaterEqual(self.client.get("/api/v1/equipment").json()["count"], 1)
 
+    def test_equipment_alarm_interlocks_bound_operation(self):
+        suffix = uuid4().hex[:8]
+        equipment = self.client.post(
+            "/api/v1/equipment",
+            json={
+                "code": f"CNC-LOCK-{suffix}",
+                "name": "联锁测试机床",
+                "workshopId": "WS-MACH-01",
+                "workCenterId": "WC-LATHE-01",
+                "protocol": "SIMULATED",
+            },
+        ).json()
+        equipment = self.client.post(
+            f"/api/v1/equipment/{equipment['equipmentId']}/telemetry",
+            json={
+                "sampleId": f"healthy-{suffix}",
+                "observedAt": datetime.now(UTC).isoformat(),
+                "expectedVersion": equipment["version"],
+                "state": "IDLE",
+            },
+        ).json()
+        body = {
+            "humanCode": f"WO-LOCK-{suffix}",
+            "productionOrderId": f"PO-LOCK-{suffix}",
+            "workshopId": "WS-MACH-01",
+            "quantity": 5,
+            "dueAt": (datetime.now(UTC) + timedelta(days=2)).isoformat(),
+            "priority": 90,
+            "revisions": {
+                "productRevisionId": "PR-A",
+                "routingRevisionId": "RT-A",
+                "bomRevisionId": "BOM-A",
+                "drawingRevisionIds": ["DWG-A"],
+            },
+            "operations": [
+                {
+                    "sequence": 10,
+                    "operationCode": "TURN",
+                    "operationName": "车削",
+                    "workCenterId": "WC-LATHE-01",
+                }
+            ],
+        }
+        work_order = self.client.post(
+            "/api/v1/work-orders",
+            json=body,
+            headers={"Idempotency-Key": f"lock-create-{suffix}"},
+        ).json()
+        for action, payload in [
+            ("release", {"expectedVersion": 1, "actorId": "planner"}),
+            (
+                "operations/10/dispatch",
+                {
+                    "expectedVersion": 2,
+                    "actorId": "operator",
+                    "resourceId": equipment["equipmentId"],
+                },
+            ),
+            ("operations/10/start", {"expectedVersion": 3, "actorId": "operator"}),
+        ]:
+            work_order = self.client.post(
+                f"/api/v1/work-orders/{work_order['workOrderId']}/{action}",
+                json=payload,
+                headers={"Idempotency-Key": f"lock-{action}-{suffix}"},
+            ).json()
+
+        alarmed = self.client.post(
+            f"/api/v1/equipment/{equipment['equipmentId']}/telemetry",
+            json={
+                "sampleId": f"alarm-{suffix}",
+                "observedAt": (datetime.now(UTC) + timedelta(seconds=1)).isoformat(),
+                "expectedVersion": equipment["version"],
+                "state": "ALARM",
+                "alarmCode": "SERVO-OVERLOAD",
+            },
+        )
+        self.assertEqual([work_order["workOrderId"]], alarmed.json()["affectedWorkOrderIds"])
+        suspended = self.client.get(
+            f"/api/v1/work-orders/{work_order['workOrderId']}"
+        ).json()
+        self.assertEqual("SUSPENDED", suspended["status"])
+        blocked = self.client.post(
+            f"/api/v1/work-orders/{work_order['workOrderId']}/operations/10/resume",
+            json={"expectedVersion": suspended["version"], "actorId": "supervisor"},
+            headers={"Idempotency-Key": f"blocked-resume-{suffix}"},
+        )
+        self.assertEqual(409, blocked.status_code)
+
 
 if __name__ == "__main__":
     unittest.main()

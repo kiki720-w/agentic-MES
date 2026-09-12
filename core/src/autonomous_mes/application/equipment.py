@@ -78,6 +78,12 @@ class EquipmentApplicationService:
             raise ValidationError("limit must be between 1 and 500")
         return [_serialize(item) for item in self._store.list_equipment(limit)]
 
+    def get(self, equipment_id: str) -> dict[str, Any]:
+        item = self._store.get_equipment(equipment_id)
+        if item is None:
+            raise NotFound("equipment not found")
+        return _serialize(item)
+
 
 def _serialize(item: Equipment) -> dict[str, Any]:
     return {
