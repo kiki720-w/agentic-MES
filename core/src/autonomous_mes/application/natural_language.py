@@ -1,6 +1,6 @@
 import re
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, Protocol
 
 from autonomous_mes.domain.errors import ValidationError
 
@@ -17,14 +17,26 @@ WRITE_INTENT = re.compile(
     r"(?:^|帮我|请|立即|直接|执行|现在).{0,12}"
     r"(?:复工|恢复|释放|下达|派工|开工|报工|完工|放行|批准|审批|删除|修改|控制|停机)"
 )
+RESUME_INTENT = re.compile(r"(?:复工|恢复)", re.IGNORECASE)
+WORK_ORDER_CODE = re.compile(r"\bWO-[A-Z0-9-]+\b", re.IGNORECASE)
+
+
+class ActionProposalAgent(Protocol):
+    def analyze(self) -> list[dict[str, Any]]: ...
 
 
 class NaturalLanguageQueryService:
-    def __init__(self, store: MesStore, model: NaturalLanguageModel | None) -> None:
+    def __init__(
+        self,
+        store: MesStore,
+        model: NaturalLanguageModel | None,
+        action_agent: ActionProposalAgent | None = None,
+    ) -> None:
         self._orders = WorkOrderApplicationService(store)
         self._equipment = EquipmentApplicationService(store)
         self._quality = QualityApplicationService(store, store)
         self._model = model
+        self._action_agent = action_agent
 
     def ask(self, question: str) -> dict[str, Any]:
         question = question.strip()
@@ -32,6 +44,9 @@ class NaturalLanguageQueryService:
             raise ValidationError("question must contain 1 to 500 characters")
         as_of = datetime.now(UTC).isoformat()
         if WRITE_INTENT.search(question):
+            resume = self._resume_proposal(question, as_of)
+            if resume is not None:
+                return resume
             return {
                 "answer": "该请求涉及生产状态变更，自然语言接口无权执行。请在对应业务页面发起操作，并按现有安全策略完成校验和人工审批。",
                 "source": "POLICY",
@@ -82,6 +97,74 @@ class NaturalLanguageQueryService:
             }
         except ModelGatewayError:
             return self._fallback(as_of, objects, orders, equipment, inspections)
+
+    def _resume_proposal(self, question: str, as_of: str) -> dict[str, Any] | None:
+        if not RESUME_INTENT.search(question):
+            return None
+        code_match = WORK_ORDER_CODE.search(question)
+        if code_match is None:
+            return {
+                "answer": "我识别到复工意图，但缺少明确工单编号。请使用“恢复工单 WO-...”重新提交；系统只会生成待审批提案。",
+                "source": "POLICY",
+                "model": None,
+                "policyDecision": "REQUIRE_EXPLICIT_TARGET",
+                "asOf": as_of,
+                "sourceObjects": [],
+            }
+        code = code_match.group(0).upper()
+        order = next(
+            (x for x in self._orders.list(500) if str(x["humanCode"]).upper() == code),
+            None,
+        )
+        if order is None:
+            return self._action_rejected(as_of, f"未找到工单 {code}。", [])
+        references = [{"type": "WorkOrder", "id": str(order["workOrderId"])}]
+        if order["status"] != "SUSPENDED":
+            return self._action_rejected(
+                as_of, f"工单 {code} 当前状态为 {order['status']}，不满足复工条件。", references
+            )
+        if self._action_agent is None:
+            return self._action_rejected(as_of, "动作提案服务不可用。", references)
+        proposal = next(
+            (
+                item
+                for item in self._action_agent.analyze()
+                if item["workOrderId"] == order["workOrderId"]
+            ),
+            None,
+        )
+        if proposal is None or proposal["action"] != "RESUME_OPERATION":
+            return self._action_rejected(
+                as_of,
+                f"工单 {code} 的关联设备尚未恢复健康，不能生成复工提案。",
+                references,
+            )
+        references.append({"type": "Equipment", "id": str(proposal["equipmentId"])})
+        return {
+            "answer": (
+                f"已为工单 {code} 生成复工提案，但尚未执行。"
+                "请在下方提案中检查设备状态和影响范围，再由主管审批执行。"
+            ),
+            "source": "POLICY",
+            "model": proposal["modelName"],
+            "policyDecision": "REQUIRE_APPROVAL",
+            "asOf": as_of,
+            "sourceObjects": references,
+            "actionProposal": proposal,
+        }
+
+    @staticmethod
+    def _action_rejected(
+        as_of: str, answer: str, objects: list[dict[str, str]]
+    ) -> dict[str, Any]:
+        return {
+            "answer": answer,
+            "source": "POLICY",
+            "model": None,
+            "policyDecision": "REJECTED_BY_POLICY",
+            "asOf": as_of,
+            "sourceObjects": objects,
+        }
 
     @staticmethod
     def _fallback(

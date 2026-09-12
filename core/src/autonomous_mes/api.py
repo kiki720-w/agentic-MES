@@ -172,7 +172,9 @@ deepseek_narrator = (
     else None
 )
 incident_agent = IncidentResponseAgent(store, deepseek_narrator)
-natural_language_service = NaturalLanguageQueryService(store, deepseek_model_gateway)
+natural_language_service = NaturalLanguageQueryService(
+    store, deepseek_model_gateway, incident_agent
+)
 quality_service = QualityApplicationService(store, store)
 policy = ScopedReadPolicy({"demo-planner": {"WS-MACH-01"}})
 get_work_order_tool = GetWorkOrderTool(store, policy, store)

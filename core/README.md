@@ -34,7 +34,7 @@ uvicorn autonomous_mes.api:app --app-dir src --reload
 - `POST /api/v1/equipment/{equipmentId}/telemetry`
 - `POST /api/v1/agent-tools/get-work-order`
 - `POST /api/v1/agent/incidents/analyze`
-- `POST /api/v1/agent/chat`：基于 MES 实时快照的只读自然语言查询
+- `POST /api/v1/agent/chat`：基于 MES 实时快照的查询，以及受控自然语言动作提案
 - `GET /api/v1/agent/model-status`
 - `GET /api/v1/agent/proposals`
 - `POST /api/v1/agent/proposals/{proposalId}/approve`
@@ -68,6 +68,8 @@ Worker通过数据库租约领取事件；失败会指数退避，超过上限�
 派工必须选择同一工作中心内状态为`IDLE`或`RUNNING`的已注册设备。绑定设备上报`DOWN`或`ALARM`后，正在执行的工序和工单会自动进入`SUSPENDED`并产生联锁事件。设备未恢复时禁止复工；恢复为健康状态后仍需由人员或受控Agent明确调用`resume`，系统不会因一次正常心跳自行恢复生产。
 
 第一代异常处置Agent采用“规则决策内核 + 可替换模型解释层”的设计。没有模型API时仍可自动观察暂停工单、设备版本和健康状态，生成去重且持久化的诊断提案。`HOLD_AND_INSPECT`只记录观察结论；`RESUME_OPERATION`属于`R2`动作，必须由主管填写原因并批准，执行前会再次验证设备健康、工单版本和幂等键。模型只能增强诊断说明，不能绕过这些确定性安全规则。
+
+自然语言接口已开放第一项受控动作：输入“请恢复工单 WO-...”时，系统先要求明确工单号，再读取实时状态并调用异常处置Agent生成或复用`RESUME_OPERATION`提案。响应策略为`REQUIRE_APPROVAL`，不会在对话请求中执行复工；只有主管在提案区审批、且执行时安全检查仍通过，MES应用服务才会改变生产状态。其他未显式开放的写指令继续被策略层拒绝。
 
 启用 DeepSeek 时只需在本机 `.env` 设置 `AUTONOMOUS_MES_DEEPSEEK_API_KEY` 并重启 API。默认使用 `deepseek-v4-flash`、JSON 输出、关闭思考模式和 12 秒超时。每条提案记录 `narrativeSource` 与 `modelName`；不要把真实密钥写入仓库。
 

@@ -1,6 +1,6 @@
 # 自主 MES 阶段一验证工程
 
-本工作区用于验证一个面向精密机械加工的最小 MES 闭环，以及只读 Agent 的安全接入方式。
+本工作区用于验证一个面向精密机械加工的最小 MES 闭环，以及受控 Agent 的安全接入方式。
 
 ## 已冻结的试点边界
 
@@ -9,7 +9,7 @@
 - 3 种产品，每种 4—8 道工序
 - 主流程：订单 → 工单 → 加工 → 检验 → 返工/完工 → 追溯
 - 异常：插单、设备停机、缺料、质量失败、刀具异常
-- Agent：只读查询、异常解释、建议生成；不直接修改生产状态
+- Agent：只读查询、异常解释、建议生成，以及受策略约束的自然语言动作提案；模型不直接修改生产状态
 - 推理：DeepSeek API，经可替换模型网关调用
 - 部署：本地 MES/边缘采集 + 云端模型
 
@@ -36,6 +36,7 @@
 - `docs/step-7-quality-rework-acceptance.md`：质量检验、隔离和返工闭环验收记录
 - `docs/step-8-deepseek-gateway-acceptance.md`：DeepSeek 诊断解释网关与安全降级验收记录
 - `docs/step-9-natural-language-interface-acceptance.md`：只读自然语言生产查询与写意图拦截验收记录
+- `docs/step-10-governed-natural-language-action-acceptance.md`：自然语言复工提案、审批门和执行隔离验收记录
 
 ## 当前决策门
 
