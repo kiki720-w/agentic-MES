@@ -40,3 +40,11 @@ docker compose up -d postgres
 ```
 
 首个迁移创建`work_orders`、`idempotency_records`、`event_outbox`和`agent_tool_audits`。`.env`不会进入Git。
+
+单次运行Outbox发布Worker：
+
+```powershell
+.\.venv\Scripts\python.exe -m autonomous_mes.worker --batch-size 50
+```
+
+Worker通过数据库租约领取事件；失败会指数退避，超过上限进入`QUARANTINED`，支持陈旧租约恢复和带操作者/原因的人工重放。
