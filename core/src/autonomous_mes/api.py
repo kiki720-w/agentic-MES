@@ -5,13 +5,13 @@ import io
 import json
 from datetime import date, datetime
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, Literal
 from uuid import uuid4
 
 from fastapi import Depends, FastAPI, Header, Request
 from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from autonomous_mes.application.agent_runtime import FallbackNarrator, IncidentResponseAgent
 from autonomous_mes.application.agent_tools import (
@@ -58,8 +58,13 @@ from autonomous_mes.application.quality_policy import (
 from autonomous_mes.application.quality_risk import default_quality_risk_configuration
 from autonomous_mes.application.scheduling import (
     GenerateScheduleCommand,
+    IngestSchedulingSnapshotCommand,
     RegisterPlanningResourceCommand,
     SchedulingApplicationService,
+)
+from autonomous_mes.application.scheduling_agent import (
+    SchedulingAgent,
+    SchedulingAgentCommand,
 )
 from autonomous_mes.application.work_orders import (
     CreateWorkOrderCommand,
@@ -342,6 +347,82 @@ class GenerateScheduleBody(BaseModel):
     operationRates: dict[str, float] = Field(default_factory=dict)
 
 
+class AnalyzeScheduleBody(GenerateScheduleBody):
+    pass
+
+
+class SnapshotOperationBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    sequence: int = Field(gt=0)
+    operationCode: str = Field(min_length=1, max_length=64)
+    operationName: str = Field(min_length=1, max_length=160)
+    workCenterId: str = Field(min_length=1, max_length=64)
+    plannedQuantity: int = Field(gt=0)
+    status: Literal["PENDING", "DISPATCHED", "IN_PROGRESS", "SUSPENDED", "COMPLETED"]
+    assignedResourceId: str | None = None
+    goodQuantity: int = Field(default=0, ge=0)
+    scrapQuantity: int = Field(default=0, ge=0)
+
+    @model_validator(mode="after")
+    def validate_reported_quantity(self) -> "SnapshotOperationBody":
+        if self.goodQuantity + self.scrapQuantity > self.plannedQuantity:
+            raise ValueError("reported quantity cannot exceed planned quantity")
+        return self
+
+
+class SnapshotWorkOrderBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    externalId: str = Field(min_length=1, max_length=128)
+    code: str = Field(min_length=1, max_length=64)
+    productionOrderId: str = Field(min_length=1, max_length=128)
+    quantity: int = Field(gt=0)
+    dueAt: datetime
+    priority: int = Field(default=50, ge=1, le=100)
+    productRevisionId: str = Field(min_length=1, max_length=128)
+    routingRevisionId: str = Field(min_length=1, max_length=128)
+    bomRevisionId: str = Field(min_length=1, max_length=128)
+    drawingRevisionIds: list[str] = Field(default_factory=list)
+    status: Literal[
+        "DRAFT", "RELEASED", "IN_PROGRESS", "SUSPENDED", "COMPLETED", "CLOSED", "CANCELLED"
+    ]
+    version: int = Field(default=1, ge=1)
+    createdAt: datetime | None = None
+    updatedAt: datetime | None = None
+    materialReady: bool = True
+    qualityHold: bool = False
+    operations: list[SnapshotOperationBody] = Field(default_factory=list)
+
+
+class SnapshotResourceBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    externalId: str = Field(min_length=1, max_length=128)
+    code: str = Field(min_length=1, max_length=64)
+    name: str = Field(min_length=1, max_length=160)
+    resourceType: Literal["PERSON", "CELL", "EQUIPMENT"]
+    workCenterId: str = Field(min_length=1, max_length=64)
+    dailyCapacityMinutes: float = Field(gt=0)
+    overtimeCapacityMinutes: float = Field(gt=0)
+    capabilityCodes: list[str] = Field(default_factory=list)
+    active: bool = True
+    state: Literal["UNKNOWN", "IDLE", "RUNNING", "DOWN", "ALARM", "OFFLINE"] = "UNKNOWN"
+
+    @model_validator(mode="after")
+    def validate_capacity(self) -> "SnapshotResourceBody":
+        if self.overtimeCapacityMinutes < self.dailyCapacityMinutes:
+            raise ValueError("overtime capacity cannot be lower than daily capacity")
+        return self
+
+
+class SchedulingSnapshotPush(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    sourceSystem: str = Field(min_length=1, max_length=64)
+    workshopId: str = Field(min_length=1, max_length=64)
+    sourceRevision: str = Field(min_length=1, max_length=128)
+    observedAt: datetime
+    workOrders: list[SnapshotWorkOrderBody]
+    resources: list[SnapshotResourceBody]
+
+
 class ScheduleTransitionBody(BaseModel):
     model_config = ConfigDict(extra="forbid")
     expectedRecordVersion: int = Field(ge=1)
@@ -396,9 +477,7 @@ def current_identity(
     x_dev_actor: str | None = Header(default=None, alias="X-Dev-Actor"),
 ) -> Identity:
     if settings.auth_mode.upper() == "DEV" and x_dev_actor:
-        factory_ids = parse_csv_set(settings.dev_factory_ids) or frozenset(
-            {settings.factory_id}
-        )
+        factory_ids = parse_csv_set(settings.dev_factory_ids) or frozenset({settings.factory_id})
         if x_dev_actor == settings.dev_subject_id:
             return Identity(
                 settings.dev_subject_id,
@@ -430,6 +509,13 @@ def authorize_human(identity: Identity, *roles: str) -> None:
     identity.require_any_role(*roles)
 
 
+def require_simulator_mode() -> None:
+    if not settings.simulator_mode:
+        raise Forbidden(
+            "built-in MES write path is disabled; use an authorized external-system connector"
+        )
+
+
 def build_store() -> MesStore:
     if settings.storage_backend == "memory":
         return InMemoryWorkOrderStore()
@@ -459,14 +545,26 @@ incident_agent = IncidentResponseAgent(
     settings.agent_l3_execution_enabled,
     {item.strip() for item in settings.agent_l3_approver_ids.split(",") if item.strip()},
 )
-natural_language_service = NaturalLanguageQueryService(
-    store, deepseek_model_gateway, incident_agent
-)
 quality_service = QualityApplicationService(store, store, store)
 quality_policy_service = QualityPolicyApplicationService(store)
 genealogy_service = GenealogyApplicationService(store)
 master_data_service = ManufacturingResourceApplicationService(store)
 scheduling_service = SchedulingApplicationService(store)
+scheduling_agent = SchedulingAgent(
+    store,
+    enabled=settings.scheduling_agent_enabled,
+    auto_submit=settings.scheduling_agent_auto_submit,
+)
+natural_language_service = NaturalLanguageQueryService(
+    store,
+    deepseek_model_gateway,
+    incident_agent,
+    scheduling_agent=scheduling_agent,
+    scheduling_workshop_id=settings.scheduling_agent_workshop_ids.split(",")[0].strip(),
+    scheduling_horizon_days=settings.scheduling_agent_horizon_days,
+    scheduling_default_minutes_per_unit=settings.scheduling_agent_default_minutes_per_unit,
+    scheduling_use_overtime=settings.scheduling_agent_use_overtime,
+)
 connector_credentials = (
     {settings.connector_key_id: settings.connector_hmac_secret}
     if settings.connector_key_id and settings.connector_hmac_secret
@@ -480,7 +578,8 @@ get_work_order_tool = GetWorkOrderTool(store, policy, store)
 get_product_genealogy_tool = GetProductGenealogyTool(store, policy)
 list_quality_candidates_tool = ListQualityCandidatesTool(store, policy)
 app = FastAPI(title="Autonomous MES Core", version="0.1.0")
-dashboard_path = Path(__file__).parent / "static" / "dashboard.html"
+control_tower_path = Path(__file__).parent / "static" / "control_tower.html"
+simulator_path = Path(__file__).parent / "static" / "dashboard.html"
 planning_path = Path(__file__).parent / "static" / "planning.html"
 
 
@@ -514,6 +613,8 @@ def ready() -> dict[str, str]:
         else "RULES_ONLY",
         "storageBackend": settings.storage_backend,
         "agentLevel": "L3_EXPERIMENTAL" if settings.agent_l3_execution_enabled else "L2",
+        "schedulingAgentLevel": "L3_BOUNDED" if settings.scheduling_agent_enabled else "DISABLED",
+        "simulatorMode": str(settings.simulator_mode).lower(),
         "deploymentMode": settings.deployment_mode,
         "organizationId": settings.organization_id,
         "factoryId": settings.factory_id,
@@ -522,13 +623,15 @@ def ready() -> dict[str, str]:
 
 
 @app.get("/api/v1/system/deployment-context")
-def deployment_context() -> dict[str, str]:
+def deployment_context() -> dict[str, str | bool]:
     return {
         "deploymentMode": settings.deployment_mode,
         "organizationId": settings.organization_id,
         "factoryId": settings.factory_id,
         "dataIsolation": "DEDICATED_DATABASE",
         "cloudControlPlane": "OPTIONAL_NOT_CONNECTED",
+        "simulatorMode": settings.simulator_mode,
+        "productRole": "MANUFACTURING_INTELLIGENCE_CONTROL_PLANE",
     }
 
 
@@ -583,7 +686,13 @@ def agent_chat(
 
 @app.get("/", response_class=HTMLResponse, include_in_schema=False)
 def dashboard() -> HTMLResponse:
-    return HTMLResponse(dashboard_path.read_text(encoding="utf-8"))
+    return HTMLResponse(control_tower_path.read_text(encoding="utf-8"))
+
+
+@app.get("/simulator", response_class=HTMLResponse, include_in_schema=False)
+def simulator_console() -> HTMLResponse:
+    require_simulator_mode()
+    return HTMLResponse(simulator_path.read_text(encoding="utf-8"))
 
 
 @app.get("/planning", response_class=HTMLResponse, include_in_schema=False)
@@ -622,6 +731,15 @@ def list_planning_resources(
     return scheduling_service.list_resources(workshopId)
 
 
+@app.get("/api/v1/planning/snapshots/latest")
+def latest_scheduling_snapshot(
+    workshopId: str,
+    identity: Annotated[Identity, Depends(current_identity)],
+) -> dict[str, object] | None:
+    authorize_human(identity, "PLANNER", "SUPERVISOR", "OPERATOR", "QUALITY")
+    return scheduling_service.latest_snapshot(workshopId)
+
+
 @app.post("/api/v1/planning/plans/generate", status_code=201)
 def generate_schedule_plan(
     body: GenerateScheduleBody,
@@ -638,6 +756,24 @@ def generate_schedule_plan(
             {key.upper(): value for key, value in body.operationRates.items()},
             identity.subject_id,
             str(uuid4()),
+        )
+    )
+
+
+@app.post("/api/v1/planning/agent/analyze", status_code=201)
+def analyze_schedule_with_agent(
+    body: AnalyzeScheduleBody,
+    identity: Annotated[Identity, Depends(current_identity)],
+) -> dict[str, object]:
+    authorize_human(identity, "PLANNER", "SUPERVISOR")
+    return scheduling_agent.analyze(
+        SchedulingAgentCommand(
+            body.workshopId,
+            body.horizonStart,
+            body.horizonDays,
+            body.useOvertime,
+            body.defaultMinutesPerUnit,
+            {key.upper(): value for key, value in body.operationRates.items()},
         )
     )
 
@@ -724,6 +860,7 @@ def create_work_order(
     idempotency_key: str = Header(...),
 ) -> dict[str, object]:
     authorize_human(identity, "PLANNER")
+    require_simulator_mode()
     return service.create(
         CreateWorkOrderCommand(
             idempotency_key=idempotency_key,
@@ -916,9 +1053,7 @@ def submit_quality_risk_policy(
     identity: Annotated[Identity, Depends(current_identity)],
 ) -> dict[str, object]:
     authorize_human(identity, "MASTER_DATA_ADMIN")
-    return quality_policy_service.submit(
-        policy_id, body.expectedRecordVersion, identity.subject_id
-    )
+    return quality_policy_service.submit(policy_id, body.expectedRecordVersion, identity.subject_id)
 
 
 @app.post("/api/v1/quality/risk-policies/{policy_id}/simulate")
@@ -965,6 +1100,7 @@ def register_product_unit(
     identity: Annotated[Identity, Depends(current_identity)],
 ) -> dict[str, object]:
     authorize_human(identity, "OPERATOR")
+    require_simulator_mode()
     return genealogy_service.register(
         RegisterProductUnitCommand(
             str(uuid4()), body.productSerial, body.workOrderId, identity.subject_id
@@ -984,6 +1120,7 @@ def record_execution_session(
     identity: Annotated[Identity, Depends(current_identity)],
 ) -> dict[str, object]:
     authorize_human(identity, "OPERATOR")
+    require_simulator_mode()
     return genealogy_service.record_execution(
         RecordExecutionSessionCommand(
             str(uuid4()),
@@ -1016,6 +1153,7 @@ def create_quality_inspection(
     identity: Annotated[Identity, Depends(current_identity)],
 ) -> dict[str, object]:
     authorize_human(identity, "QUALITY")
+    require_simulator_mode()
     return quality_service.create(
         CreateInspectionCommand(
             str(uuid4()),
@@ -1034,6 +1172,7 @@ def record_quality_result(
     identity: Annotated[Identity, Depends(current_identity)],
 ) -> dict[str, object]:
     authorize_human(identity, "QUALITY")
+    require_simulator_mode()
     return quality_service.record(
         inspection_id,
         body.passed,
@@ -1054,6 +1193,7 @@ def approve_quality_rework(
     identity: Annotated[Identity, Depends(current_identity)],
 ) -> dict[str, object]:
     authorize_human(identity, "QUALITY", "SUPERVISOR")
+    require_simulator_mode()
     return quality_service.approve_rework(
         inspection_id, body.route, body.expectedVersion, identity.subject_id, str(uuid4())
     )
@@ -1066,6 +1206,7 @@ def approve_agent_proposal(
     identity: Annotated[Identity, Depends(current_identity)],
 ) -> dict[str, object]:
     authorize_human(identity, "SUPERVISOR")
+    require_simulator_mode()
     return incident_agent.approve(proposal_id, identity.subject_id, body.reason)
 
 
@@ -1079,6 +1220,7 @@ def create_inspection_from_agent_proposal(
     identity: Annotated[Identity, Depends(current_identity)],
 ) -> dict[str, object]:
     authorize_human(identity, "QUALITY")
+    require_simulator_mode()
     return quality_service.confirm_recommendation(
         ConfirmQualityRecommendationCommand(
             proposal_id,
@@ -1096,6 +1238,7 @@ def register_equipment(
     identity: Annotated[Identity, Depends(current_identity)],
 ) -> dict[str, object]:
     authorize_human(identity, "MASTER_DATA_ADMIN")
+    require_simulator_mode()
     return equipment_service.register(
         RegisterEquipmentCommand(
             correlation_id=str(uuid4()),
@@ -1129,6 +1272,7 @@ def register_manufacturing_resource(
     identity: Annotated[Identity, Depends(current_identity)],
 ) -> dict[str, object]:
     authorize_human(identity, "MASTER_DATA_ADMIN")
+    require_simulator_mode()
     return master_data_service.register(
         RegisterManufacturingResourceCommand(
             str(uuid4()),
@@ -1169,6 +1313,7 @@ def update_manufacturing_resource(
     identity: Annotated[Identity, Depends(current_identity)],
 ) -> dict[str, object]:
     authorize_human(identity, "MASTER_DATA_ADMIN")
+    require_simulator_mode()
     return master_data_service.update(
         UpdateManufacturingResourceCommand(
             str(uuid4()),
@@ -1200,6 +1345,7 @@ def preview_manufacturing_resource_csv(
     identity: Annotated[Identity, Depends(current_identity)],
 ) -> dict[str, object]:
     authorize_human(identity, "MASTER_DATA_ADMIN")
+    require_simulator_mode()
     return master_data_service.preview_csv(body.csvText, body.sourceSystem)
 
 
@@ -1209,6 +1355,7 @@ def import_manufacturing_resource_csv(
     identity: Annotated[Identity, Depends(current_identity)],
 ) -> dict[str, object]:
     authorize_human(identity, "MASTER_DATA_ADMIN")
+    require_simulator_mode()
     return master_data_service.import_csv(
         body.csvText,
         body.sourceSystem,
@@ -1272,6 +1419,49 @@ async def connector_push_manufacturing_resources(
     }
 
 
+@app.post("/api/v1/connectors/v1/scheduling-snapshots", status_code=201)
+async def connector_push_scheduling_snapshot(
+    request: Request,
+    x_connector_key: str = Header(alias="X-Connector-Key"),
+    x_connector_timestamp: str = Header(alias="X-Connector-Timestamp"),
+    x_connector_nonce: str = Header(alias="X-Connector-Nonce"),
+    x_connector_signature: str = Header(alias="X-Connector-Signature"),
+) -> dict[str, object]:
+    body = await request.body()
+    receipt = connector_authenticator.authenticate(
+        x_connector_key,
+        x_connector_timestamp,
+        x_connector_nonce,
+        x_connector_signature,
+        body,
+    )
+    try:
+        payload = SchedulingSnapshotPush.model_validate_json(body)
+    except ValueError as exc:
+        raise ValidationError("scheduling snapshot payload is invalid") from exc
+    values = payload.model_dump(mode="json")
+    result = scheduling_service.ingest_snapshot(
+        IngestSchedulingSnapshotCommand(
+            payload.sourceSystem,
+            payload.workshopId,
+            payload.sourceRevision,
+            payload.observedAt,
+            {
+                "workOrders": values["workOrders"],
+                "resources": values["resources"],
+            },
+            f"connector:{receipt.key_id}",
+            receipt.nonce,
+        )
+    )
+    return {
+        **result,
+        "keyId": receipt.key_id,
+        "nonce": receipt.nonce,
+        "requestDigest": receipt.request_digest,
+    }
+
+
 @app.post("/api/v1/equipment/{equipment_id}/telemetry")
 def record_equipment_telemetry(
     equipment_id: str,
@@ -1279,6 +1469,7 @@ def record_equipment_telemetry(
     identity: Annotated[Identity, Depends(current_identity)],
 ) -> dict[str, object]:
     authorize_human(identity, "OPERATOR")
+    require_simulator_mode()
     equipment = equipment_service.record(
         RecordTelemetryCommand(
             correlation_id=str(uuid4()),
@@ -1313,6 +1504,7 @@ def release_work_order(
     idempotency_key: str = Header(...),
 ) -> dict[str, object]:
     authorize_human(identity, "PLANNER")
+    require_simulator_mode()
     return service.release(
         ReleaseWorkOrderCommand(
             idempotency_key=idempotency_key,
@@ -1339,6 +1531,7 @@ def execute_operation(
     idempotency_key: str = Header(...),
 ) -> dict[str, object]:
     authorize_human(identity, "SUPERVISOR" if action == "resume" else "OPERATOR")
+    require_simulator_mode()
     current = service.get(work_order_id)
     operation = next((item for item in current["operations"] if item["sequence"] == sequence), None)
     if operation is None:

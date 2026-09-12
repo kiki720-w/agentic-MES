@@ -1,4 +1,5 @@
 import unittest
+from datetime import date
 from typing import Any
 from unittest.mock import Mock
 
@@ -100,4 +101,38 @@ class NaturalLanguageQueryTests(unittest.TestCase):
         self.assertEqual("CREATED_RECOMMENDATION_DRAFT", result["policyDecision"])
         self.assertEqual("quality-draft-1", result["actionProposal"]["proposalId"])
         action_agent.recommend_quality_inspection.assert_called_once_with("order-1", 10)
+        model.answer.assert_not_called()
+
+    def test_replan_instruction_invokes_bounded_scheduling_agent(self) -> None:
+        model = Mock()
+        scheduling_agent = Mock()
+        scheduling_agent.analyze.return_value = {
+            "decision": "SUBMITTED_FOR_APPROVAL",
+            "reused": False,
+            "publicationAuthority": "HUMAN_SUPERVISOR_ONLY",
+            "plan": {
+                "planId": "plan-1",
+                "status": "PENDING_APPROVAL",
+                "assignments": [{"assignmentId": "assignment-1"}],
+                "shortages": [],
+            },
+        }
+        service = NaturalLanguageQueryService(
+            InMemoryWorkOrderStore(),
+            model,
+            scheduling_agent=scheduling_agent,
+            scheduling_workshop_id="WS-1",
+            scheduling_horizon_days=7,
+            scheduling_default_minutes_per_unit=20,
+        )
+
+        result = service.ask("请重新排产")
+
+        self.assertEqual("SUBMITTED_FOR_APPROVAL", result["policyDecision"])
+        self.assertEqual("plan-1", result["sourceObjects"][0]["id"])
+        command = scheduling_agent.analyze.call_args.args[0]
+        self.assertEqual("WS-1", command.workshop_id)
+        self.assertEqual(7, command.horizon_days)
+        self.assertEqual(20, command.default_minutes_per_unit)
+        self.assertIsInstance(command.horizon_start, date)
         model.answer.assert_not_called()

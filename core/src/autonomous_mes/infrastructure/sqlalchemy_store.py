@@ -30,6 +30,7 @@ from autonomous_mes.domain.scheduling import (
     PlanningResourceType,
     SchedulePlan,
     SchedulePlanStatus,
+    SchedulingSnapshot,
 )
 from autonomous_mes.domain.work_order import (
     FrozenRevisions,
@@ -56,6 +57,7 @@ from .models import (
     QualityInspectionRow,
     QualityRiskPolicyRow,
     SchedulePlanRow,
+    SchedulingSnapshotRow,
     WorkOrderOperationRow,
     WorkOrderRow,
 )
@@ -231,9 +233,7 @@ class SqlAlchemyWorkOrderStore:
                     )
                 )
             if publish_status:
-                statement = statement.where(
-                    EventOutboxRow.publish_status == publish_status
-                )
+                statement = statement.where(EventOutboxRow.publish_status == publish_status)
             if before_occurred_at and before_event_id:
                 statement = statement.where(
                     or_(
@@ -267,9 +267,7 @@ class SqlAlchemyWorkOrderStore:
                 for row in rows
             ]
 
-    def count_outbox(
-        self, query: str | None = None, publish_status: str | None = None
-    ) -> int:
+    def count_outbox(self, query: str | None = None, publish_status: str | None = None) -> int:
         with self._sessions() as session:
             statement = select(func.count()).select_from(EventOutboxRow)
             if query:
@@ -284,9 +282,7 @@ class SqlAlchemyWorkOrderStore:
                     )
                 )
             if publish_status:
-                statement = statement.where(
-                    EventOutboxRow.publish_status == publish_status
-                )
+                statement = statement.where(EventOutboxRow.publish_status == publish_status)
             return int(session.scalar(statement) or 0)
 
     def record_tool_event(self, event: DomainEvent) -> None:
@@ -552,16 +548,16 @@ class SqlAlchemyWorkOrderStore:
             rows = list(
                 session.scalars(
                     select(QualityRiskPolicyRow).where(
-                    QualityRiskPolicyRow.status == QualityPolicyStatus.APPROVED.value,
-                    QualityRiskPolicyRow.effective_from <= as_of,
-                    or_(
-                        QualityRiskPolicyRow.product_revision_id.is_(None),
-                        QualityRiskPolicyRow.product_revision_id == product_revision_id,
-                    ),
-                    or_(
-                        QualityRiskPolicyRow.operation_code.is_(None),
-                        QualityRiskPolicyRow.operation_code == operation_code,
-                    ),
+                        QualityRiskPolicyRow.status == QualityPolicyStatus.APPROVED.value,
+                        QualityRiskPolicyRow.effective_from <= as_of,
+                        or_(
+                            QualityRiskPolicyRow.product_revision_id.is_(None),
+                            QualityRiskPolicyRow.product_revision_id == product_revision_id,
+                        ),
+                        or_(
+                            QualityRiskPolicyRow.operation_code.is_(None),
+                            QualityRiskPolicyRow.operation_code == operation_code,
+                        ),
                     )
                 ).all()
             )
@@ -569,8 +565,7 @@ class SqlAlchemyWorkOrderStore:
                 return None
             rows.sort(
                 key=lambda row: (
-                    int(row.product_revision_id is not None)
-                    + int(row.operation_code is not None),
+                    int(row.product_revision_id is not None) + int(row.operation_code is not None),
                     row.effective_from or row.created_at,
                     row.version,
                 ),
@@ -625,9 +620,7 @@ class SqlAlchemyWorkOrderStore:
             )
         return snapshots
 
-    def add_quality_policy_atomically(
-        self, policy: QualityRiskPolicy, event: DomainEvent
-    ) -> None:
+    def add_quality_policy_atomically(self, policy: QualityRiskPolicy, event: DomainEvent) -> None:
         try:
             with self._sessions.begin() as session:
                 session.add(QualityRiskPolicyRow(**_quality_policy_values(policy)))
@@ -676,9 +669,7 @@ class SqlAlchemyWorkOrderStore:
                 session.add(PlanningResourceRow(**_planning_resource_values(resource)))
                 session.add_all(_event_rows([event]))
         except IntegrityError as exc:
-            raise InvalidTransition(
-                "planning resource code already exists in workshop"
-            ) from exc
+            raise InvalidTransition("planning resource code already exists in workshop") from exc
 
     def get_schedule_plan(self, plan_id: str) -> SchedulePlan | None:
         with self._sessions() as session:
@@ -718,6 +709,42 @@ class SqlAlchemyWorkOrderStore:
             if getattr(result, "rowcount", 0) != 1:
                 raise InvalidTransition("schedule plan version changed")
             session.add_all(_event_rows([event]))
+
+    def get_latest_scheduling_snapshot(self, workshop_id: str) -> SchedulingSnapshot | None:
+        with self._sessions() as session:
+            row = session.scalar(
+                select(SchedulingSnapshotRow)
+                .where(SchedulingSnapshotRow.workshop_id == workshop_id)
+                .order_by(
+                    SchedulingSnapshotRow.observed_at.desc(),
+                    SchedulingSnapshotRow.created_at.desc(),
+                )
+                .limit(1)
+            )
+            return _scheduling_snapshot_to_domain(row) if row else None
+
+    def get_scheduling_snapshot(
+        self, source_system: str, workshop_id: str, source_revision: str
+    ) -> SchedulingSnapshot | None:
+        with self._sessions() as session:
+            row = session.scalar(
+                select(SchedulingSnapshotRow).where(
+                    SchedulingSnapshotRow.source_system == source_system,
+                    SchedulingSnapshotRow.workshop_id == workshop_id,
+                    SchedulingSnapshotRow.source_revision == source_revision,
+                )
+            )
+            return _scheduling_snapshot_to_domain(row) if row else None
+
+    def add_scheduling_snapshot_atomically(
+        self, snapshot: SchedulingSnapshot, event: DomainEvent
+    ) -> None:
+        try:
+            with self._sessions.begin() as session:
+                session.add(SchedulingSnapshotRow(**_scheduling_snapshot_values(snapshot)))
+                session.add_all(_event_rows([event]))
+        except IntegrityError as exc:
+            raise IdempotencyConflict("scheduling snapshot revision already exists") from exc
 
     def update_agent_proposal_atomically(
         self, proposal: AgentProposal, expected_status: ProposalStatus, event: DomainEvent
@@ -1608,9 +1635,7 @@ def _inspection_to_domain(row: QualityInspectionRow) -> QualityInspection:
     )
 
 
-def _quality_policy_values(
-    item: QualityRiskPolicy, *, include_id: bool = True
-) -> dict[str, Any]:
+def _quality_policy_values(item: QualityRiskPolicy, *, include_id: bool = True) -> dict[str, Any]:
     values = {
         "policy_key": item.policy_key,
         "version": item.version,
@@ -1666,9 +1691,7 @@ def _quality_policy_to_domain(row: QualityRiskPolicyRow) -> QualityRiskPolicy:
     )
 
 
-def _planning_resource_values(
-    item: PlanningResource, *, include_id: bool = True
-) -> dict[str, Any]:
+def _planning_resource_values(item: PlanningResource, *, include_id: bool = True) -> dict[str, Any]:
     values = {
         "code": item.code,
         "name": item.name,
@@ -1757,6 +1780,32 @@ def _schedule_plan_to_domain(row: SchedulePlanRow) -> SchedulePlan:
         row.withdrawal_reason,
         row.created_at,
         row.updated_at,
+    )
+
+
+def _scheduling_snapshot_values(item: SchedulingSnapshot) -> dict[str, Any]:
+    return {
+        "snapshot_id": item.snapshot_id,
+        "source_system": item.source_system,
+        "workshop_id": item.workshop_id,
+        "source_revision": item.source_revision,
+        "observed_at": item.observed_at,
+        "payload": item.payload,
+        "checksum": item.checksum,
+        "created_at": item.created_at,
+    }
+
+
+def _scheduling_snapshot_to_domain(row: SchedulingSnapshotRow) -> SchedulingSnapshot:
+    return SchedulingSnapshot(
+        row.snapshot_id,
+        row.source_system,
+        row.workshop_id,
+        row.source_revision,
+        row.observed_at,
+        row.payload,
+        row.checksum,
+        row.created_at,
     )
 
 

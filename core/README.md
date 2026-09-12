@@ -1,8 +1,8 @@
-# Autonomous MES Core
+# Agentic Manufacturing Control Plane Core
 
-当前垂直切片覆盖有限产能滚动排产、创建/释放工单，机械加工工序的派工、开工、报工、完工，以及设备台账和实时遥测采集；每个业务动作都会原子写入Outbox，并支持Agent只读`get_work_order`工具。
+当前核心定位是连接既有 ERP、MES、WMS、QMS、机床与传感器的制造智能控制层。正式模式从签名连接器接收来源可追溯的制造快照，执行有限产能滚动排产，并由受控 L3 智能体生成和提交计划；审批、发布与生产回写仍由独立人类权限和确定性策略控制。
 
-本目录是自主实现，不依赖`candidates/`中的任何候选MES代码。
+早期工单、报工、质量和设备写接口仅在`AUTONOMOUS_MES_SIMULATOR_MODE=true`时开放，用于离线演示及回归测试。它们不是正式部署中的第二套 MES。
 
 ## 当前可运行范围
 
@@ -40,6 +40,9 @@ uvicorn autonomous_mes.api:app --app-dir src --reload
 - `POST /api/v1/quality/risk-policies/{policyId}/rollback-draft`：从已批准版本创建回滚草稿
 - `POST/GET /api/v1/planning/resources`：维护人员与工作单元能力及正常/加班产能
 - `POST /api/v1/planning/plans/generate`：从MES工单、工序和设备事实生成有限产能排产草稿
+- `POST /api/v1/planning/agent/analyze`：L3智能体生成或复用排产方案，并最多提交到人工审批
+- `GET /api/v1/planning/snapshots/latest`：读取排产使用的最新外部制造快照及校验和
+- `POST /api/v1/connectors/v1/scheduling-snapshots`：以HMAC签名推送ERP/MES/WMS/QMS合成的标准排产快照
 - `GET /api/v1/planning/plans`：读取计划版本、排产明细和未排能力缺口
 - `POST /api/v1/planning/plans/{planId}/assignments/{assignmentId}/move`：在草稿阶段人工调整资源或日期并重新校验能力
 - `POST /api/v1/planning/plans/{planId}/{submit|approve|publish|withdraw}`：双人审批的计划发布治理链
@@ -59,9 +62,10 @@ uvicorn autonomous_mes.api:app --app-dir src --reload
 - `GET /api/v1/identity/me`
 - `GET /health/live`
 - `GET /health/ready`
-- `GET /`：可视化生产控制台HTML
+- `GET /`：制造智能控制塔HTML
+- `GET /simulator`：仅在模拟器模式开放的旧MES流程界面
 
-API支持内存适配器和PostgreSQL持久化适配器。DeepSeek 可通过供应商中立模型网关提供诊断解释；模型只接收最小化的结构化设备/工单事实，不获得数据库连接和 MES 工具。未配置密钥或调用失败时自动回退到规则解释。
+API支持内存适配器和PostgreSQL持久化适配器。DeepSeek 可通过供应商中立模型网关提供诊断解释；模型只接收最小化的结构化事实，不获得数据库、审批、发布或设备控制权限。未配置密钥或调用失败时自动回退到规则解释。自然语言“重新排产”调用的是确定性APS外层的L3排产智能体，而不是让大模型直接编写计划或更新生产数据。
 
 产品序列号谱系使用只追加的`product_units`和`genealogy_links`保存。登记序列号时，从工单冻结快照固化工单、产品版本、工艺路线、BOM、图纸，以及已绑定的工序和设备关系；追溯查询同时聚合该工单的质量检验结果。页面“事件追溯”区支持按序列号查询。
 
@@ -93,6 +97,14 @@ Worker通过数据库租约领取事件；失败会指数退避，超过上限�
 ```
 
 它只在`OperationCompleted`后生成去重、可追溯的R2质检建议草稿。已有检验时跳过；重复投递不会重复建草稿。该Worker不创建检验、不隔离产品，也不批准返工。未提供`--quality-agent-auto-draft`时保持普通事件发布行为。
+
+启用事件驱动L3排产智能体并持续消费：
+
+```powershell
+.\.venv\Scripts\python.exe -m autonomous_mes.worker --scheduling-agent-auto-plan --watch --poll-seconds 1
+```
+
+该Worker在外部排产快照、工单/工序、设备、资源或质量约束变化后运行确定性APS。它按输入指纹避免重复建案，可自动提交有内容的计划，但没有批准或发布接口。
 
 启动服务后访问`http://127.0.0.1:8000/`，可以查看工单指标、制造事件流、设备状态，创建演示工单并模拟机床采集。遥测样本使用`sampleId`去重，旧时间戳不能覆盖当前状态；`DOWN`和`ALARM`必须携带停机原因或报警码。该页面使用原生HTML/CSS/JavaScript，无需Node构建环境。
 

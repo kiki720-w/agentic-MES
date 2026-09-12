@@ -4,6 +4,7 @@ from uuid import uuid4
 
 from autonomous_mes.application.scheduling import (
     GenerateScheduleCommand,
+    IngestSchedulingSnapshotCommand,
     RegisterPlanningResourceCommand,
     SchedulingApplicationService,
 )
@@ -167,9 +168,7 @@ class SchedulingTests(unittest.TestCase):
         self.assertEqual(2, moved["recordVersion"])
         self.assertEqual("P-02", moved["assignments"][0]["resourceCode"])
         self.assertEqual("2026-09-15", moved["assignments"][0]["productionDate"])
-        self.assertEqual(
-            "ScheduleAssignmentMoved", self.store.list_outbox()[-1]["eventType"]
-        )
+        self.assertEqual("ScheduleAssignmentMoved", self.store.list_outbox()[-1]["eventType"])
 
     def test_missing_capacity_is_visible_as_shortage(self) -> None:
         self.create_order("WO-NO-CAPACITY", 50)
@@ -202,6 +201,109 @@ class SchedulingTests(unittest.TestCase):
         self.assertEqual(1, plan["metrics"]["candidateOrderCount"])
         self.assertEqual(1, plan["metrics"]["shortageCount"])
         self.assertEqual("未配置工艺路线", plan["shortages"][0]["operationName"])
+
+    def test_external_snapshot_becomes_authoritative_scheduling_input(self) -> None:
+        observed = datetime.now(UTC)
+        snapshot = self.scheduling.ingest_snapshot(
+            IngestSchedulingSnapshotCommand(
+                "factory-edge-adapter",
+                "WS-1",
+                "rev-100",
+                observed,
+                {
+                    "workOrders": [
+                        {
+                            "externalId": "mes-order-ready",
+                            "code": "WO-EXTERNAL-READY",
+                            "productionOrderId": "ERP-100",
+                            "quantity": 10,
+                            "dueAt": (observed + timedelta(days=3)).isoformat(),
+                            "priority": 90,
+                            "productRevisionId": "PR-1",
+                            "routingRevisionId": "RT-1",
+                            "bomRevisionId": "BOM-1",
+                            "status": "RELEASED",
+                            "version": 7,
+                            "materialReady": True,
+                            "qualityHold": False,
+                            "operations": [
+                                {
+                                    "sequence": 10,
+                                    "operationCode": "TURN",
+                                    "operationName": "Turning",
+                                    "workCenterId": "WC-TURN",
+                                    "plannedQuantity": 10,
+                                    "status": "PENDING",
+                                }
+                            ],
+                        },
+                        {
+                            "externalId": "mes-order-short",
+                            "code": "WO-EXTERNAL-SHORT",
+                            "productionOrderId": "ERP-101",
+                            "quantity": 5,
+                            "dueAt": (observed + timedelta(days=4)).isoformat(),
+                            "priority": 80,
+                            "productRevisionId": "PR-2",
+                            "routingRevisionId": "RT-2",
+                            "bomRevisionId": "BOM-2",
+                            "status": "RELEASED",
+                            "version": 3,
+                            "materialReady": False,
+                            "qualityHold": False,
+                            "operations": [
+                                {
+                                    "sequence": 10,
+                                    "operationCode": "TURN",
+                                    "operationName": "Turning",
+                                    "workCenterId": "WC-TURN",
+                                    "plannedQuantity": 5,
+                                    "status": "PENDING",
+                                }
+                            ],
+                        },
+                    ],
+                    "resources": [
+                        {
+                            "externalId": "mes-cell-1",
+                            "code": "CELL-EXT-1",
+                            "name": "External turning cell",
+                            "resourceType": "CELL",
+                            "workCenterId": "WC-TURN",
+                            "dailyCapacityMinutes": 480,
+                            "overtimeCapacityMinutes": 600,
+                            "capabilityCodes": ["TURN"],
+                            "active": True,
+                            "state": "RUNNING",
+                        }
+                    ],
+                },
+                "connector:key-1",
+                "nonce-1",
+            )
+        )
+        reused = self.scheduling.ingest_snapshot(
+            IngestSchedulingSnapshotCommand(
+                "factory-edge-adapter",
+                "WS-1",
+                "rev-100",
+                observed,
+                self.store.get_latest_scheduling_snapshot("WS-1").payload,
+                "connector:key-1",
+                "nonce-2",
+            )
+        )
+
+        plan = self.generate(date(2026, 9, 14))
+
+        self.assertFalse(snapshot["reused"])
+        self.assertTrue(reused["reused"])
+        self.assertEqual("WO-EXTERNAL-READY", plan["assignments"][0]["workOrderCode"])
+        self.assertEqual("WMS 显示物料未齐套", plan["shortages"][0]["reason"])
+        self.assertEqual(
+            "EXTERNAL_SCHEDULING_SNAPSHOT",
+            plan["generationParameters"]["inputSource"]["type"],
+        )
 
 
 if __name__ == "__main__":

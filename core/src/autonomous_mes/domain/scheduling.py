@@ -1,6 +1,8 @@
+import json
 from dataclasses import dataclass, replace
 from datetime import date, datetime
 from enum import Enum
+from hashlib import sha256
 from typing import Any
 from uuid import uuid4
 
@@ -19,6 +21,70 @@ class SchedulePlanStatus(str, Enum):
     APPROVED = "APPROVED"
     PUBLISHED = "PUBLISHED"
     WITHDRAWN = "WITHDRAWN"
+
+
+@dataclass(frozen=True)
+class SchedulingSnapshot:
+    snapshot_id: str
+    source_system: str
+    workshop_id: str
+    source_revision: str
+    observed_at: datetime
+    payload: dict[str, Any]
+    checksum: str
+    created_at: datetime
+
+    @classmethod
+    def create(
+        cls,
+        source_system: str,
+        workshop_id: str,
+        source_revision: str,
+        observed_at: datetime,
+        payload: dict[str, Any],
+        actor_id: str,
+        correlation_id: str,
+    ) -> tuple["SchedulingSnapshot", DomainEvent]:
+        if any(
+            not value.strip() for value in (source_system, workshop_id, source_revision, actor_id)
+        ):
+            raise ValidationError("snapshot source, workshop, revision and actor are required")
+        if observed_at.tzinfo is None:
+            raise ValidationError("snapshot observed_at must include a timezone")
+        if not isinstance(payload.get("workOrders"), list) or not isinstance(
+            payload.get("resources"), list
+        ):
+            raise ValidationError("snapshot payload requires workOrders and resources arrays")
+        encoded = json.dumps(
+            payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+        ).encode()
+        snapshot = cls(
+            str(uuid4()),
+            source_system.strip(),
+            workshop_id.strip(),
+            source_revision.strip(),
+            observed_at,
+            payload,
+            sha256(encoded).hexdigest(),
+            utc_now(),
+        )
+        event = DomainEvent.create(
+            "SchedulingSnapshotIngested",
+            "SchedulingSnapshot",
+            snapshot.snapshot_id,
+            {
+                "sourceSystem": snapshot.source_system,
+                "workshopId": snapshot.workshop_id,
+                "sourceRevision": snapshot.source_revision,
+                "observedAt": snapshot.observed_at.isoformat(),
+                "checksum": snapshot.checksum,
+                "workOrderCount": len(payload["workOrders"]),
+                "resourceCount": len(payload["resources"]),
+                "actorId": actor_id,
+            },
+            correlation_id,
+        )
+        return snapshot, event
 
 
 @dataclass(frozen=True)
@@ -210,18 +276,17 @@ class SchedulePlan:
             "resourceType": target_resource["resourceType"],
             "productionDate": production_date.isoformat(),
             "deliveryStatus": (
-                "LATE" if production_date > datetime.fromisoformat(source["dueAt"]).date() else "ON_TIME"
+                "LATE"
+                if production_date > datetime.fromisoformat(source["dueAt"]).date()
+                else "ON_TIME"
             ),
             "rationale": f"人工计划调整：{reason.strip()}",
         }
         assignments = tuple(
-            moved if item["assignmentId"] == assignment_id else item
-            for item in self.assignments
+            moved if item["assignmentId"] == assignment_id else item for item in self.assignments
         )
         late_order_ids = {
-            item["workOrderId"]
-            for item in assignments
-            if item["deliveryStatus"] == "LATE"
+            item["workOrderId"] for item in assignments if item["deliveryStatus"] == "LATE"
         }
         metrics = {**self.metrics, "lateOrderCount": len(late_order_ids)}
         changed = replace(

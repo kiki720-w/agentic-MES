@@ -1,10 +1,11 @@
 import unittest
 from datetime import UTC, datetime, timedelta
+from unittest.mock import patch
 from uuid import uuid4
 
 from fastapi.testclient import TestClient
 
-from autonomous_mes.api import app
+from autonomous_mes.api import app, settings
 
 
 class ApiContractTests(unittest.TestCase):
@@ -48,6 +49,8 @@ class ApiContractTests(unittest.TestCase):
                 "organizationId": "ORG-DEMO",
                 "factoryId": "FACTORY-DEMO",
                 "authMode": "DEV",
+                "schedulingAgentLevel": "L3_BOUNDED",
+                "simulatorMode": "true",
             },
             self.client.get("/health/ready").json(),
         )
@@ -57,6 +60,30 @@ class ApiContractTests(unittest.TestCase):
         self.assertEqual("demo-supervisor", identity.json()["subjectId"])
         self.assertIn("SUPERVISOR", identity.json()["roles"])
         self.assertEqual(["FACTORY-DEMO"], identity.json()["factoryIds"])
+
+    def test_control_plane_mode_blocks_legacy_mes_writes(self):
+        with patch.object(settings, "simulator_mode", False):
+            response = self.client.post(
+                "/api/v1/work-orders",
+                headers={"Idempotency-Key": "blocked-control-plane-write"},
+                json={
+                    "humanCode": "WO-BLOCKED",
+                    "productionOrderId": "PO-BLOCKED",
+                    "workshopId": "WS-MACH-01",
+                    "quantity": 1,
+                    "dueAt": (datetime.now(UTC) + timedelta(days=1)).isoformat(),
+                    "revisions": {
+                        "productRevisionId": "PR-1",
+                        "routingRevisionId": "RT-1",
+                        "bomRevisionId": "BOM-1",
+                    },
+                },
+            )
+            simulator = self.client.get("/simulator")
+
+        self.assertEqual(403, response.status_code)
+        self.assertIn("external-system connector", response.json()["detail"])
+        self.assertEqual(403, simulator.status_code)
 
         quality_identity = self.client.get(
             "/api/v1/identity/me", headers={"X-Dev-Actor": "demo-quality-manager"}
@@ -141,9 +168,7 @@ class ApiContractTests(unittest.TestCase):
             any(item["workOrderCode"] == f"WO-APS-{suffix}" for item in plan["assignments"])
         )
         assignment = next(
-            item
-            for item in plan["assignments"]
-            if item["workOrderCode"] == f"WO-APS-{suffix}"
+            item for item in plan["assignments"] if item["workOrderCode"] == f"WO-APS-{suffix}"
         )
         moved = self.client.post(
             f"/api/v1/planning/plans/{plan['planId']}/assignments/"
@@ -187,21 +212,14 @@ class ApiContractTests(unittest.TestCase):
         dashboard = self.client.get("/")
         self.assertEqual(200, dashboard.status_code)
         self.assertIn("AGENTIC", dashboard.text)
-        self.assertIn("生产执行中心", dashboard.text)
-        self.assertIn("质量检验与返工", dashboard.text)
-        self.assertIn("DeepSeek 诊断解释网关", dashboard.text)
-        self.assertIn("自然语言 Agent", dashboard.text)
-        self.assertIn("确认并创建检验", dashboard.text)
-        self.assertIn("搜索事件类型、聚合ID、事件ID或关联ID", dashboard.text)
-        self.assertIn("changeEventPage(-1)", dashboard.text)
-        self.assertIn("质量风险策略", dashboard.text)
-        self.assertIn("新建策略版本", dashboard.text)
-        self.assertIn("运行仿真", dashboard.text)
+        self.assertIn("制造智能控制塔", dashboard.text)
+        self.assertIn("企业系统连接面", dashboard.text)
+        self.assertIn("排产智能体", dashboard.text)
+        self.assertIn("L3 BOUNDED", dashboard.text)
+        self.assertIn("运行 L3 排产分析", dashboard.text)
         self.assertIn("mes_dev_actor", dashboard.text)
 
-        default_policy = self.client.get(
-            "/api/v1/quality/risk-policies/default-configuration"
-        )
+        default_policy = self.client.get("/api/v1/quality/risk-policies/default-configuration")
         self.assertEqual(200, default_policy.status_code)
         self.assertEqual(30, default_policy.json()["lookbackDays"])
 
@@ -232,7 +250,9 @@ class ApiContractTests(unittest.TestCase):
 
         invalid_cursor = self.client.get(
             "/api/v1/system/outbox",
-            params={"cursor": "eyJvY2N1cnJlZEF0IjoiMjAyNi0wMS0wMVQwMDowMDowMCIsImV2ZW50SWQiOiJ4In0"},
+            params={
+                "cursor": "eyJvY2N1cnJlZEF0IjoiMjAyNi0wMS0wMVQwMDowMDowMCIsImV2ZW50SWQiOiJ4In0"
+            },
         )
         self.assertEqual(409, invalid_cursor.status_code)
         projection = self.client.get("/api/v1/system/operation-projection-health").json()
@@ -333,9 +353,7 @@ class ApiContractTests(unittest.TestCase):
         self.assertIn("total", resources)
         self.assertIn(
             "typeCounts",
-            self.client.get(
-                "/api/v1/master-data/manufacturing-resources-summary"
-            ).json(),
+            self.client.get("/api/v1/master-data/manufacturing-resources-summary").json(),
         )
 
         quality = self.client.get(

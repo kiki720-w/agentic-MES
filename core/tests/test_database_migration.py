@@ -52,6 +52,7 @@ class DatabaseMigrationTests(unittest.TestCase):
                     "work_order_operations",
                     "planning_resources",
                     "schedule_plans",
+                    "scheduling_snapshots",
                 },
                 set(schema.get_table_names()),
             )
@@ -59,18 +60,13 @@ class DatabaseMigrationTests(unittest.TestCase):
             self.assertIn("ix_event_outbox_pending", outbox_indexes)
             equipment_indexes = {item["name"] for item in schema.get_indexes("equipment")}
             self.assertIn("ix_equipment_state_updated_id", equipment_indexes)
-            quality_indexes = {
-                item["name"] for item in schema.get_indexes("quality_inspections")
-            }
+            quality_indexes = {item["name"] for item in schema.get_indexes("quality_inspections")}
             self.assertIn("ix_quality_status_updated_id", quality_indexes)
             self.assertIn("uq_quality_work_order_operation", quality_indexes)
-            policy_indexes = {
-                item["name"] for item in schema.get_indexes("quality_risk_policies")
-            }
+            policy_indexes = {item["name"] for item in schema.get_indexes("quality_risk_policies")}
             self.assertIn("ix_quality_risk_policies_status", policy_indexes)
             policy_constraints = {
-                item["name"]
-                for item in schema.get_unique_constraints("quality_risk_policies")
+                item["name"] for item in schema.get_unique_constraints("quality_risk_policies")
             }
             self.assertIn("uq_quality_risk_policy_version", policy_constraints)
             resource_indexes = {
@@ -81,15 +77,11 @@ class DatabaseMigrationTests(unittest.TestCase):
                 item["name"] for item in schema.get_indexes("work_order_operations")
             }
             self.assertIn("ix_operation_status_order_sequence", operation_indexes)
-            execution_columns = {
-                item["name"] for item in schema.get_columns("execution_sessions")
-            }
+            execution_columns = {item["name"] for item in schema.get_columns("execution_sessions")}
             self.assertIn("resource_context", execution_columns)
             quality_columns = {item["name"] for item in schema.get_columns("quality_inspections")}
             self.assertIn("gauge_id", quality_columns)
-            policy_columns = {
-                item["name"] for item in schema.get_columns("quality_risk_policies")
-            }
+            policy_columns = {item["name"] for item in schema.get_columns("quality_risk_policies")}
             self.assertIn("simulation_summary", policy_columns)
             self.assertIn("simulated_by", policy_columns)
             planning_resource_columns = {
@@ -101,6 +93,10 @@ class DatabaseMigrationTests(unittest.TestCase):
             self.assertIn("assignments", plan_columns)
             self.assertIn("shortages", plan_columns)
             self.assertIn("record_version", plan_columns)
+            snapshot_columns = {item["name"] for item in schema.get_columns("scheduling_snapshots")}
+            self.assertIn("source_revision", snapshot_columns)
+            self.assertIn("payload", snapshot_columns)
+            self.assertIn("checksum", snapshot_columns)
             engine.dispose()
 
 

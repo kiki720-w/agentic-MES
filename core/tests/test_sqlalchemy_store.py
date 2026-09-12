@@ -14,6 +14,7 @@ from autonomous_mes.application.genealogy import (
 )
 from autonomous_mes.application.scheduling import (
     GenerateScheduleCommand,
+    IngestSchedulingSnapshotCommand,
     RegisterPlanningResourceCommand,
     SchedulingApplicationService,
 )
@@ -31,6 +32,7 @@ from autonomous_mes.infrastructure.models import (
     PlanningResourceRow,
     ProductUnitRow,
     SchedulePlanRow,
+    SchedulingSnapshotRow,
     WorkOrderRow,
 )
 from autonomous_mes.infrastructure.sqlalchemy_store import SqlAlchemyWorkOrderStore
@@ -158,6 +160,29 @@ class SqlAlchemyStoreTests(unittest.TestCase):
         assert row is not None
         self.assertEqual("PENDING_APPROVAL", row.status)
         self.assertEqual(submitted["recordVersion"], row.record_version)
+
+    def test_scheduling_snapshot_persists_with_source_revision(self):
+        observed = datetime.now(UTC)
+        scheduling = SchedulingApplicationService(self.store)
+
+        result = scheduling.ingest_snapshot(
+            IngestSchedulingSnapshotCommand(
+                "edge-adapter",
+                "WS-MACH-01",
+                "source-rev-1",
+                observed,
+                {"workOrders": [], "resources": []},
+                "connector:key-1",
+                "snapshot-correlation",
+            )
+        )
+
+        with self.sessions() as session:
+            row = session.get(SchedulingSnapshotRow, result["snapshotId"])
+        self.assertIsNotNone(row)
+        assert row is not None
+        self.assertEqual("source-rev-1", row.source_revision)
+        self.assertEqual(result["checksum"], row.checksum)
 
 
 if __name__ == "__main__":

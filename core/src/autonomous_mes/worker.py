@@ -3,7 +3,10 @@ import logging
 import time
 from uuid import uuid4
 
-from autonomous_mes.application.event_consumers import QualityRecommendationEventPublisher
+from autonomous_mes.application.event_consumers import (
+    QualityRecommendationEventPublisher,
+    SchedulingAgentEventPublisher,
+)
 from autonomous_mes.application.outbox import EventPublisher
 from autonomous_mes.config import Settings
 from autonomous_mes.infrastructure.database import build_engine, build_session_factory
@@ -22,6 +25,11 @@ def main() -> int:
         action="store_true",
         help="generate R2 quality recommendation drafts from OperationCompleted events",
     )
+    parser.add_argument(
+        "--scheduling-agent-auto-plan",
+        action="store_true",
+        help="run the bounded L3 scheduling Agent after relevant manufacturing events",
+    )
     parser.add_argument("--watch", action="store_true", help="continue polling for new events")
     parser.add_argument("--poll-seconds", type=float, default=2.0)
     args = parser.parse_args()
@@ -36,6 +44,25 @@ def main() -> int:
     if args.quality_agent_auto_draft:
         publisher = QualityRecommendationEventPublisher(
             SqlAlchemyWorkOrderStore(sessions), publisher
+        )
+    if args.scheduling_agent_auto_plan:
+        if not settings.scheduling_agent_enabled:
+            parser.error("scheduling Agent is disabled by configuration")
+        workshop_ids = tuple(
+            item.strip()
+            for item in settings.scheduling_agent_workshop_ids.split(",")
+            if item.strip()
+        )
+        if not workshop_ids:
+            parser.error("scheduling Agent requires at least one configured workshop")
+        publisher = SchedulingAgentEventPublisher(
+            SqlAlchemyWorkOrderStore(sessions),
+            publisher,
+            workshop_ids=workshop_ids,
+            horizon_days=settings.scheduling_agent_horizon_days,
+            default_minutes_per_unit=settings.scheduling_agent_default_minutes_per_unit,
+            use_overtime=settings.scheduling_agent_use_overtime,
+            auto_submit=settings.scheduling_agent_auto_submit,
         )
     worker = SqlAlchemyOutboxWorker(
         sessions,

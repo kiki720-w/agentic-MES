@@ -18,7 +18,11 @@ from autonomous_mes.domain.genealogy import (
 from autonomous_mes.domain.master_data import ManufacturingResource
 from autonomous_mes.domain.quality import QualityInspection
 from autonomous_mes.domain.quality_policy import QualityPolicyStatus, QualityRiskPolicy
-from autonomous_mes.domain.scheduling import PlanningResource, SchedulePlan
+from autonomous_mes.domain.scheduling import (
+    PlanningResource,
+    SchedulePlan,
+    SchedulingSnapshot,
+)
 from autonomous_mes.domain.work_order import WorkOrder
 
 
@@ -47,6 +51,7 @@ class InMemoryWorkOrderStore:
         self._planning_resources: dict[str, PlanningResource] = {}
         self._planning_resource_codes: dict[str, str] = {}
         self._schedule_plans: dict[str, SchedulePlan] = {}
+        self._scheduling_snapshots: dict[str, SchedulingSnapshot] = {}
 
     def get(self, work_order_id: str) -> WorkOrder | None:
         with self._lock:
@@ -189,9 +194,7 @@ class InMemoryWorkOrderStore:
                     )
                 ]
             if publish_status:
-                items = [
-                    item for item in items if item["publishStatus"] == publish_status
-                ]
+                items = [item for item in items if item["publishStatus"] == publish_status]
             if before_occurred_at and before_event_id:
                 cursor = (before_occurred_at, before_event_id)
                 items = [
@@ -201,9 +204,7 @@ class InMemoryWorkOrderStore:
                 ]
             return deepcopy(items[offset : offset + limit])
 
-    def count_outbox(
-        self, query: str | None = None, publish_status: str | None = None
-    ) -> int:
+    def count_outbox(self, query: str | None = None, publish_status: str | None = None) -> int:
         with self._lock:
             items = self._outbox
             if query:
@@ -223,9 +224,7 @@ class InMemoryWorkOrderStore:
                     )
                 ]
             if publish_status:
-                items = [
-                    item for item in items if item["publishStatus"] == publish_status
-                ]
+                items = [item for item in items if item["publishStatus"] == publish_status]
             return len(items)
 
     def record_tool_event(self, event: DomainEvent) -> None:
@@ -576,23 +575,24 @@ class InMemoryWorkOrderStore:
         with self._lock:
             inspected = failed = 0
             for inspection in self._inspections.values():
-                if (
-                    inspection.result is None
-                    or (
-                        inspection.work_order_id == work_order_id
-                        and inspection.operation_sequence == operation_sequence
-                    )
+                if inspection.result is None or (
+                    inspection.work_order_id == work_order_id
+                    and inspection.operation_sequence == operation_sequence
                 ):
                     continue
                 order = self._orders.get(inspection.work_order_id)
-                operation = next(
-                    (
-                        item
-                        for item in order.operations
-                        if item.sequence == inspection.operation_sequence
-                    ),
-                    None,
-                ) if order else None
+                operation = (
+                    next(
+                        (
+                            item
+                            for item in order.operations
+                            if item.sequence == inspection.operation_sequence
+                        ),
+                        None,
+                    )
+                    if order
+                    else None
+                )
                 if operation and operation.assigned_resource_id == equipment_id:
                     inspected += 1
                     failed += int(inspection.result == "FAIL")
@@ -613,8 +613,7 @@ class InMemoryWorkOrderStore:
                 if session.work_order_id == work_order_id
                 and session.operation_sequence == operation_sequence
                 for resource in session.resources
-                if resource.resource_type == "TOOL"
-                and resource.life_remaining_percent is not None
+                if resource.resource_type == "TOOL" and resource.life_remaining_percent is not None
             ]
             return {
                 "historicalInspections": inspected,
@@ -710,9 +709,7 @@ class InMemoryWorkOrderStore:
             for _, order, operation in selected
         ]
 
-    def add_quality_policy_atomically(
-        self, policy: QualityRiskPolicy, event: DomainEvent
-    ) -> None:
+    def add_quality_policy_atomically(self, policy: QualityRiskPolicy, event: DomainEvent) -> None:
         with self._lock:
             if any(
                 item.policy_key == policy.policy_key and item.version == policy.version
@@ -766,8 +763,7 @@ class InMemoryWorkOrderStore:
     def list_schedule_plans(self, workshop_id: str, limit: int = 30) -> list[SchedulePlan]:
         with self._lock:
             items = [
-                item for item in self._schedule_plans.values()
-                if item.workshop_id == workshop_id
+                item for item in self._schedule_plans.values() if item.workshop_id == workshop_id
             ]
             items.sort(key=lambda item: item.created_at, reverse=True)
             return deepcopy(items[:limit])
@@ -787,6 +783,52 @@ class InMemoryWorkOrderStore:
             if current is None or current.record_version != expected_record_version:
                 raise InvalidTransition("schedule plan version changed")
             self._schedule_plans[plan.plan_id] = deepcopy(plan)
+            self._append_event(event)
+
+    def get_latest_scheduling_snapshot(self, workshop_id: str) -> SchedulingSnapshot | None:
+        with self._lock:
+            items = [
+                item
+                for item in self._scheduling_snapshots.values()
+                if item.workshop_id == workshop_id
+            ]
+            if not items:
+                return None
+            return deepcopy(max(items, key=lambda item: (item.observed_at, item.created_at)))
+
+    def get_scheduling_snapshot(
+        self, source_system: str, workshop_id: str, source_revision: str
+    ) -> SchedulingSnapshot | None:
+        with self._lock:
+            item = next(
+                (
+                    item
+                    for item in self._scheduling_snapshots.values()
+                    if item.source_system == source_system
+                    and item.workshop_id == workshop_id
+                    and item.source_revision == source_revision
+                ),
+                None,
+            )
+            return deepcopy(item) if item else None
+
+    def add_scheduling_snapshot_atomically(
+        self, snapshot: SchedulingSnapshot, event: DomainEvent
+    ) -> None:
+        with self._lock:
+            duplicate = next(
+                (
+                    item
+                    for item in self._scheduling_snapshots.values()
+                    if item.source_system == snapshot.source_system
+                    and item.workshop_id == snapshot.workshop_id
+                    and item.source_revision == snapshot.source_revision
+                ),
+                None,
+            )
+            if duplicate is not None:
+                raise IdempotencyConflict("scheduling snapshot revision already exists")
+            self._scheduling_snapshots[snapshot.snapshot_id] = deepcopy(snapshot)
             self._append_event(event)
 
     def update_agent_proposal_atomically(

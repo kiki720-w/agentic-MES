@@ -290,6 +290,29 @@ class SchedulePlanRow(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
 
+class SchedulingSnapshotRow(Base):
+    __tablename__ = "scheduling_snapshots"
+    __table_args__ = (
+        UniqueConstraint(
+            "source_system",
+            "workshop_id",
+            "source_revision",
+            name="uq_scheduling_snapshot_source_revision",
+        ),
+    )
+
+    snapshot_id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    source_system: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    workshop_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    source_revision: Mapped[str] = mapped_column(String(128), nullable=False)
+    observed_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, index=True
+    )
+    payload: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
+    checksum: Mapped[str] = mapped_column(String(64), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
 class ProductUnitRow(Base):
     __tablename__ = "product_units"
 
@@ -338,7 +361,9 @@ class ExecutionSessionRow(Base):
     started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     ended_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
-    resource_context: Mapped[list[dict[str, Any]]] = mapped_column(JSON, nullable=False, default=list)
+    resource_context: Mapped[list[dict[str, Any]]] = mapped_column(
+        JSON, nullable=False, default=list
+    )
 
 
 class MaterialConsumptionRow(Base):
@@ -384,4 +409,6 @@ class ConnectorReceiptRow(Base):
     nonce: Mapped[str] = mapped_column(String(128), primary_key=True)
     key_id: Mapped[str] = mapped_column(String(96), nullable=False, index=True)
     request_digest: Mapped[str] = mapped_column(String(64), nullable=False)
-    received_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
+    received_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, index=True
+    )

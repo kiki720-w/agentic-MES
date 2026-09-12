@@ -14,7 +14,11 @@ from autonomous_mes.domain.genealogy import (
 from autonomous_mes.domain.master_data import ManufacturingResource
 from autonomous_mes.domain.quality import QualityInspection
 from autonomous_mes.domain.quality_policy import QualityRiskPolicy
-from autonomous_mes.domain.scheduling import PlanningResource, SchedulePlan
+from autonomous_mes.domain.scheduling import (
+    PlanningResource,
+    SchedulePlan,
+    SchedulingSnapshot,
+)
 from autonomous_mes.domain.work_order import WorkOrder
 
 if TYPE_CHECKING:
@@ -75,9 +79,7 @@ class WorkOrderStore(Protocol):
         publish_status: str | None = None,
     ) -> list[dict[str, Any]]: ...
 
-    def count_outbox(
-        self, query: str | None = None, publish_status: str | None = None
-    ) -> int: ...
+    def count_outbox(self, query: str | None = None, publish_status: str | None = None) -> int: ...
 
 
 class AuthorizationPolicy(Protocol):
@@ -286,6 +288,16 @@ class SchedulingStore(Protocol):
     def add_schedule_plan_atomically(self, plan: SchedulePlan, event: DomainEvent) -> None: ...
     def update_schedule_plan_atomically(
         self, plan: SchedulePlan, expected_record_version: int, event: DomainEvent
+    ) -> None: ...
+
+    def get_latest_scheduling_snapshot(self, workshop_id: str) -> SchedulingSnapshot | None: ...
+
+    def get_scheduling_snapshot(
+        self, source_system: str, workshop_id: str, source_revision: str
+    ) -> SchedulingSnapshot | None: ...
+
+    def add_scheduling_snapshot_atomically(
+        self, snapshot: SchedulingSnapshot, event: DomainEvent
     ) -> None: ...
 
 

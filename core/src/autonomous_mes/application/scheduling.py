@@ -1,12 +1,22 @@
 from dataclasses import dataclass
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from typing import Any
 from uuid import uuid4
 
 from autonomous_mes.domain.equipment import EquipmentState
-from autonomous_mes.domain.errors import NotFound, ValidationError
-from autonomous_mes.domain.scheduling import PlanningResource, SchedulePlan
-from autonomous_mes.domain.work_order import OperationStatus, WorkOrder, WorkOrderStatus
+from autonomous_mes.domain.errors import IdempotencyConflict, NotFound, ValidationError
+from autonomous_mes.domain.scheduling import (
+    PlanningResource,
+    SchedulePlan,
+    SchedulingSnapshot,
+)
+from autonomous_mes.domain.work_order import (
+    FrozenRevisions,
+    OperationStatus,
+    ProductionOperation,
+    WorkOrder,
+    WorkOrderStatus,
+)
 
 from .ports import SchedulingStore
 
@@ -35,6 +45,18 @@ class GenerateScheduleCommand:
     operation_rates: dict[str, float]
     actor_id: str
     correlation_id: str
+    trigger_context: dict[str, Any] | None = None
+
+
+@dataclass(frozen=True)
+class IngestSchedulingSnapshotCommand:
+    source_system: str
+    workshop_id: str
+    source_revision: str
+    observed_at: datetime
+    payload: dict[str, Any]
+    actor_id: str
+    correlation_id: str
 
 
 @dataclass(frozen=True)
@@ -56,9 +78,7 @@ class SchedulingApplicationService:
     def __init__(self, store: SchedulingStore) -> None:
         self._store = store
 
-    def register_resource(
-        self, command: RegisterPlanningResourceCommand
-    ) -> dict[str, Any]:
+    def register_resource(self, command: RegisterPlanningResourceCommand) -> dict[str, Any]:
         resource, event = PlanningResource.create(
             command.code,
             command.name,
@@ -89,19 +109,9 @@ class SchedulingApplicationService:
             raise ValidationError("operation rates must be greater than zero")
 
         days = _working_days(command.horizon_start, command.horizon_days)
-        resources = self._candidates(command.workshop_id)
-        orders = [
-            item
-            for item in self._store.list_work_orders(limit=10_000, include_test=False)
-            if item.workshop_id == command.workshop_id
-            and item.status
-            in {
-                WorkOrderStatus.DRAFT,
-                WorkOrderStatus.RELEASED,
-                WorkOrderStatus.IN_PROGRESS,
-                WorkOrderStatus.SUSPENDED,
-            }
-        ]
+        snapshot = self._store.get_latest_scheduling_snapshot(command.workshop_id)
+        resources = self._candidates(command.workshop_id, snapshot)
+        orders, order_constraints = self._orders(command.workshop_id, snapshot)
         orders.sort(key=lambda item: (-item.priority, item.due_at, item.created_at))
         assignments: list[dict[str, Any]] = []
         shortages: list[dict[str, Any]] = []
@@ -114,13 +124,15 @@ class SchedulingApplicationService:
             if not order.operations:
                 shortages.append(_missing_route_shortage(order))
                 continue
+            blocking_reason = order_constraints.get(order.work_order_id)
+            if blocking_reason:
+                shortages.extend(_blocked_order_shortages(order, command, blocking_reason))
+                continue
             earliest_index = 0
             for operation in order.operations:
                 remaining_quantity = max(
                     0,
-                    operation.planned_quantity
-                    - operation.good_quantity
-                    - operation.scrap_quantity,
+                    operation.planned_quantity - operation.good_quantity - operation.scrap_quantity,
                 )
                 if operation.status is OperationStatus.COMPLETED or remaining_quantity == 0:
                     continue
@@ -136,7 +148,9 @@ class SchedulingApplicationService:
 
                 rate = _rate_for(order, operation.operation_code, command)
                 required = remaining_quantity * rate
-                candidates = _matching_candidates(resources, operation.work_center_id, operation.operation_code)
+                candidates = _matching_candidates(
+                    resources, operation.work_center_id, operation.operation_code
+                )
                 if not candidates:
                     shortages.append(
                         _shortage(
@@ -160,12 +174,11 @@ class SchedulingApplicationService:
                         command.use_overtime,
                     )
                     existing = sum(
-                        value for (resource_id, _), value in loads.items()
+                        value
+                        for (resource_id, _), value in loads.items()
                         if resource_id == candidate.resource_id
                     )
-                    options.append(
-                        (remainder, finish_index, existing, candidate, candidate_plan)
-                    )
+                    options.append((remainder, finish_index, existing, candidate, candidate_plan))
                 remainder, finish_index, _, selected, allocation = min(
                     options, key=lambda item: (item[0], item[1], item[2], item[3].code)
                 )
@@ -236,7 +249,21 @@ class SchedulingApplicationService:
             "defaultMinutesPerUnit": command.default_minutes_per_unit,
             "operationRates": command.operation_rates,
             "equipmentFallbackCapacityMinutes": 480,
+            "inputSource": (
+                {
+                    "type": "EXTERNAL_SCHEDULING_SNAPSHOT",
+                    "snapshotId": snapshot.snapshot_id,
+                    "sourceSystem": snapshot.source_system,
+                    "sourceRevision": snapshot.source_revision,
+                    "observedAt": snapshot.observed_at.isoformat(),
+                    "checksum": snapshot.checksum,
+                }
+                if snapshot
+                else {"type": "SIMULATOR_PROJECTION"}
+            ),
         }
+        if command.trigger_context:
+            parameters.update(command.trigger_context)
         plan, event = SchedulePlan.create_draft(
             command.workshop_id,
             command.horizon_start,
@@ -251,6 +278,32 @@ class SchedulingApplicationService:
         )
         self._store.add_schedule_plan_atomically(plan, event)
         return serialize_schedule_plan(plan)
+
+    def ingest_snapshot(self, command: IngestSchedulingSnapshotCommand) -> dict[str, Any]:
+        snapshot, event = SchedulingSnapshot.create(
+            command.source_system,
+            command.workshop_id,
+            command.source_revision,
+            command.observed_at,
+            command.payload,
+            command.actor_id,
+            command.correlation_id,
+        )
+        existing = self._store.get_scheduling_snapshot(
+            snapshot.source_system, snapshot.workshop_id, snapshot.source_revision
+        )
+        if existing is not None:
+            if existing.checksum != snapshot.checksum:
+                raise IdempotencyConflict(
+                    "snapshot source revision already exists with different content"
+                )
+            return {**serialize_scheduling_snapshot(existing), "reused": True}
+        self._store.add_scheduling_snapshot_atomically(snapshot, event)
+        return {**serialize_scheduling_snapshot(snapshot), "reused": False}
+
+    def latest_snapshot(self, workshop_id: str) -> dict[str, Any] | None:
+        snapshot = self._store.get_latest_scheduling_snapshot(workshop_id)
+        return serialize_scheduling_snapshot(snapshot) if snapshot else None
 
     def list_plans(self, workshop_id: str, limit: int = 30) -> list[dict[str, Any]]:
         return [
@@ -324,9 +377,10 @@ class SchedulingApplicationService:
             and item["resourceId"] == target_resource_id
             and item["productionDate"] == production_date.isoformat()
         )
-        if other_load + float(assignment["plannedWorkMinutes"]) > target.capacity(
-            current.use_overtime
-        ) + 0.001:
+        if (
+            other_load + float(assignment["plannedWorkMinutes"])
+            > target.capacity(current.use_overtime) + 0.001
+        ):
             raise ValidationError("target resource daily capacity would be exceeded")
         changed, event = current.move_assignment(
             version,
@@ -345,9 +399,7 @@ class SchedulingApplicationService:
         self._store.update_schedule_plan_atomically(changed, current.record_version, event)
         return serialize_schedule_plan(changed)
 
-    def approve(
-        self, plan_id: str, version: int, actor_id: str, reason: str
-    ) -> dict[str, Any]:
+    def approve(self, plan_id: str, version: int, actor_id: str, reason: str) -> dict[str, Any]:
         current = self._require(plan_id)
         changed, event = current.approve(version, actor_id, reason, str(uuid4()))
         self._store.update_schedule_plan_atomically(changed, current.record_version, event)
@@ -364,9 +416,7 @@ class SchedulingApplicationService:
         self._store.update_schedule_plan_atomically(changed, current.record_version, event)
         return serialize_schedule_plan(changed)
 
-    def withdraw(
-        self, plan_id: str, version: int, actor_id: str, reason: str
-    ) -> dict[str, Any]:
+    def withdraw(self, plan_id: str, version: int, actor_id: str, reason: str) -> dict[str, Any]:
         current = self._require(plan_id)
         changed, event = current.withdraw(version, actor_id, reason, str(uuid4()))
         self._store.update_schedule_plan_atomically(changed, current.record_version, event)
@@ -378,7 +428,9 @@ class SchedulingApplicationService:
             raise NotFound("schedule plan not found")
         return plan
 
-    def _candidates(self, workshop_id: str) -> list[_Candidate]:
+    def _candidates(
+        self, workshop_id: str, snapshot: SchedulingSnapshot | None = None
+    ) -> list[_Candidate]:
         resources = [
             _Candidate(
                 item.resource_id,
@@ -408,7 +460,122 @@ class SchedulingApplicationService:
             if item.workshop_id == workshop_id
             and item.state in {EquipmentState.IDLE, EquipmentState.RUNNING}
         ]
-        return resources + equipment
+        external = _snapshot_resources(snapshot) if snapshot else []
+        combined = {item.resource_id: item for item in resources + equipment}
+        combined.update({item.resource_id: item for item in external})
+        return list(combined.values())
+
+    def _orders(
+        self, workshop_id: str, snapshot: SchedulingSnapshot | None
+    ) -> tuple[list[WorkOrder], dict[str, str]]:
+        if snapshot is not None:
+            return _snapshot_orders(snapshot)
+        return (
+            [
+                item
+                for item in self._store.list_work_orders(limit=10_000, include_test=False)
+                if item.workshop_id == workshop_id
+                and item.status
+                in {
+                    WorkOrderStatus.DRAFT,
+                    WorkOrderStatus.RELEASED,
+                    WorkOrderStatus.IN_PROGRESS,
+                    WorkOrderStatus.SUSPENDED,
+                }
+            ],
+            {},
+        )
+
+
+def _snapshot_orders(
+    snapshot: SchedulingSnapshot,
+) -> tuple[list[WorkOrder], dict[str, str]]:
+    orders: list[WorkOrder] = []
+    constraints: dict[str, str] = {}
+    for source in snapshot.payload["workOrders"]:
+        work_order_id = str(source["externalId"])
+        order_status = WorkOrderStatus(str(source.get("status", "RELEASED")).upper())
+        if order_status not in {
+            WorkOrderStatus.DRAFT,
+            WorkOrderStatus.RELEASED,
+            WorkOrderStatus.IN_PROGRESS,
+            WorkOrderStatus.SUSPENDED,
+        }:
+            continue
+        operations = [
+            ProductionOperation(
+                int(operation["sequence"]),
+                str(operation["operationCode"]),
+                str(operation["operationName"]),
+                str(operation["workCenterId"]),
+                int(operation.get("plannedQuantity", source["quantity"])),
+                OperationStatus(str(operation.get("status", "PENDING")).upper()),
+                operation.get("assignedResourceId"),
+                int(operation.get("goodQuantity", 0)),
+                int(operation.get("scrapQuantity", 0)),
+            )
+            for operation in source.get("operations", [])
+        ]
+        created_at = datetime.fromisoformat(
+            str(source.get("createdAt") or snapshot.observed_at.isoformat())
+        )
+        updated_at = datetime.fromisoformat(
+            str(source.get("updatedAt") or snapshot.observed_at.isoformat())
+        )
+        orders.append(
+            WorkOrder(
+                work_order_id,
+                str(source["code"]),
+                str(source["productionOrderId"]),
+                snapshot.workshop_id,
+                int(source["quantity"]),
+                datetime.fromisoformat(str(source["dueAt"])),
+                int(source.get("priority", 50)),
+                FrozenRevisions(
+                    str(source["productRevisionId"]),
+                    str(source["routingRevisionId"]),
+                    str(source["bomRevisionId"]),
+                    [str(item) for item in source.get("drawingRevisionIds", [])],
+                ),
+                order_status,
+                int(source.get("version", 1)),
+                created_at,
+                updated_at,
+                operations,
+                [],
+            )
+        )
+        if source.get("materialReady") is False:
+            constraints[work_order_id] = "WMS 显示物料未齐套"
+        elif source.get("qualityHold") is True:
+            constraints[work_order_id] = "QMS 质量冻结尚未解除"
+    return orders, constraints
+
+
+def _snapshot_resources(snapshot: SchedulingSnapshot) -> list[_Candidate]:
+    resources: list[_Candidate] = []
+    for source in snapshot.payload["resources"]:
+        resource_type = str(source["resourceType"]).upper()
+        if not source.get("active", True):
+            continue
+        if resource_type == "EQUIPMENT" and str(source.get("state", "UNKNOWN")).upper() not in {
+            "IDLE",
+            "RUNNING",
+        }:
+            continue
+        resources.append(
+            _Candidate(
+                str(source["externalId"]),
+                str(source["code"]),
+                str(source["name"]),
+                resource_type,
+                str(source["workCenterId"]),
+                float(source["dailyCapacityMinutes"]),
+                float(source.get("overtimeCapacityMinutes", source["dailyCapacityMinutes"])),
+                tuple(str(item).upper() for item in source.get("capabilityCodes", [])),
+            )
+        )
+    return resources
 
 
 def _working_days(start: date, count: int) -> list[date]:
@@ -428,7 +595,11 @@ def _matching_candidates(
         item
         for item in candidates
         if item.work_center_id == work_center_id
-        and (not item.capabilities or "*" in item.capabilities or operation_code.upper() in item.capabilities)
+        and (
+            not item.capabilities
+            or "*" in item.capabilities
+            or operation_code.upper() in item.capabilities
+        )
     ]
     people = [item for item in matching if item.resource_type == "PERSON"]
     return people or matching
@@ -506,6 +677,22 @@ def _missing_route_shortage(order: WorkOrder) -> dict[str, Any]:
     }
 
 
+def _blocked_order_shortages(
+    order: WorkOrder, command: GenerateScheduleCommand, reason: str
+) -> list[dict[str, Any]]:
+    shortages: list[dict[str, Any]] = []
+    for operation in order.operations:
+        if operation.status is OperationStatus.COMPLETED:
+            continue
+        remaining = max(
+            0,
+            operation.planned_quantity - operation.good_quantity - operation.scrap_quantity,
+        )
+        rate = _rate_for(order, operation.operation_code, command)
+        shortages.append(_shortage(order, operation, remaining, remaining * rate, reason))
+    return shortages
+
+
 def serialize_planning_resource(item: PlanningResource) -> dict[str, Any]:
     return {
         "resourceId": item.resource_id,
@@ -547,4 +734,18 @@ def serialize_schedule_plan(item: SchedulePlan) -> dict[str, Any]:
         "withdrawalReason": item.withdrawal_reason,
         "createdAt": item.created_at.isoformat(),
         "updatedAt": item.updated_at.isoformat(),
+    }
+
+
+def serialize_scheduling_snapshot(item: SchedulingSnapshot) -> dict[str, Any]:
+    return {
+        "snapshotId": item.snapshot_id,
+        "sourceSystem": item.source_system,
+        "workshopId": item.workshop_id,
+        "sourceRevision": item.source_revision,
+        "observedAt": item.observed_at.isoformat(),
+        "checksum": item.checksum,
+        "workOrderCount": len(item.payload["workOrders"]),
+        "resourceCount": len(item.payload["resources"]),
+        "createdAt": item.created_at.isoformat(),
     }

@@ -11,6 +11,7 @@ from .model_gateway import (
 )
 from .ports import MesStore
 from .quality import QualityApplicationService
+from .scheduling_agent import SchedulingAgentCommand
 from .work_orders import WorkOrderApplicationService
 
 WRITE_INTENT = re.compile(
@@ -28,6 +29,9 @@ QUALITY_RECOMMENDATION_INTENT = re.compile(
     r"(?:创建|生成|发起).{0,24}(?:检验|质检).{0,12}(?:建议|申请|提案)|"
     r"(?:检验|质检).{0,12}(?:建议|申请|提案)"
 )
+SCHEDULE_REPLAN_INTENT = re.compile(
+    r"(?:重新排产|重排计划|生成排产|运行排产|优化排产|重新安排生产)"
+)
 
 
 class ActionProposalAgent(Protocol):
@@ -38,24 +42,41 @@ class ActionProposalAgent(Protocol):
     ) -> dict[str, Any]: ...
 
 
+class ScheduleProposalAgent(Protocol):
+    def analyze(self, command: SchedulingAgentCommand) -> dict[str, Any]: ...
+
+
 class NaturalLanguageQueryService:
     def __init__(
         self,
         store: MesStore,
         model: NaturalLanguageModel | None,
         action_agent: ActionProposalAgent | None = None,
+        *,
+        scheduling_agent: ScheduleProposalAgent | None = None,
+        scheduling_workshop_id: str = "WS-MACH-01",
+        scheduling_horizon_days: int = 10,
+        scheduling_default_minutes_per_unit: float = 30.0,
+        scheduling_use_overtime: bool = False,
     ) -> None:
         self._orders = WorkOrderApplicationService(store)
         self._equipment = EquipmentApplicationService(store)
         self._quality = QualityApplicationService(store, store)
         self._model = model
         self._action_agent = action_agent
+        self._scheduling_agent = scheduling_agent
+        self._scheduling_workshop_id = scheduling_workshop_id
+        self._scheduling_horizon_days = scheduling_horizon_days
+        self._scheduling_default_minutes_per_unit = scheduling_default_minutes_per_unit
+        self._scheduling_use_overtime = scheduling_use_overtime
 
     def ask(self, question: str) -> dict[str, Any]:
         question = question.strip()
         if not question or len(question) > 500:
             raise ValidationError("question must contain 1 to 500 characters")
         as_of = datetime.now(UTC).isoformat()
+        if SCHEDULE_REPLAN_INTENT.search(question):
+            return self._schedule_proposal(as_of)
         if QUALITY_RECOMMENDATION_INTENT.search(question):
             return self._quality_recommendation(question, as_of)
         if ANALYZE_INCIDENTS_INTENT.search(question):
@@ -114,6 +135,38 @@ class NaturalLanguageQueryService:
             }
         except ModelGatewayError:
             return self._fallback(as_of, objects, orders, equipment, inspections)
+
+    def _schedule_proposal(self, as_of: str) -> dict[str, Any]:
+        if self._scheduling_agent is None:
+            return self._action_rejected(as_of, "排产智能体不可用。", [])
+        result = self._scheduling_agent.analyze(
+            SchedulingAgentCommand(
+                self._scheduling_workshop_id,
+                datetime.now(UTC).date(),
+                self._scheduling_horizon_days,
+                self._scheduling_use_overtime,
+                self._scheduling_default_minutes_per_unit,
+                {},
+            )
+        )
+        plan = result["plan"]
+        reused = bool(result["reused"])
+        if plan["status"] == "PENDING_APPROVAL":
+            outcome = "已复用待审批排产方案" if reused else "已生成排产方案并提交人工审批"
+        else:
+            outcome = "已生成排产草稿，但输入数据或产能仍需补齐"
+        return {
+            "answer": (
+                f"{outcome}，共 {len(plan['assignments'])} 项工序分配、"
+                f"{len(plan['shortages'])} 项缺口。L3 智能体不能批准或发布计划。"
+            ),
+            "source": "POLICY",
+            "model": None,
+            "policyDecision": result["decision"],
+            "asOf": as_of,
+            "sourceObjects": [{"type": "SchedulePlan", "id": str(plan["planId"])}],
+            "schedulingAgentResult": result,
+        }
 
     def _analyze_incidents(self, as_of: str) -> dict[str, Any]:
         if self._action_agent is None:

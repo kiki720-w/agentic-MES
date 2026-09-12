@@ -17,6 +17,13 @@ class Settings(BaseSettings):
     deepseek_timeout_seconds: float = 12.0
     agent_l3_execution_enabled: bool = False
     agent_l3_approver_ids: str = ""
+    scheduling_agent_enabled: bool = True
+    scheduling_agent_auto_submit: bool = True
+    scheduling_agent_workshop_ids: str = "WS-MACH-01"
+    scheduling_agent_horizon_days: int = 10
+    scheduling_agent_default_minutes_per_unit: float = 30.0
+    scheduling_agent_use_overtime: bool = False
+    simulator_mode: bool = False
     deployment_mode: str = "FACTORY_EDGE"
     organization_id: str = "ORG-DEMO"
     factory_id: str = "FACTORY-DEMO"
