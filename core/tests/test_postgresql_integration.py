@@ -9,9 +9,14 @@ from sqlalchemy import create_engine, func, select
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session, sessionmaker
 
+from autonomous_mes.application.genealogy import (
+    GenealogyApplicationService,
+    RegisterProductUnitCommand,
+)
 from autonomous_mes.application.outbox import OutboxMessage
 from autonomous_mes.application.work_orders import (
     CreateWorkOrderCommand,
+    ReleaseWorkOrderCommand,
     WorkOrderApplicationService,
 )
 from autonomous_mes.domain.errors import IdempotencyConflict
@@ -101,6 +106,31 @@ class PostgreSqlIntegrationTests(unittest.TestCase):
 
         self.assertEqual(sum(claimed), len(publisher.event_ids))
         self.assertEqual(len(publisher.event_ids), len(set(publisher.event_ids)))
+
+    def test_product_unit_and_links_commit_in_one_postgresql_transaction(self) -> None:
+        store = SqlAlchemyWorkOrderStore(self.sessions)
+        orders = WorkOrderApplicationService(store)
+        suffix = uuid4().hex
+        created = orders.create(self._command(suffix))
+        released = orders.release(
+            ReleaseWorkOrderCommand(
+                f"pg-release-{suffix}",
+                f"pg-genealogy-{suffix}",
+                str(created["workOrderId"]),
+                int(created["version"]),
+                "planner-1",
+            )
+        )
+        serial = f"SN-PG-{suffix}"
+
+        registered = GenealogyApplicationService(store).register(
+            RegisterProductUnitCommand(
+                f"pg-serial-{suffix}", serial, str(released["workOrderId"]), "operator-1"
+            )
+        )
+
+        self.assertEqual(serial.upper(), registered["productSerial"])
+        self.assertGreaterEqual(len(registered["links"]), 4)
 
 
 if __name__ == "__main__":

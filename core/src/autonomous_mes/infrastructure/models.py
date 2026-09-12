@@ -173,3 +173,37 @@ class QualityInspectionRow(Base):
     rework_route: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class ProductUnitRow(Base):
+    __tablename__ = "product_units"
+
+    product_serial: Mapped[str] = mapped_column(String(96), primary_key=True)
+    work_order_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
+    product_revision_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    genealogy_status: Mapped[str] = mapped_column(String(32), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class GenealogyLinkRow(Base):
+    __tablename__ = "genealogy_links"
+    __table_args__ = (
+        UniqueConstraint(
+            "product_serial",
+            "relation_type",
+            "object_type",
+            "object_id",
+            "operation_sequence",
+            name="uq_genealogy_link_fact",
+        ),
+    )
+
+    link_id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    product_serial: Mapped[str] = mapped_column(
+        String(96), ForeignKey("product_units.product_serial"), nullable=False, index=True
+    )
+    relation_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    object_type: Mapped[str] = mapped_column(String(64), nullable=False)
+    object_id: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
+    operation_sequence: Mapped[int | None] = mapped_column(Integer)
+    occurred_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)

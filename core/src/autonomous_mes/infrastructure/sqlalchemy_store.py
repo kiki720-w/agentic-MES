@@ -10,6 +10,7 @@ from autonomous_mes.domain.agent import AgentProposal, ProposalStatus
 from autonomous_mes.domain.equipment import Equipment, EquipmentState, TelemetrySample
 from autonomous_mes.domain.errors import IdempotencyConflict, InvalidTransition
 from autonomous_mes.domain.events import DomainEvent
+from autonomous_mes.domain.genealogy import GenealogyLink, ProductUnit
 from autonomous_mes.domain.quality import InspectionStatus, QualityInspection
 from autonomous_mes.domain.work_order import (
     FrozenRevisions,
@@ -25,7 +26,9 @@ from .models import (
     EquipmentRow,
     EquipmentTelemetryRow,
     EventOutboxRow,
+    GenealogyLinkRow,
     IdempotencyRecordRow,
+    ProductUnitRow,
     QualityInspectionRow,
     WorkOrderRow,
 )
@@ -279,6 +282,51 @@ class SqlAlchemyWorkOrderStore:
                 raise InvalidTransition("quality inspection version changed")
             session.add_all(_event_rows([event]))
 
+    def get_product_unit(self, product_serial: str) -> ProductUnit | None:
+        with self._sessions() as session:
+            row = session.get(ProductUnitRow, product_serial)
+            return _product_unit_to_domain(row) if row else None
+
+    def list_genealogy_links(self, product_serial: str) -> list[GenealogyLink]:
+        with self._sessions() as session:
+            rows = session.scalars(
+                select(GenealogyLinkRow)
+                .where(GenealogyLinkRow.product_serial == product_serial)
+                .order_by(GenealogyLinkRow.occurred_at, GenealogyLinkRow.link_id)
+            ).all()
+            return [_genealogy_link_to_domain(row) for row in rows]
+
+    def add_product_unit_atomically(
+        self, unit: ProductUnit, links: list[GenealogyLink], event: DomainEvent
+    ) -> None:
+        try:
+            with self._sessions.begin() as session:
+                session.add(
+                    ProductUnitRow(
+                        product_serial=unit.product_serial,
+                        work_order_id=unit.work_order_id,
+                        product_revision_id=unit.product_revision_id,
+                        genealogy_status=unit.genealogy_status,
+                        created_at=unit.created_at,
+                    )
+                )
+                session.flush()
+                session.add_all(
+                    GenealogyLinkRow(
+                        link_id=item.link_id,
+                        product_serial=item.product_serial,
+                        relation_type=item.relation_type,
+                        object_type=item.object_type,
+                        object_id=item.object_id,
+                        operation_sequence=item.operation_sequence,
+                        occurred_at=item.occurred_at,
+                    )
+                    for item in links
+                )
+                session.add_all(_event_rows([event]))
+        except IntegrityError as exc:
+            raise IdempotencyConflict("product serial already exists") from exc
+
 
 def _row_values(item: WorkOrder) -> dict[str, Any]:
     return {
@@ -499,4 +547,26 @@ def _inspection_to_domain(row: QualityInspectionRow) -> QualityInspection:
         list(row.rework_route),
         row.created_at,
         row.updated_at,
+    )
+
+
+def _product_unit_to_domain(row: ProductUnitRow) -> ProductUnit:
+    return ProductUnit(
+        row.product_serial,
+        row.work_order_id,
+        row.product_revision_id,
+        row.genealogy_status,
+        row.created_at,
+    )
+
+
+def _genealogy_link_to_domain(row: GenealogyLinkRow) -> GenealogyLink:
+    return GenealogyLink(
+        row.link_id,
+        row.product_serial,
+        row.relation_type,
+        row.object_type,
+        row.object_id,
+        row.operation_sequence,
+        row.occurred_at,
     )

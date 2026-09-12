@@ -72,6 +72,28 @@ class ApiContractTests(unittest.TestCase):
         self.assertEqual(201, second.status_code)
         self.assertEqual(first["workOrderId"], second.json()["workOrderId"])
 
+    def test_product_serial_genealogy_api(self):
+        _, _, created = self._create()
+        released = self.client.post(
+            f"/api/v1/work-orders/{created['workOrderId']}/release",
+            json={"expectedVersion": created["version"], "actorId": "planner-1"},
+            headers={"Idempotency-Key": f"release-{uuid4().hex}"},
+        ).json()
+        serial = f"SN-API-{uuid4().hex[:8]}"
+        registered = self.client.post(
+            "/api/v1/genealogy/product-units",
+            json={
+                "productSerial": serial,
+                "workOrderId": released["workOrderId"],
+                "actorId": "operator-1",
+            },
+        )
+        self.assertEqual(201, registered.status_code, registered.text)
+        traced = self.client.get(f"/api/v1/genealogy/product-units/{serial}")
+        self.assertEqual(200, traced.status_code, traced.text)
+        self.assertEqual(serial.upper(), traced.json()["productSerial"])
+        self.assertGreaterEqual(len(traced.json()["links"]), 4)
+
     def test_release_and_agent_scope(self):
         _, _, created = self._create()
         work_order_id = created["workOrderId"]

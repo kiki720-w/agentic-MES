@@ -13,6 +13,10 @@ from autonomous_mes.application.equipment import (
     RecordTelemetryCommand,
     RegisterEquipmentCommand,
 )
+from autonomous_mes.application.genealogy import (
+    GenealogyApplicationService,
+    RegisterProductUnitCommand,
+)
 from autonomous_mes.application.natural_language import NaturalLanguageQueryService
 from autonomous_mes.application.ports import MesStore
 from autonomous_mes.application.quality import CreateInspectionCommand, QualityApplicationService
@@ -139,6 +143,13 @@ class NaturalLanguageBody(BaseModel):
     question: str = Field(min_length=1, max_length=500)
 
 
+class RegisterProductUnitBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    productSerial: str = Field(min_length=1, max_length=96)
+    workOrderId: str
+    actorId: str
+
+
 settings = Settings()
 
 
@@ -178,6 +189,7 @@ natural_language_service = NaturalLanguageQueryService(
     store, deepseek_model_gateway, incident_agent
 )
 quality_service = QualityApplicationService(store, store)
+genealogy_service = GenealogyApplicationService(store)
 policy = ScopedReadPolicy({"demo-planner": {"WS-MACH-01"}})
 get_work_order_tool = GetWorkOrderTool(store, policy, store)
 app = FastAPI(title="Autonomous MES Core", version="0.1.0")
@@ -297,6 +309,20 @@ def list_agent_proposals(limit: int = 100) -> dict[str, object]:
 def list_quality_inspections(limit: int = 100) -> dict[str, object]:
     items = quality_service.list(limit)
     return {"items": items, "count": len(items)}
+
+
+@app.post("/api/v1/genealogy/product-units", status_code=201)
+def register_product_unit(body: RegisterProductUnitBody) -> dict[str, object]:
+    return genealogy_service.register(
+        RegisterProductUnitCommand(
+            str(uuid4()), body.productSerial, body.workOrderId, body.actorId
+        )
+    )
+
+
+@app.get("/api/v1/genealogy/product-units/{product_serial}")
+def get_product_genealogy(product_serial: str) -> dict[str, object]:
+    return genealogy_service.get(product_serial)
 
 
 @app.post("/api/v1/quality/inspections", status_code=201)

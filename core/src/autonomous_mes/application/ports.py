@@ -4,6 +4,7 @@ from typing import Any, Protocol
 from autonomous_mes.domain.agent import AgentProposal, ProposalStatus
 from autonomous_mes.domain.equipment import Equipment, TelemetrySample
 from autonomous_mes.domain.events import DomainEvent
+from autonomous_mes.domain.genealogy import GenealogyLink, ProductUnit
 from autonomous_mes.domain.quality import QualityInspection
 from autonomous_mes.domain.work_order import WorkOrder
 
@@ -92,7 +93,21 @@ class QualityStore(Protocol):
     ) -> None: ...
 
 
+class GenealogyStore(Protocol):
+    def get_product_unit(self, product_serial: str) -> ProductUnit | None: ...
+    def list_genealogy_links(self, product_serial: str) -> list[GenealogyLink]: ...
+    def add_product_unit_atomically(
+        self, unit: ProductUnit, links: list[GenealogyLink], event: DomainEvent
+    ) -> None: ...
+
+
 class MesStore(
-    WorkOrderStore, EquipmentStore, AgentProposalStore, QualityStore, ToolAuditSink, Protocol
+    WorkOrderStore,
+    EquipmentStore,
+    AgentProposalStore,
+    QualityStore,
+    GenealogyStore,
+    ToolAuditSink,
+    Protocol,
 ):
     """Combined persistence port used by the current vertical slice."""

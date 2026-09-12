@@ -32,6 +32,8 @@ uvicorn autonomous_mes.api:app --app-dir src --reload
 - `POST /api/v1/equipment`
 - `GET /api/v1/equipment`
 - `POST /api/v1/equipment/{equipmentId}/telemetry`
+- `POST /api/v1/genealogy/product-units`
+- `GET /api/v1/genealogy/product-units/{productSerial}`
 - `POST /api/v1/agent-tools/get-work-order`
 - `POST /api/v1/agent/incidents/analyze`
 - `POST /api/v1/agent/chat`：基于 MES 实时快照的查询，以及受控自然语言动作提案
@@ -43,6 +45,8 @@ uvicorn autonomous_mes.api:app --app-dir src --reload
 - `GET /`：可视化生产控制台HTML
 
 API支持内存适配器和PostgreSQL持久化适配器。DeepSeek 可通过供应商中立模型网关提供诊断解释；模型只接收最小化的结构化设备/工单事实，不获得数据库连接和 MES 工具。未配置密钥或调用失败时自动回退到规则解释。
+
+产品序列号谱系使用只追加的`product_units`和`genealogy_links`保存。登记序列号时，从工单冻结快照固化工单、产品版本、工艺路线、BOM、图纸，以及已绑定的工序和设备关系；追溯查询同时聚合该工单的质量检验结果。页面“事件追溯”区支持按序列号查询。
 
 ## 数据库开发
 

@@ -7,6 +7,7 @@ from autonomous_mes.domain.agent import AgentProposal, ProposalStatus
 from autonomous_mes.domain.equipment import Equipment, TelemetrySample
 from autonomous_mes.domain.errors import Forbidden, IdempotencyConflict, InvalidTransition
 from autonomous_mes.domain.events import DomainEvent
+from autonomous_mes.domain.genealogy import GenealogyLink, ProductUnit
 from autonomous_mes.domain.quality import QualityInspection
 from autonomous_mes.domain.work_order import WorkOrder
 
@@ -26,6 +27,8 @@ class InMemoryWorkOrderStore:
         self._agent_proposals: dict[str, AgentProposal] = {}
         self._proposal_fingerprints: dict[str, str] = {}
         self._inspections: dict[str, QualityInspection] = {}
+        self._product_units: dict[str, ProductUnit] = {}
+        self._genealogy_links: dict[str, list[GenealogyLink]] = {}
 
     def get(self, work_order_id: str) -> WorkOrder | None:
         with self._lock:
@@ -227,6 +230,24 @@ class InMemoryWorkOrderStore:
             if current is None or current.status is not expected_status:
                 raise InvalidTransition("agent proposal status changed")
             self._agent_proposals[proposal.proposal_id] = deepcopy(proposal)
+            self._append_event(event)
+
+    def get_product_unit(self, product_serial: str) -> ProductUnit | None:
+        with self._lock:
+            return deepcopy(self._product_units.get(product_serial))
+
+    def list_genealogy_links(self, product_serial: str) -> list[GenealogyLink]:
+        with self._lock:
+            return deepcopy(self._genealogy_links.get(product_serial, []))
+
+    def add_product_unit_atomically(
+        self, unit: ProductUnit, links: list[GenealogyLink], event: DomainEvent
+    ) -> None:
+        with self._lock:
+            if unit.product_serial in self._product_units:
+                raise IdempotencyConflict("product serial already exists")
+            self._product_units[unit.product_serial] = deepcopy(unit)
+            self._genealogy_links[unit.product_serial] = deepcopy(links)
             self._append_event(event)
 
 
