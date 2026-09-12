@@ -127,6 +127,9 @@ class ManufacturingResourceStore(Protocol):
     def update_manufacturing_resource_atomically(
         self, resource: ManufacturingResource, expected_version: int, event: DomainEvent
     ) -> None: ...
+    def add_manufacturing_resources_atomically(
+        self, resources: list[ManufacturingResource], events: list[DomainEvent]
+    ) -> None: ...
 
 
 class MesStore(

@@ -3,7 +3,7 @@ from pathlib import Path
 from uuid import uuid4
 
 from fastapi import FastAPI, Header, Request
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse
 from pydantic import BaseModel, ConfigDict, Field
 
 from autonomous_mes.application.agent_runtime import FallbackNarrator, IncidentResponseAgent
@@ -179,6 +179,17 @@ class UpdateManufacturingResourceBody(BaseModel):
     lifeRemainingPercent: float | None = None
     calibrationDueAt: datetime | None = None
     sourceUpdatedAt: datetime
+    actorId: str
+
+
+class PreviewResourceCsvBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    csvText: str
+    sourceSystem: str = "MES"
+
+
+class ImportResourceCsvBody(PreviewResourceCsvBody):
+    expectedPreviewId: str
     actorId: str
 
 
@@ -533,6 +544,31 @@ def update_manufacturing_resource(body: UpdateManufacturingResourceBody) -> dict
             body.calibrationDueAt,
             body.sourceUpdatedAt,
         )
+    )
+
+
+@app.get("/api/v1/master-data/manufacturing-resources/import-template")
+def manufacturing_resource_import_template() -> PlainTextResponse:
+    header = (
+        "resourceType,resourceId,revision,name,status,lifeRemainingPercent,"
+        "calibrationDueAt,externalReference,sourceUpdatedAt\n"
+    )
+    return PlainTextResponse(header, media_type="text/csv")
+
+
+@app.post("/api/v1/master-data/manufacturing-resources/import-preview")
+def preview_manufacturing_resource_csv(body: PreviewResourceCsvBody) -> dict[str, object]:
+    return master_data_service.preview_csv(body.csvText, body.sourceSystem)
+
+
+@app.post("/api/v1/master-data/manufacturing-resources/import")
+def import_manufacturing_resource_csv(body: ImportResourceCsvBody) -> dict[str, object]:
+    return master_data_service.import_csv(
+        body.csvText,
+        body.sourceSystem,
+        body.expectedPreviewId,
+        body.actorId,
+        str(uuid4()),
     )
 
 

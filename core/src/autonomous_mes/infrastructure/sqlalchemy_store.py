@@ -481,6 +481,36 @@ class SqlAlchemyWorkOrderStore:
                 raise InvalidTransition("manufacturing resource version changed")
             session.add_all(_event_rows([event]))
 
+    def add_manufacturing_resources_atomically(
+        self, resources: list[ManufacturingResource], events: list[DomainEvent]
+    ) -> None:
+        try:
+            with self._sessions.begin() as session:
+                session.add_all(
+                    ManufacturingResourceRow(
+                        resource_key=item.key,
+                        resource_type=item.resource_type,
+                        resource_id=item.resource_id,
+                        revision=item.revision,
+                        name=item.name,
+                        status=item.status,
+                        life_remaining_percent=item.life_remaining_percent,
+                        calibration_due_at=item.calibration_due_at,
+                        source_system=item.source_system,
+                        external_reference=item.external_reference,
+                        source_updated_at=item.source_updated_at,
+                        version=item.version,
+                        created_at=item.created_at,
+                        updated_at=item.updated_at,
+                    )
+                    for item in resources
+                )
+                session.add_all(_event_rows(events))
+        except IntegrityError as exc:
+            raise IdempotencyConflict(
+                "manufacturing resource batch contains duplicate key"
+            ) from exc
+
 
 def _row_values(item: WorkOrder) -> dict[str, Any]:
     return {

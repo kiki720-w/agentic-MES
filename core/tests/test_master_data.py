@@ -93,6 +93,43 @@ class ManufacturingResourceMasterTests(unittest.TestCase):
                 )
             )
 
+    def test_csv_preview_then_atomic_import(self) -> None:
+        now = datetime.now(UTC).isoformat()
+        csv_text = (
+            "resourceType,resourceId,revision,name,status,lifeRemainingPercent,"
+            "calibrationDueAt,externalReference,sourceUpdatedAt\n"
+            f"TOOL,T-BATCH-1,,批量刀具,AVAILABLE,70,,,${now}\n"
+            f"NC_PROGRAM,P-BATCH-1,R3,批量程序,RELEASED,,,,{now}\n"
+        ).replace("$", "")
+        preview = self.service.preview_csv(csv_text, "MES")
+        self.assertEqual(2, preview["validCount"])
+        self.assertEqual(0, preview["errorCount"])
+        result = self.service.import_csv(
+            csv_text,
+            "MES",
+            str(preview["previewId"]),
+            "importer",
+            "batch-import",
+        )
+        self.assertEqual(2, result["importedCount"])
+        self.assertEqual(2, len(self.service.list()))
+
+    def test_csv_import_rejects_changed_or_invalid_preview(self) -> None:
+        now = datetime.now(UTC).isoformat()
+        csv_text = (
+            "resourceType,resourceId,revision,name,status,lifeRemainingPercent,"
+            "calibrationDueAt,externalReference,sourceUpdatedAt\n"
+            f"TOOL,T-BAD,,坏刀具,AVAILABLE,not-a-number,,,{now}\n"
+        )
+        preview = self.service.preview_csv(csv_text, "MES")
+        self.assertEqual(1, preview["errorCount"])
+        with self.assertRaises(ValidationError):
+            self.service.import_csv(
+                csv_text, "MES", str(preview["previewId"]), "importer", "bad-import"
+            )
+        with self.assertRaisesRegex(Exception, "changed after preview"):
+            self.service.import_csv(csv_text, "MES", "wrong", "importer", "changed-import")
+
 
 if __name__ == "__main__":
     unittest.main()

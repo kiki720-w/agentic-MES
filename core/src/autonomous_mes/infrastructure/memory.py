@@ -321,6 +321,21 @@ class InMemoryWorkOrderStore:
             self._manufacturing_resources[resource.key] = deepcopy(resource)
             self._append_event(event)
 
+    def add_manufacturing_resources_atomically(
+        self, resources: list[ManufacturingResource], events: list[DomainEvent]
+    ) -> None:
+        with self._lock:
+            keys = [item.key for item in resources]
+            if len(keys) != len(set(keys)) or any(
+                key in self._manufacturing_resources for key in keys
+            ):
+                raise IdempotencyConflict("manufacturing resource batch contains duplicate key")
+            self._manufacturing_resources.update(
+                {item.key: deepcopy(item) for item in resources}
+            )
+            for event in events:
+                self._append_event(event)
+
 
 class ScopedReadPolicy:
     def __init__(self, grants: dict[str, set[str]]) -> None:
