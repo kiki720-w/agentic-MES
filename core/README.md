@@ -71,6 +71,8 @@ Worker通过数据库租约领取事件；失败会指数退避，超过上限�
 
 自然语言接口已开放第一项受控动作：输入“请恢复工单 WO-...”时，系统先要求明确工单号，再读取实时状态并调用异常处置Agent生成或复用`RESUME_OPERATION`提案。响应策略为`REQUIRE_APPROVAL`，不会在对话请求中执行复工；只有主管在提案区审批、且执行时安全检查仍通过，MES应用服务才会改变生产状态。其他未显式开放的写指令继续被策略层拒绝。
 
+输入“分析当前设备异常并生成建议”可通过自然语言触发全局异常扫描。Agent对暂停工单形成去重提案：设备健康时生成`PENDING_APPROVAL`复工提案，设备异常时生成`OBSERVED`保持停机结论。该安全自动化会记录分析结果和Outbox事件，但不会直接改变工单或设备状态。
+
 启用 DeepSeek 时只需在本机 `.env` 设置 `AUTONOMOUS_MES_DEEPSEEK_API_KEY` 并重启 API。默认使用 `deepseek-v4-flash`、JSON 输出、关闭思考模式和 12 秒超时。每条提案记录 `narrativeSource` 与 `modelName`；不要把真实密钥写入仓库。
 
 ### 本机D盘免安装环境

@@ -37,6 +37,7 @@
 - `docs/step-8-deepseek-gateway-acceptance.md`：DeepSeek 诊断解释网关与安全降级验收记录
 - `docs/step-9-natural-language-interface-acceptance.md`：只读自然语言生产查询与写意图拦截验收记录
 - `docs/step-10-governed-natural-language-action-acceptance.md`：自然语言复工提案、审批门和执行隔离验收记录
+- `docs/step-11-natural-language-incident-analysis-acceptance.md`：自然语言触发异常分析与提案分级验收记录
 
 ## 当前决策门
 

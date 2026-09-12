@@ -19,6 +19,10 @@ WRITE_INTENT = re.compile(
 )
 RESUME_INTENT = re.compile(r"(?:复工|恢复)", re.IGNORECASE)
 WORK_ORDER_CODE = re.compile(r"\bWO-[A-Z0-9-]+\b", re.IGNORECASE)
+ANALYZE_INCIDENTS_INTENT = re.compile(
+    r"(?:分析|诊断|检查|排查).{0,12}(?:异常|停机|暂停|故障)|"
+    r"(?:异常|停机|暂停|故障).{0,12}(?:分析|诊断|检查|排查)"
+)
 
 
 class ActionProposalAgent(Protocol):
@@ -43,6 +47,8 @@ class NaturalLanguageQueryService:
         if not question or len(question) > 500:
             raise ValidationError("question must contain 1 to 500 characters")
         as_of = datetime.now(UTC).isoformat()
+        if ANALYZE_INCIDENTS_INTENT.search(question):
+            return self._analyze_incidents(as_of)
         if WRITE_INTENT.search(question):
             resume = self._resume_proposal(question, as_of)
             if resume is not None:
@@ -97,6 +103,30 @@ class NaturalLanguageQueryService:
             }
         except ModelGatewayError:
             return self._fallback(as_of, objects, orders, equipment, inspections)
+
+    def _analyze_incidents(self, as_of: str) -> dict[str, Any]:
+        if self._action_agent is None:
+            return self._action_rejected(as_of, "异常分析服务不可用。", [])
+        proposals = self._action_agent.analyze()
+        pending = [item for item in proposals if item["status"] == "PENDING_APPROVAL"]
+        observed = [item for item in proposals if item["status"] == "OBSERVED"]
+        references = [
+            {"type": "AgentProposal", "id": str(item["proposalId"])}
+            for item in proposals
+        ]
+        return {
+            "answer": (
+                f"异常分析已完成，共检查到 {len(proposals)} 个暂停工单："
+                f"{len(pending)} 个形成待审批复工提案，{len(observed)} 个保持停机观察。"
+                "分析没有直接改变任何生产状态。"
+            ),
+            "source": "POLICY",
+            "model": next((item["modelName"] for item in proposals if item["modelName"]), None),
+            "policyDecision": "EXECUTED_SAFE_ANALYSIS",
+            "asOf": as_of,
+            "sourceObjects": references,
+            "actionProposals": proposals,
+        }
 
     def _resume_proposal(self, question: str, as_of: str) -> dict[str, Any] | None:
         if not RESUME_INTENT.search(question):

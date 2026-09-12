@@ -54,3 +54,29 @@ class NaturalLanguageQueryTests(unittest.TestCase):
         self.assertEqual("REQUIRE_APPROVAL", result["policyDecision"])
         self.assertEqual("proposal-1", result["actionProposal"]["proposalId"])
         model.answer.assert_not_called()
+
+    def test_incident_analysis_runs_agent_without_executing_proposals(self) -> None:
+        model = Mock()
+        action_agent = Mock()
+        action_agent.analyze.return_value = [
+            {
+                "proposalId": "proposal-1",
+                "status": "PENDING_APPROVAL",
+                "modelName": "fake-model",
+            },
+            {
+                "proposalId": "proposal-2",
+                "status": "OBSERVED",
+                "modelName": "fake-model",
+            },
+        ]
+
+        result = NaturalLanguageQueryService(
+            InMemoryWorkOrderStore(), model, action_agent
+        ).ask("请分析当前设备异常并生成建议")
+
+        self.assertEqual("EXECUTED_SAFE_ANALYSIS", result["policyDecision"])
+        self.assertEqual(2, len(result["actionProposals"]))
+        self.assertIn("1 个形成待审批复工提案", result["answer"])
+        action_agent.analyze.assert_called_once_with()
+        model.answer.assert_not_called()
