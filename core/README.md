@@ -27,6 +27,7 @@ uvicorn autonomous_mes.api:app --app-dir src --reload
 - `POST /api/v1/agent-tools/get-work-order`
 - `GET /health/live`
 - `GET /health/ready`
+- `GET /`：可视化生产控制台HTML
 
 当前API使用内存适配器，只用于验证领域切片；下一切片将增加PostgreSQL/Alembic适配器。模型网关尚未连接，Agent工具可直接进行确定性契约测试。
 
@@ -48,3 +49,5 @@ docker compose up -d postgres
 ```
 
 Worker通过数据库租约领取事件；失败会指数退避，超过上限进入`QUARANTINED`，支持陈旧租约恢复和带操作者/原因的人工重放。
+
+启动服务后访问`http://127.0.0.1:8000/`，可以查看工单指标、制造事件流并创建演示工单。该页面使用原生HTML/CSS/JavaScript，无需Node构建环境。

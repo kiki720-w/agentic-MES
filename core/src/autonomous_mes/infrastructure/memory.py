@@ -28,6 +28,11 @@ class InMemoryWorkOrderStore:
             work_order_id = self._human_codes.get(human_code)
             return self.get(work_order_id) if work_order_id else None
 
+    def list_work_orders(self, limit: int = 100) -> list[WorkOrder]:
+        with self._lock:
+            items = sorted(self._orders.values(), key=lambda item: item.updated_at, reverse=True)
+            return deepcopy(items[:limit])
+
     def get_idempotent_result(self, idempotency_key: str) -> IdempotentResult | None:
         with self._lock:
             return self._idempotency.get(idempotency_key)

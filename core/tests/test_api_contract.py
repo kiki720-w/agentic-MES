@@ -46,6 +46,19 @@ class ApiContractTests(unittest.TestCase):
             self.client.get("/health/ready").json(),
         )
 
+    def test_dashboard_and_read_models_are_available(self):
+        dashboard = self.client.get("/")
+        self.assertEqual(200, dashboard.status_code)
+        self.assertIn("AGENTIC", dashboard.text)
+        self.assertIn("生产控制台", dashboard.text)
+
+        orders = self.client.get("/api/v1/work-orders")
+        outbox = self.client.get("/api/v1/system/outbox")
+        self.assertEqual(200, orders.status_code)
+        self.assertIn("items", orders.json())
+        self.assertEqual(200, outbox.status_code)
+        self.assertIn("items", outbox.json())
+
     def test_create_is_idempotent_over_http(self):
         body, key, first = self._create()
         second = self.client.post(

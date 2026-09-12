@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Agentic MES · 生产控制台</title>
+  <style>
+    :root{--bg:#07111f;--panel:#0d1b2d;--line:#203550;--text:#e8f0f7;--muted:#8ea6bd;--cyan:#3dd9c5;--blue:#4d8dff;--amber:#ffbd59}
+    *{box-sizing:border-box}body{margin:0;color:var(--text);background:radial-gradient(circle at 85% 0,#122b49 0,transparent 34%),var(--bg);font:14px/1.5 Inter,"Segoe UI",sans-serif}
+    header{display:flex;justify-content:space-between;align-items:center;padding:22px 28px;border-bottom:1px solid var(--line);background:#081422dd;position:sticky;top:0;backdrop-filter:blur(12px);z-index:2}
+    h1{margin:0;font-size:21px;letter-spacing:.04em}h1 span,.accent{color:var(--cyan)}.health{display:flex;gap:12px;align-items:center;color:var(--muted)}.dot{width:9px;height:9px;border-radius:50%;background:var(--cyan);box-shadow:0 0 14px var(--cyan)}
+    main{max-width:1440px;margin:auto;padding:24px}.metrics{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:18px}.card,.panel{background:linear-gradient(145deg,#0f2034,#0b1727);border:1px solid var(--line);border-radius:14px;box-shadow:0 12px 30px #0004}.card{padding:18px}.label{color:var(--muted);text-transform:uppercase;letter-spacing:.1em;font-size:11px}.value{font-size:31px;font-weight:700;margin-top:5px}
+    .grid{display:grid;grid-template-columns:minmax(0,1.8fr) minmax(320px,1fr);gap:18px}.panel{overflow:hidden}.panel-head{padding:16px 18px;display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid var(--line)}h2{margin:0;font-size:15px}button{border:0;border-radius:8px;padding:9px 13px;color:#06131c;background:var(--cyan);font-weight:700;cursor:pointer}button.secondary{color:var(--text);background:#18314d;border:1px solid #2d4b6a}
+    table{width:100%;border-collapse:collapse}th,td{padding:12px 16px;text-align:left;border-bottom:1px solid #172a40}th{color:var(--muted);font-size:11px;letter-spacing:.06em}tbody tr:hover{background:#11263c}.mono{font-family:"Cascadia Code",monospace;font-size:12px}.badge{display:inline-block;padding:3px 8px;border-radius:999px;font-size:11px;font-weight:700;background:#18314d;color:#a9c8e7}.badge.RELEASED,.badge.PUBLISHED{background:#103b37;color:#70eadb}.badge.DRAFT,.badge.PENDING{background:#42351b;color:#ffd27d}
+    .events{max-height:490px;overflow:auto}.event{padding:13px 17px;border-bottom:1px solid #172a40;display:grid;grid-template-columns:10px 1fr;gap:11px}.event i{width:8px;height:8px;border-radius:50%;background:var(--blue);margin-top:6px}.event small{color:var(--muted)}.empty{color:var(--muted);padding:30px;text-align:center}
+    dialog{width:min(520px,92vw);border:1px solid var(--line);border-radius:14px;color:var(--text);background:#0c1a2b;padding:0}dialog::backdrop{background:#020814bb;backdrop-filter:blur(3px)}form{padding:20px;display:grid;gap:12px}label{color:var(--muted);font-size:12px}input{width:100%;margin-top:5px;padding:10px;color:var(--text);background:#071321;border:1px solid #29435f;border-radius:8px}.actions{display:flex;justify-content:flex-end;gap:9px;margin-top:8px}.error{color:#ff9aaa;min-height:20px}
+    @media(max-width:900px){.metrics{grid-template-columns:repeat(2,1fr)}.grid{grid-template-columns:1fr}}@media(max-width:520px){.metrics{grid-template-columns:1fr}header{padding:16px}main{padding:14px}}
+  </style>
+</head>
+<body>
+  <header><h1><span>AGENTIC</span> MES · 生产控制台</h1><div class="health"><i class="dot"></i><span id="health">正在连接MES…</span></div></header>
+  <main>
+    <section class="metrics">
+      <div class="card"><div class="label">工单总数</div><div class="value" id="total">—</div></div>
+      <div class="card"><div class="label">已释放</div><div class="value accent" id="released">—</div></div>
+      <div class="card"><div class="label">待发布事件</div><div class="value" id="pending">—</div></div>
+      <div class="card"><div class="label">Agent审计</div><div class="value" id="audits">—</div></div>
+    </section>
+    <section class="grid">
+      <div class="panel"><div class="panel-head"><h2>生产工单</h2><div><button class="secondary" onclick="refresh()">刷新</button> <button onclick="openCreate()">新建演示工单</button></div></div><div style="overflow:auto"><table><thead><tr><th>工单</th><th>产品版本</th><th>数量</th><th>交期</th><th>状态</th><th>版本</th></tr></thead><tbody id="orders"></tbody></table></div></div>
+      <div class="panel"><div class="panel-head"><h2>制造事件流</h2><span class="badge">OUTBOX</span></div><div class="events" id="events"></div></div>
+    </section>
+  </main>
+  <dialog id="createDialog"><form id="createForm"><h2>创建传动轴演示工单</h2><label>工单编号<input id="humanCode" required></label><label>数量<input id="quantity" type="number" min="1" value="10" required></label><label>交期<input id="dueAt" type="datetime-local" required></label><div class="error" id="formError"></div><div class="actions"><button type="button" class="secondary" onclick="createDialog.close()">取消</button><button type="submit">创建</button></div></form></dialog>
+  <script>
+    async function api(url,options){const r=await fetch(url,options),b=await r.json();if(!r.ok)throw new Error(b.detail||`HTTP ${r.status}`);return b}
+    function openCreate(){const n=Date.now().toString().slice(-8);humanCode.value=`WO-SHAFT-${n}`;dueAt.value=new Date(Date.now()+7*864e5).toISOString().slice(0,16);formError.textContent="";createDialog.showModal()}
+    function cell(value,cls=""){const td=document.createElement("td");td.textContent=String(value??"");td.className=cls;return td}
+    async function refresh(){try{const[h,o,e]=await Promise.all([api("/health/ready"),api("/api/v1/work-orders"),api("/api/v1/system/outbox")]);health.textContent=`MES在线 · ${h.storageBackend.toUpperCase()} · AI非必需`;total.textContent=o.count;released.textContent=o.items.filter(x=>x.status==="RELEASED").length;pending.textContent=e.items.filter(x=>x.publishStatus==="PENDING").length;audits.textContent=e.items.filter(x=>x.eventType==="AgentToolCallRecorded").length;orders.replaceChildren(...o.items.map(x=>{const tr=document.createElement("tr");tr.append(cell(x.humanCode,"mono"),cell(x.revisions.productRevisionId),cell(x.quantity),cell(new Date(x.dueAt).toLocaleString()));const td=cell("");const b=document.createElement("span");b.className=`badge ${x.status}`;b.textContent=x.status;td.append(b);tr.append(td,cell(x.version));return tr}));if(!o.count)orders.innerHTML='<tr><td colspan="6" class="empty">尚无工单，请创建演示工单</td></tr>';events.replaceChildren(...e.items.map(x=>{const d=document.createElement("div");d.className="event";const i=document.createElement("i"),body=document.createElement("div"),t=document.createElement("div"),m=document.createElement("small");t.className="mono";t.textContent=x.eventType;m.textContent=`${x.aggregateId} · ${x.publishStatus} · ${x.occurredAt||""}`;body.append(t,m);d.append(i,body);return d}));if(!e.count)events.innerHTML='<div class="empty">暂无制造事件</div>'}catch(err){health.textContent=`连接失败：${err.message}`}}
+    createForm.addEventListener("submit",async e=>{e.preventDefault();formError.textContent="";try{const key=crypto.randomUUID();await api("/api/v1/work-orders",{method:"POST",headers:{"Content-Type":"application/json","Idempotency-Key":key},body:JSON.stringify({humanCode:humanCode.value,productionOrderId:`PO-${humanCode.value}`,workshopId:"WS-MACH-01",quantity:Number(quantity.value),dueAt:new Date(dueAt.value).toISOString(),priority:80,revisions:{productRevisionId:"PR-SHAFT-A",routingRevisionId:"RT-SHAFT-A",bomRevisionId:"BOM-SHAFT-A",drawingRevisionIds:["DWG-SHAFT-A"]}})});createDialog.close();await refresh()}catch(err){formError.textContent=err.message}});refresh();setInterval(refresh,10000);
+  </script>
+</body></html>

@@ -18,6 +18,8 @@ class WorkOrderStore(Protocol):
 
     def get_by_human_code(self, human_code: str) -> WorkOrder | None: ...
 
+    def list_work_orders(self, limit: int = 100) -> list[WorkOrder]: ...
+
     def save_atomically(
         self,
         work_order: WorkOrder,

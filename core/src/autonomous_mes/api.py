@@ -1,8 +1,9 @@
 from datetime import datetime
+from pathlib import Path
 from uuid import uuid4
 
 from fastapi import FastAPI, Header, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse
 from pydantic import BaseModel, ConfigDict, Field
 
 from autonomous_mes.application.agent_tools import GetWorkOrderTool, ToolContext
@@ -70,6 +71,7 @@ service = WorkOrderApplicationService(store)
 policy = ScopedReadPolicy({"demo-planner": {"WS-MACH-01"}})
 get_work_order_tool = GetWorkOrderTool(store, policy, store)
 app = FastAPI(title="Autonomous MES Core", version="0.1.0")
+dashboard_path = Path(__file__).parent / "static" / "dashboard.html"
 
 
 @app.exception_handler(DomainError)
@@ -101,6 +103,11 @@ def ready() -> dict[str, str]:
     }
 
 
+@app.get("/", response_class=HTMLResponse, include_in_schema=False)
+def dashboard() -> HTMLResponse:
+    return HTMLResponse(dashboard_path.read_text(encoding="utf-8"))
+
+
 @app.post("/api/v1/work-orders", status_code=201)
 def create_work_order(
     body: CreateWorkOrderBody, idempotency_key: str = Header(...)
@@ -121,6 +128,18 @@ def create_work_order(
             drawing_revision_ids=body.revisions.drawingRevisionIds,
         )
     )
+
+
+@app.get("/api/v1/work-orders")
+def list_work_orders(limit: int = 100) -> dict[str, object]:
+    items = service.list(limit)
+    return {"items": items, "count": len(items)}
+
+
+@app.get("/api/v1/system/outbox")
+def list_outbox() -> dict[str, object]:
+    items = store.list_outbox()[-100:]
+    return {"items": list(reversed(items)), "count": len(items)}
 
 
 @app.post("/api/v1/work-orders/{work_order_id}/release")

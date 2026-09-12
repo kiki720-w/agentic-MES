@@ -27,6 +27,13 @@ class SqlAlchemyWorkOrderStore:
             row = session.scalar(select(WorkOrderRow).where(WorkOrderRow.human_code == human_code))
             return _to_domain(row) if row else None
 
+    def list_work_orders(self, limit: int = 100) -> list[WorkOrder]:
+        with self._sessions() as session:
+            rows = session.scalars(
+                select(WorkOrderRow).order_by(WorkOrderRow.updated_at.desc()).limit(limit)
+            ).all()
+            return [_to_domain(row) for row in rows]
+
     def get_idempotent_result(self, idempotency_key: str) -> IdempotentResult | None:
         with self._sessions() as session:
             row = session.get(IdempotencyRecordRow, idempotency_key)
@@ -84,6 +91,7 @@ class SqlAlchemyWorkOrderStore:
                     "eventId": row.event_id,
                     "eventType": row.event_type,
                     "aggregateId": row.aggregate_id,
+                    "occurredAt": row.occurred_at.isoformat(),
                     "payload": row.payload,
                     "publishStatus": row.publish_status,
                 }

@@ -4,7 +4,7 @@ from datetime import datetime
 from hashlib import sha256
 from typing import Any
 
-from autonomous_mes.domain.errors import IdempotencyConflict, NotFound
+from autonomous_mes.domain.errors import IdempotencyConflict, NotFound, ValidationError
 from autonomous_mes.domain.work_order import FrozenRevisions, WorkOrder
 
 from .ports import IdempotentResult, WorkOrderStore
@@ -107,26 +107,35 @@ class WorkOrderApplicationService:
         item = self._store.get(work_order_id)
         if item is None:
             raise NotFound("work order not found")
-        return {
-            "workOrderId": item.work_order_id,
-            "humanCode": item.human_code,
-            "productionOrderId": item.production_order_id,
-            "workshopId": item.workshop_id,
-            "quantity": item.quantity,
-            "dueAt": item.due_at.isoformat(),
-            "priority": item.priority,
-            "status": item.status.value,
-            "version": item.version,
-            "revisions": {
-                "productRevisionId": item.revisions.product_revision_id,
-                "routingRevisionId": item.revisions.routing_revision_id,
-                "bomRevisionId": item.revisions.bom_revision_id,
-                "drawingRevisionIds": list(item.revisions.drawing_revision_ids),
-            },
-            "asOf": item.updated_at.isoformat(),
-            "dataFreshness": "CURRENT",
-            "sourceObjects": [{"type": "WorkOrder", "id": item.work_order_id}],
-        }
+        return _serialize(item)
+
+    def list(self, limit: int = 100) -> list[dict[str, Any]]:
+        if limit < 1 or limit > 500:
+            raise ValidationError("limit must be between 1 and 500")
+        return [_serialize(item) for item in self._store.list_work_orders(limit)]
+
+
+def _serialize(item: WorkOrder) -> dict[str, Any]:
+    return {
+        "workOrderId": item.work_order_id,
+        "humanCode": item.human_code,
+        "productionOrderId": item.production_order_id,
+        "workshopId": item.workshop_id,
+        "quantity": item.quantity,
+        "dueAt": item.due_at.isoformat(),
+        "priority": item.priority,
+        "status": item.status.value,
+        "version": item.version,
+        "revisions": {
+            "productRevisionId": item.revisions.product_revision_id,
+            "routingRevisionId": item.revisions.routing_revision_id,
+            "bomRevisionId": item.revisions.bom_revision_id,
+            "drawingRevisionIds": list(item.revisions.drawing_revision_ids),
+        },
+        "asOf": item.updated_at.isoformat(),
+        "dataFreshness": "CURRENT",
+        "sourceObjects": [{"type": "WorkOrder", "id": item.work_order_id}],
+    }
 
 
 def _command_hash(command: object) -> str:
