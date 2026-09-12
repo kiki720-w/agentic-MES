@@ -13,6 +13,7 @@ from autonomous_mes.application.equipment import (
     RecordTelemetryCommand,
     RegisterEquipmentCommand,
 )
+from autonomous_mes.application.natural_language import NaturalLanguageQueryService
 from autonomous_mes.application.ports import MesStore
 from autonomous_mes.application.quality import CreateInspectionCommand, QualityApplicationService
 from autonomous_mes.application.work_orders import (
@@ -133,6 +134,11 @@ class ReworkApprovalBody(BaseModel):
     actorId: str
 
 
+class NaturalLanguageBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    question: str = Field(min_length=1, max_length=500)
+
+
 settings = Settings()
 
 
@@ -166,6 +172,7 @@ deepseek_narrator = (
     else None
 )
 incident_agent = IncidentResponseAgent(store, deepseek_narrator)
+natural_language_service = NaturalLanguageQueryService(store, deepseek_model_gateway)
 quality_service = QualityApplicationService(store, store)
 policy = ScopedReadPolicy({"demo-planner": {"WS-MACH-01"}})
 get_work_order_tool = GetWorkOrderTool(store, policy, store)
@@ -214,6 +221,11 @@ def agent_model_status() -> dict[str, str | None]:
             "lastError": None,
         }
     return deepseek_model_gateway.status()
+
+
+@app.post("/api/v1/agent/chat")
+def agent_chat(body: NaturalLanguageBody) -> dict[str, object]:
+    return natural_language_service.ask(body.question)
 
 
 @app.get("/", response_class=HTMLResponse, include_in_schema=False)

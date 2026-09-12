@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from typing import Protocol
+from typing import Any, Protocol
 
 
 @dataclass(frozen=True)
@@ -26,6 +26,17 @@ class DiagnosticNarrative:
 
 class DiagnosticModel(Protocol):
     def explain(self, facts: DiagnosticFacts) -> DiagnosticNarrative: ...
+
+
+@dataclass(frozen=True)
+class NaturalLanguageAnswer:
+    answer: str
+    source: str
+    model: str | None = None
+
+
+class NaturalLanguageModel(Protocol):
+    def answer(self, question: str, facts: dict[str, Any]) -> NaturalLanguageAnswer: ...
 
 
 class ModelGatewayError(RuntimeError):

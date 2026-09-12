@@ -9,6 +9,7 @@ from autonomous_mes.application.model_gateway import (
     DiagnosticFacts,
     DiagnosticNarrative,
     ModelGatewayError,
+    NaturalLanguageAnswer,
 )
 
 
@@ -87,3 +88,47 @@ class DeepSeekDiagnosticModel:
         except (httpx.HTTPError, KeyError, IndexError, TypeError, ValueError, json.JSONDecodeError) as exc:
             self._record_status("DEGRADED", exc.__class__.__name__)
             raise ModelGatewayError("DeepSeek diagnostic request failed") from exc
+
+    def answer(self, question: str, facts: dict[str, Any]) -> NaturalLanguageAnswer:
+        payload = {
+            "model": self._model,
+            "messages": [
+                {
+                    "role": "system",
+                    "content": (
+                        "你是机械加工MES只读问答助手。只能依据用户消息中的MES快照回答，"
+                        "不可使用模型记忆补充生产事实。输出JSON格式 {\"answer\":\"...\"}。"
+                        "回答应简洁，引用相关工单或设备编号；不得声称已执行任何生产动作。"
+                        "如果问题超出快照数据，明确说明无法确定。"
+                    ),
+                },
+                {
+                    "role": "user",
+                    "content": json.dumps(
+                        {"question": question, "mesSnapshot": facts}, ensure_ascii=False
+                    ),
+                },
+            ],
+            "response_format": {"type": "json_object"},
+            "thinking": {"type": "disabled"},
+            "max_tokens": 700,
+            "temperature": 0.1,
+        }
+        try:
+            response = httpx.post(
+                f"{self._base_url}/chat/completions",
+                headers={"Authorization": f"Bearer {self._api_key}"},
+                json=payload,
+                timeout=self._timeout,
+            )
+            response.raise_for_status()
+            body: dict[str, Any] = response.json()
+            content = body["choices"][0]["message"]["content"]
+            answer = str(json.loads(content)["answer"]).strip()
+            if not answer or len(answer) > 3000:
+                raise ValueError("invalid answer length")
+            self._record_status("CONNECTED")
+            return NaturalLanguageAnswer(answer, "DEEPSEEK", self._model)
+        except (httpx.HTTPError, KeyError, IndexError, TypeError, ValueError) as exc:
+            self._record_status("DEGRADED", exc.__class__.__name__)
+            raise ModelGatewayError("DeepSeek natural language request failed") from exc

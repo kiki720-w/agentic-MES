@@ -34,6 +34,8 @@ uvicorn autonomous_mes.api:app --app-dir src --reload
 - `POST /api/v1/equipment/{equipmentId}/telemetry`
 - `POST /api/v1/agent-tools/get-work-order`
 - `POST /api/v1/agent/incidents/analyze`
+- `POST /api/v1/agent/chat`：基于 MES 实时快照的只读自然语言查询
+- `GET /api/v1/agent/model-status`
 - `GET /api/v1/agent/proposals`
 - `POST /api/v1/agent/proposals/{proposalId}/approve`
 - `GET /health/live`
