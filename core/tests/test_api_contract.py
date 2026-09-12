@@ -268,6 +268,8 @@ class ApiContractTests(unittest.TestCase):
         self.assertEqual(200, model_settings.status_code)
         self.assertIn("模型与 API 设置", model_settings.text)
         self.assertIn("Kimi / Moonshot", model_settings.text)
+        self.assertIn("API 服务 / Base URL", model_settings.text)
+        self.assertIn("自定义兼容接口", model_settings.text)
 
         planner_headers = {"X-Dev-Actor": "demo-planner"}
         forbidden = self.client.put(
