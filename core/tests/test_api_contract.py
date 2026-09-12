@@ -47,9 +47,22 @@ class ApiContractTests(unittest.TestCase):
                 "deploymentMode": "FACTORY_EDGE",
                 "organizationId": "ORG-DEMO",
                 "factoryId": "FACTORY-DEMO",
+                "authMode": "DEV",
             },
             self.client.get("/health/ready").json(),
         )
+
+        identity = self.client.get("/api/v1/identity/me")
+        self.assertEqual(200, identity.status_code)
+        self.assertEqual("demo-supervisor", identity.json()["subjectId"])
+        self.assertIn("SUPERVISOR", identity.json()["roles"])
+        self.assertEqual(["FACTORY-DEMO"], identity.json()["factoryIds"])
+
+        spoofed_approval = self.client.post(
+            "/api/v1/agent/proposals/not-a-proposal/approve",
+            json={"actorId": "attacker", "reason": "spoofed"},
+        )
+        self.assertEqual(422, spoofed_approval.status_code)
 
     def test_dashboard_and_read_models_are_available(self):
         dashboard = self.client.get("/")

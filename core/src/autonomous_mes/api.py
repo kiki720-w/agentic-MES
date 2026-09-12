@@ -2,10 +2,12 @@ import csv
 import io
 from datetime import datetime
 from pathlib import Path
+from typing import Annotated
 from uuid import uuid4
 
-from fastapi import FastAPI, Header, Request
+from fastapi import Depends, FastAPI, Header, Request
 from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, ConfigDict, Field
 
 from autonomous_mes.application.agent_runtime import FallbackNarrator, IncidentResponseAgent
@@ -26,6 +28,12 @@ from autonomous_mes.application.genealogy import (
     ProcessResourceInput,
     RecordExecutionSessionCommand,
     RegisterProductUnitCommand,
+)
+from autonomous_mes.application.identity import (
+    DeveloperIdentityProvider,
+    Identity,
+    OidcTokenVerifier,
+    parse_csv_set,
 )
 from autonomous_mes.application.master_data import (
     ManufacturingResourceApplicationService,
@@ -134,7 +142,6 @@ class TelemetryBody(BaseModel):
 
 class ApproveProposalBody(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    actorId: str
     reason: str
 
 
@@ -263,6 +270,45 @@ class RecordExecutionSessionBody(BaseModel):
 settings = Settings()
 
 
+def build_identity_provider() -> DeveloperIdentityProvider | OidcTokenVerifier:
+    auth_mode = settings.auth_mode.upper()
+    if auth_mode == "DEV":
+        factory_ids = parse_csv_set(settings.dev_factory_ids) or frozenset({settings.factory_id})
+        return DeveloperIdentityProvider(
+            Identity(
+                settings.dev_subject_id,
+                settings.dev_display_name,
+                parse_csv_set(settings.dev_roles),
+                factory_ids,
+            )
+        )
+    if auth_mode == "OIDC":
+        if not settings.oidc_issuer or not settings.oidc_audience:
+            raise RuntimeError("OIDC auth requires issuer and audience")
+        jwks_url = settings.oidc_jwks_url or (
+            f"{settings.oidc_issuer.rstrip('/')}/protocol/openid-connect/certs"
+        )
+        return OidcTokenVerifier(
+            settings.oidc_issuer,
+            settings.oidc_audience,
+            jwks_url,
+            settings.oidc_roles_claim,
+            settings.oidc_factory_ids_claim,
+        )
+    raise RuntimeError(f"unsupported auth mode: {settings.auth_mode}")
+
+
+identity_provider = build_identity_provider()
+bearer_scheme = HTTPBearer(auto_error=False)
+
+
+def current_identity(
+    credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(bearer_scheme)],
+) -> Identity:
+    token = credentials.credentials if credentials else None
+    return identity_provider.authenticate(token)
+
+
 def build_store() -> MesStore:
     if settings.storage_backend == "memory":
         return InMemoryWorkOrderStore()
@@ -350,6 +396,7 @@ def ready() -> dict[str, str]:
         "deploymentMode": settings.deployment_mode,
         "organizationId": settings.organization_id,
         "factoryId": settings.factory_id,
+        "authMode": settings.auth_mode.upper(),
     }
 
 
@@ -362,6 +409,11 @@ def deployment_context() -> dict[str, str]:
         "dataIsolation": "DEDICATED_DATABASE",
         "cloudControlPlane": "OPTIONAL_NOT_CONNECTED",
     }
+
+
+@app.get("/api/v1/identity/me")
+def identity_me(identity: Annotated[Identity, Depends(current_identity)]) -> dict[str, object]:
+    return identity.as_dict()
 
 
 @app.get("/api/v1/agent/model-status")
@@ -524,8 +576,14 @@ def approve_quality_rework(inspection_id: str, body: ReworkApprovalBody) -> dict
 
 
 @app.post("/api/v1/agent/proposals/{proposal_id}/approve")
-def approve_agent_proposal(proposal_id: str, body: ApproveProposalBody) -> dict[str, object]:
-    return incident_agent.approve(proposal_id, body.actorId, body.reason)
+def approve_agent_proposal(
+    proposal_id: str,
+    body: ApproveProposalBody,
+    identity: Annotated[Identity, Depends(current_identity)],
+) -> dict[str, object]:
+    identity.require_role("SUPERVISOR")
+    identity.require_factory(settings.factory_id)
+    return incident_agent.approve(proposal_id, identity.subject_id, body.reason)
 
 
 @app.post("/api/v1/equipment", status_code=201)

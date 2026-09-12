@@ -1,0 +1,63 @@
+{
+  "realm": "agentic-mes",
+  "enabled": true,
+  "displayName": "Agentic MES",
+  "registrationAllowed": false,
+  "resetPasswordAllowed": true,
+  "roles": {
+    "realm": [
+      {"name": "SUPERVISOR"},
+      {"name": "PLANNER"},
+      {"name": "OPERATOR"},
+      {"name": "QUALITY"},
+      {"name": "MASTER_DATA_ADMIN"}
+    ]
+  },
+  "clients": [
+    {
+      "clientId": "agentic-mes-api",
+      "name": "Agentic MES API",
+      "enabled": true,
+      "bearerOnly": true,
+      "protocol": "openid-connect"
+    },
+    {
+      "clientId": "agentic-mes-web",
+      "name": "Agentic MES Web",
+      "enabled": true,
+      "publicClient": true,
+      "standardFlowEnabled": true,
+      "directAccessGrantsEnabled": false,
+      "protocol": "openid-connect",
+      "redirectUris": ["http://127.0.0.1:8000/*"],
+      "webOrigins": ["http://127.0.0.1:8000"],
+      "protocolMappers": [
+        {
+          "name": "agentic-mes-api-audience",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "consentRequired": false,
+          "config": {
+            "included.client.audience": "agentic-mes-api",
+            "id.token.claim": "false",
+            "access.token.claim": "true"
+          }
+        },
+        {
+          "name": "factory-scope",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-hardcoded-claim-mapper",
+          "consentRequired": false,
+          "config": {
+            "claim.name": "factory_ids",
+            "claim.value": "[\"FACTORY-DEMO\"]",
+            "jsonType.label": "JSON",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "userinfo.token.claim": "true"
+          }
+        }
+      ]
+    }
+  ]
+}

@@ -20,6 +20,16 @@ class Settings(BaseSettings):
     deployment_mode: str = "FACTORY_EDGE"
     organization_id: str = "ORG-DEMO"
     factory_id: str = "FACTORY-DEMO"
+    auth_mode: str = "DEV"
+    oidc_issuer: str | None = None
+    oidc_audience: str | None = None
+    oidc_jwks_url: str | None = None
+    oidc_roles_claim: str = "realm_access.roles"
+    oidc_factory_ids_claim: str = "factory_ids"
+    dev_subject_id: str = "demo-supervisor"
+    dev_display_name: str = "Demo Supervisor"
+    dev_roles: str = "SUPERVISOR,PLANNER,OPERATOR,QUALITY,MASTER_DATA_ADMIN"
+    dev_factory_ids: str = "FACTORY-DEMO"
     connector_key_id: str | None = None
     connector_hmac_secret: str | None = None
     connector_max_clock_skew_seconds: int = 300
