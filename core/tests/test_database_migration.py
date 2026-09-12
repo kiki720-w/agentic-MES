@@ -50,6 +50,8 @@ class DatabaseMigrationTests(unittest.TestCase):
                     "connector_receipts",
                     "work_orders",
                     "work_order_operations",
+                    "planning_resources",
+                    "schedule_plans",
                 },
                 set(schema.get_table_names()),
             )
@@ -90,6 +92,15 @@ class DatabaseMigrationTests(unittest.TestCase):
             }
             self.assertIn("simulation_summary", policy_columns)
             self.assertIn("simulated_by", policy_columns)
+            planning_resource_columns = {
+                item["name"] for item in schema.get_columns("planning_resources")
+            }
+            self.assertIn("capability_codes", planning_resource_columns)
+            self.assertIn("overtime_capacity_minutes", planning_resource_columns)
+            plan_columns = {item["name"] for item in schema.get_columns("schedule_plans")}
+            self.assertIn("assignments", plan_columns)
+            self.assertIn("shortages", plan_columns)
+            self.assertIn("record_version", plan_columns)
             engine.dispose()
 
 

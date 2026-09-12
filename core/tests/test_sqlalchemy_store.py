@@ -1,5 +1,7 @@
 import tempfile
 import unittest
+from dataclasses import replace
+from datetime import UTC, datetime
 from pathlib import Path
 
 from sqlalchemy import create_engine, func, select
@@ -10,7 +12,13 @@ from autonomous_mes.application.genealogy import (
     GenealogyApplicationService,
     RegisterProductUnitCommand,
 )
+from autonomous_mes.application.scheduling import (
+    GenerateScheduleCommand,
+    RegisterPlanningResourceCommand,
+    SchedulingApplicationService,
+)
 from autonomous_mes.application.work_orders import (
+    OperationSpec,
     ReleaseWorkOrderCommand,
     WorkOrderApplicationService,
 )
@@ -20,7 +28,9 @@ from autonomous_mes.infrastructure.models import (
     AgentToolAuditRow,
     EventOutboxRow,
     GenealogyLinkRow,
+    PlanningResourceRow,
     ProductUnitRow,
+    SchedulePlanRow,
     WorkOrderRow,
 )
 from autonomous_mes.infrastructure.sqlalchemy_store import SqlAlchemyWorkOrderStore
@@ -100,6 +110,54 @@ class SqlAlchemyStoreTests(unittest.TestCase):
         self.assertEqual("SN-SHAFT-0001", result["productSerial"])
         self.assertEqual(1, unit_count)
         self.assertGreaterEqual(link_count, 4)
+
+    def test_unified_schedule_plan_and_resource_persist(self):
+        self.service.create(
+            replace(
+                create_command("db-schedule-create"),
+                operations=[OperationSpec(10, "TURN", "Turning", "WC-LATHE-01")],
+            )
+        )
+        scheduling = SchedulingApplicationService(self.store)
+        scheduling.register_resource(
+            RegisterPlanningResourceCommand(
+                "PERSON-DB-1",
+                "Database operator",
+                "PERSON",
+                "WS-MACH-01",
+                "WC-LATHE-01",
+                480,
+                600,
+                ["TURN"],
+                "demo-planner",
+                "db-resource",
+            )
+        )
+        plan = scheduling.generate(
+            GenerateScheduleCommand(
+                "WS-MACH-01",
+                datetime.now(UTC).date(),
+                6,
+                False,
+                30,
+                {},
+                "demo-planner",
+                "db-schedule",
+            )
+        )
+        submitted = scheduling.submit(
+            str(plan["planId"]), int(plan["recordVersion"]), "demo-planner"
+        )
+        with self.sessions() as session:
+            resource_count = session.scalar(
+                select(func.count()).select_from(PlanningResourceRow)
+            )
+            row = session.get(SchedulePlanRow, str(plan["planId"]))
+        self.assertEqual(1, resource_count)
+        self.assertIsNotNone(row)
+        assert row is not None
+        self.assertEqual("PENDING_APPROVAL", row.status)
+        self.assertEqual(submitted["recordVersion"], row.record_version)
 
 
 if __name__ == "__main__":

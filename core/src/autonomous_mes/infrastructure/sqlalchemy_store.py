@@ -25,6 +25,12 @@ from autonomous_mes.domain.quality_policy import (
     QualityPolicyStatus,
     QualityRiskPolicy,
 )
+from autonomous_mes.domain.scheduling import (
+    PlanningResource,
+    PlanningResourceType,
+    SchedulePlan,
+    SchedulePlanStatus,
+)
 from autonomous_mes.domain.work_order import (
     FrozenRevisions,
     OperationStatus,
@@ -45,9 +51,11 @@ from .models import (
     IdempotencyRecordRow,
     ManufacturingResourceRow,
     MaterialConsumptionRow,
+    PlanningResourceRow,
     ProductUnitRow,
     QualityInspectionRow,
     QualityRiskPolicyRow,
+    SchedulePlanRow,
     WorkOrderOperationRow,
     WorkOrderRow,
 )
@@ -644,6 +652,71 @@ class SqlAlchemyWorkOrderStore:
             )
             if getattr(result, "rowcount", 0) != 1:
                 raise InvalidTransition("quality policy version changed")
+            session.add_all(_event_rows([event]))
+
+    def get_planning_resource(self, resource_id: str) -> PlanningResource | None:
+        with self._sessions() as session:
+            row = session.get(PlanningResourceRow, resource_id)
+            return _planning_resource_to_domain(row) if row else None
+
+    def list_planning_resources(self, workshop_id: str) -> list[PlanningResource]:
+        with self._sessions() as session:
+            rows = session.scalars(
+                select(PlanningResourceRow)
+                .where(PlanningResourceRow.workshop_id == workshop_id)
+                .order_by(PlanningResourceRow.work_center_id, PlanningResourceRow.code)
+            ).all()
+            return [_planning_resource_to_domain(row) for row in rows]
+
+    def add_planning_resource_atomically(
+        self, resource: PlanningResource, event: DomainEvent
+    ) -> None:
+        try:
+            with self._sessions.begin() as session:
+                session.add(PlanningResourceRow(**_planning_resource_values(resource)))
+                session.add_all(_event_rows([event]))
+        except IntegrityError as exc:
+            raise InvalidTransition(
+                "planning resource code already exists in workshop"
+            ) from exc
+
+    def get_schedule_plan(self, plan_id: str) -> SchedulePlan | None:
+        with self._sessions() as session:
+            row = session.get(SchedulePlanRow, plan_id)
+            return _schedule_plan_to_domain(row) if row else None
+
+    def list_schedule_plans(self, workshop_id: str, limit: int = 30) -> list[SchedulePlan]:
+        with self._sessions() as session:
+            rows = session.scalars(
+                select(SchedulePlanRow)
+                .where(SchedulePlanRow.workshop_id == workshop_id)
+                .order_by(SchedulePlanRow.created_at.desc())
+                .limit(limit)
+            ).all()
+            return [_schedule_plan_to_domain(row) for row in rows]
+
+    def add_schedule_plan_atomically(self, plan: SchedulePlan, event: DomainEvent) -> None:
+        try:
+            with self._sessions.begin() as session:
+                session.add(SchedulePlanRow(**_schedule_plan_values(plan)))
+                session.add_all(_event_rows([event]))
+        except IntegrityError as exc:
+            raise InvalidTransition("schedule plan already exists") from exc
+
+    def update_schedule_plan_atomically(
+        self, plan: SchedulePlan, expected_record_version: int, event: DomainEvent
+    ) -> None:
+        with self._sessions.begin() as session:
+            result = session.execute(
+                update(SchedulePlanRow)
+                .where(
+                    SchedulePlanRow.plan_id == plan.plan_id,
+                    SchedulePlanRow.record_version == expected_record_version,
+                )
+                .values(**_schedule_plan_values(plan, include_id=False))
+            )
+            if getattr(result, "rowcount", 0) != 1:
+                raise InvalidTransition("schedule plan version changed")
             session.add_all(_event_rows([event]))
 
     def update_agent_proposal_atomically(
@@ -1588,6 +1661,100 @@ def _quality_policy_to_domain(row: QualityRiskPolicyRow) -> QualityRiskPolicy:
         row.approved_by,
         row.approval_reason,
         row.effective_from,
+        row.created_at,
+        row.updated_at,
+    )
+
+
+def _planning_resource_values(
+    item: PlanningResource, *, include_id: bool = True
+) -> dict[str, Any]:
+    values = {
+        "code": item.code,
+        "name": item.name,
+        "resource_type": item.resource_type.value,
+        "workshop_id": item.workshop_id,
+        "work_center_id": item.work_center_id,
+        "daily_capacity_minutes": item.daily_capacity_minutes,
+        "overtime_capacity_minutes": item.overtime_capacity_minutes,
+        "capability_codes": list(item.capability_codes),
+        "active": item.active,
+        "version": item.version,
+        "created_at": item.created_at,
+        "updated_at": item.updated_at,
+    }
+    if include_id:
+        values["resource_id"] = item.resource_id
+    return values
+
+
+def _planning_resource_to_domain(row: PlanningResourceRow) -> PlanningResource:
+    return PlanningResource(
+        row.resource_id,
+        row.code,
+        row.name,
+        PlanningResourceType(row.resource_type),
+        row.workshop_id,
+        row.work_center_id,
+        row.daily_capacity_minutes,
+        row.overtime_capacity_minutes,
+        tuple(row.capability_codes),
+        row.active,
+        row.version,
+        row.created_at,
+        row.updated_at,
+    )
+
+
+def _schedule_plan_values(item: SchedulePlan, *, include_id: bool = True) -> dict[str, Any]:
+    values = {
+        "plan_number": item.plan_number,
+        "workshop_id": item.workshop_id,
+        "horizon_start": item.horizon_start,
+        "horizon_days": item.horizon_days,
+        "use_overtime": item.use_overtime,
+        "generation_parameters": item.generation_parameters,
+        "assignments": list(item.assignments),
+        "shortages": list(item.shortages),
+        "metrics": item.metrics,
+        "status": item.status.value,
+        "record_version": item.record_version,
+        "created_by": item.created_by,
+        "submitted_by": item.submitted_by,
+        "approved_by": item.approved_by,
+        "approval_reason": item.approval_reason,
+        "published_by": item.published_by,
+        "withdrawn_by": item.withdrawn_by,
+        "withdrawal_reason": item.withdrawal_reason,
+        "created_at": item.created_at,
+        "updated_at": item.updated_at,
+    }
+    if include_id:
+        values["plan_id"] = item.plan_id
+    return values
+
+
+def _schedule_plan_to_domain(row: SchedulePlanRow) -> SchedulePlan:
+    return SchedulePlan(
+        row.plan_id,
+        row.plan_number,
+        row.workshop_id,
+        row.horizon_start,
+        row.horizon_days,
+        row.use_overtime,
+        row.generation_parameters,
+        tuple(row.assignments),
+        tuple(row.shortages),
+        row.metrics,
+        SchedulePlanStatus(row.status),
+        row.record_version,
+        row.created_by,
+        row.submitted_by,
+        row.approved_by,
+        row.approval_reason,
+        row.published_by,
+        row.withdrawn_by,
+        row.withdrawal_reason,
         row.created_at,
         row.updated_at,
     )

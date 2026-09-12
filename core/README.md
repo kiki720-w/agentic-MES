@@ -1,6 +1,6 @@
 # Autonomous MES Core
 
-当前垂直切片覆盖创建/释放工单，机械加工工序的派工、开工、报工、完工，以及设备台账和实时遥测采集；每个业务动作都会原子写入Outbox，并支持Agent只读`get_work_order`工具。
+当前垂直切片覆盖有限产能滚动排产、创建/释放工单，机械加工工序的派工、开工、报工、完工，以及设备台账和实时遥测采集；每个业务动作都会原子写入Outbox，并支持Agent只读`get_work_order`工具。
 
 本目录是自主实现，不依赖`candidates/`中的任何候选MES代码。
 
@@ -38,6 +38,11 @@ uvicorn autonomous_mes.api:app --app-dir src --reload
 - `POST /api/v1/quality/risk-policies/{policyId}/simulate`：只读回放历史完工工序并记录发布前影响证据
 - `POST /api/v1/quality/risk-policies/{policyId}/approve`：质量角色批准并设置生效时间
 - `POST /api/v1/quality/risk-policies/{policyId}/rollback-draft`：从已批准版本创建回滚草稿
+- `POST/GET /api/v1/planning/resources`：维护人员与工作单元能力及正常/加班产能
+- `POST /api/v1/planning/plans/generate`：从MES工单、工序和设备事实生成有限产能排产草稿
+- `GET /api/v1/planning/plans`：读取计划版本、排产明细和未排能力缺口
+- `POST /api/v1/planning/plans/{planId}/assignments/{assignmentId}/move`：在草稿阶段人工调整资源或日期并重新校验能力
+- `POST /api/v1/planning/plans/{planId}/{submit|approve|publish|withdraw}`：双人审批的计划发布治理链
 - `GET /api/v1/system/operation-projection-health`：JSON与关系工序在线一致性巡检
 - `POST /api/v1/equipment/{equipmentId}/telemetry`
 - `POST /api/v1/genealogy/product-units`

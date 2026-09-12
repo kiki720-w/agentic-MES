@@ -33,6 +33,8 @@ class Settings(BaseSettings):
     dev_factory_ids: str = "FACTORY-DEMO"
     dev_quality_subject_id: str = "demo-quality-manager"
     dev_quality_display_name: str = "Demo Quality Manager"
+    dev_planner_subject_id: str = "demo-planner"
+    dev_planner_display_name: str = "Demo Planner"
     connector_key_id: str | None = None
     connector_hmac_secret: str | None = None
     connector_max_clock_skew_seconds: int = 300

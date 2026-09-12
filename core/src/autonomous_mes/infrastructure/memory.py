@@ -18,6 +18,7 @@ from autonomous_mes.domain.genealogy import (
 from autonomous_mes.domain.master_data import ManufacturingResource
 from autonomous_mes.domain.quality import QualityInspection
 from autonomous_mes.domain.quality_policy import QualityPolicyStatus, QualityRiskPolicy
+from autonomous_mes.domain.scheduling import PlanningResource, SchedulePlan
 from autonomous_mes.domain.work_order import WorkOrder
 
 
@@ -43,6 +44,9 @@ class InMemoryWorkOrderStore:
         self._manufacturing_resources: dict[str, ManufacturingResource] = {}
         self._connector_nonces: set[str] = set()
         self._quality_policies: dict[str, QualityRiskPolicy] = {}
+        self._planning_resources: dict[str, PlanningResource] = {}
+        self._planning_resource_codes: dict[str, str] = {}
+        self._schedule_plans: dict[str, SchedulePlan] = {}
 
     def get(self, work_order_id: str) -> WorkOrder | None:
         with self._lock:
@@ -729,6 +733,60 @@ class InMemoryWorkOrderStore:
             if current is None or current.record_version != expected_record_version:
                 raise InvalidTransition("quality policy version changed")
             self._quality_policies[policy.policy_id] = deepcopy(policy)
+            self._append_event(event)
+
+    def get_planning_resource(self, resource_id: str) -> PlanningResource | None:
+        with self._lock:
+            return deepcopy(self._planning_resources.get(resource_id))
+
+    def list_planning_resources(self, workshop_id: str) -> list[PlanningResource]:
+        with self._lock:
+            items = [
+                item
+                for item in self._planning_resources.values()
+                if item.workshop_id == workshop_id
+            ]
+            return deepcopy(sorted(items, key=lambda item: (item.work_center_id, item.code)))
+
+    def add_planning_resource_atomically(
+        self, resource: PlanningResource, event: DomainEvent
+    ) -> None:
+        with self._lock:
+            code_key = f"{resource.workshop_id}:{resource.code}".casefold()
+            if code_key in self._planning_resource_codes:
+                raise IdempotencyConflict("planning resource code already exists in workshop")
+            self._planning_resources[resource.resource_id] = deepcopy(resource)
+            self._planning_resource_codes[code_key] = resource.resource_id
+            self._append_event(event)
+
+    def get_schedule_plan(self, plan_id: str) -> SchedulePlan | None:
+        with self._lock:
+            return deepcopy(self._schedule_plans.get(plan_id))
+
+    def list_schedule_plans(self, workshop_id: str, limit: int = 30) -> list[SchedulePlan]:
+        with self._lock:
+            items = [
+                item for item in self._schedule_plans.values()
+                if item.workshop_id == workshop_id
+            ]
+            items.sort(key=lambda item: item.created_at, reverse=True)
+            return deepcopy(items[:limit])
+
+    def add_schedule_plan_atomically(self, plan: SchedulePlan, event: DomainEvent) -> None:
+        with self._lock:
+            if plan.plan_id in self._schedule_plans:
+                raise InvalidTransition("schedule plan already exists")
+            self._schedule_plans[plan.plan_id] = deepcopy(plan)
+            self._append_event(event)
+
+    def update_schedule_plan_atomically(
+        self, plan: SchedulePlan, expected_record_version: int, event: DomainEvent
+    ) -> None:
+        with self._lock:
+            current = self._schedule_plans.get(plan.plan_id)
+            if current is None or current.record_version != expected_record_version:
+                raise InvalidTransition("schedule plan version changed")
+            self._schedule_plans[plan.plan_id] = deepcopy(plan)
             self._append_event(event)
 
     def update_agent_proposal_atomically(

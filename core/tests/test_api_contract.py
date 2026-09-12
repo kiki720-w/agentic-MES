@@ -63,6 +63,11 @@ class ApiContractTests(unittest.TestCase):
         )
         self.assertEqual("demo-quality-manager", quality_identity.json()["subjectId"])
         self.assertEqual(["QUALITY"], quality_identity.json()["roles"])
+        planner_identity = self.client.get(
+            "/api/v1/identity/me", headers={"X-Dev-Actor": "demo-planner"}
+        )
+        self.assertEqual("demo-planner", planner_identity.json()["subjectId"])
+        self.assertEqual(["PLANNER"], planner_identity.json()["roles"])
         unknown_identity = self.client.get(
             "/api/v1/identity/me", headers={"X-Dev-Actor": "unconfigured-user"}
         )
@@ -73,6 +78,110 @@ class ApiContractTests(unittest.TestCase):
             json={"actorId": "attacker", "reason": "spoofed"},
         )
         self.assertEqual(422, spoofed_approval.status_code)
+
+    def test_unified_aps_schedule_lifecycle(self):
+        suffix = uuid4().hex[:8]
+        work_center = f"WC-APS-{suffix}"
+        planner_headers = {"X-Dev-Actor": "demo-planner"}
+        create_order = self.client.post(
+            "/api/v1/work-orders",
+            headers={**planner_headers, "Idempotency-Key": f"aps-order-{suffix}"},
+            json={
+                "humanCode": f"WO-APS-{suffix}",
+                "productionOrderId": f"PO-APS-{suffix}",
+                "workshopId": "WS-MACH-01",
+                "quantity": 10,
+                "dueAt": (datetime.now(UTC) + timedelta(days=5)).isoformat(),
+                "priority": 90,
+                "revisions": {
+                    "productRevisionId": f"PR-APS-{suffix}",
+                    "routingRevisionId": f"RT-APS-{suffix}",
+                    "bomRevisionId": f"BOM-APS-{suffix}",
+                    "drawingRevisionIds": [],
+                },
+                "operations": [
+                    {
+                        "sequence": 10,
+                        "operationCode": "TURN",
+                        "operationName": "APS turning",
+                        "workCenterId": work_center,
+                    }
+                ],
+            },
+        )
+        self.assertEqual(201, create_order.status_code, create_order.text)
+        resource = self.client.post(
+            "/api/v1/planning/resources",
+            headers=planner_headers,
+            json={
+                "code": f"PERSON-{suffix}",
+                "name": "APS test operator",
+                "resourceType": "PERSON",
+                "workshopId": "WS-MACH-01",
+                "workCenterId": work_center,
+                "dailyCapacityMinutes": 480,
+                "overtimeCapacityMinutes": 600,
+                "capabilityCodes": ["TURN"],
+            },
+        )
+        self.assertEqual(201, resource.status_code, resource.text)
+        generated = self.client.post(
+            "/api/v1/planning/plans/generate",
+            headers=planner_headers,
+            json={
+                "workshopId": "WS-MACH-01",
+                "horizonStart": datetime.now(UTC).date().isoformat(),
+                "horizonDays": 6,
+                "defaultMinutesPerUnit": 30,
+            },
+        )
+        self.assertEqual(201, generated.status_code, generated.text)
+        plan = generated.json()
+        self.assertTrue(
+            any(item["workOrderCode"] == f"WO-APS-{suffix}" for item in plan["assignments"])
+        )
+        assignment = next(
+            item
+            for item in plan["assignments"]
+            if item["workOrderCode"] == f"WO-APS-{suffix}"
+        )
+        moved = self.client.post(
+            f"/api/v1/planning/plans/{plan['planId']}/assignments/"
+            f"{assignment['assignmentId']}/move",
+            headers=planner_headers,
+            json={
+                "expectedRecordVersion": plan["recordVersion"],
+                "targetResourceId": resource.json()["resourceId"],
+                "productionDate": assignment["productionDate"],
+                "reason": "verified manual scheduling override",
+            },
+        )
+        self.assertEqual(200, moved.status_code, moved.text)
+        plan = moved.json()
+        submitted = self.client.post(
+            f"/api/v1/planning/plans/{plan['planId']}/submit",
+            headers=planner_headers,
+            json={"expectedRecordVersion": plan["recordVersion"]},
+        )
+        self.assertEqual(200, submitted.status_code, submitted.text)
+        approved = self.client.post(
+            f"/api/v1/planning/plans/{plan['planId']}/approve",
+            json={
+                "expectedRecordVersion": submitted.json()["recordVersion"],
+                "reason": "capacity and delivery reviewed",
+            },
+        )
+        self.assertEqual(200, approved.status_code, approved.text)
+        published = self.client.post(
+            f"/api/v1/planning/plans/{plan['planId']}/publish",
+            json={"expectedRecordVersion": approved.json()["recordVersion"]},
+        )
+        self.assertEqual("PUBLISHED", published.json()["status"])
+        planning_page = self.client.get("/planning")
+        self.assertEqual(200, planning_page.status_code)
+        self.assertIn("有限产能排产", planning_page.text)
+        self.assertIn("产能日历", planning_page.text)
+        self.assertIn("调整排产条目", planning_page.text)
 
     def test_dashboard_and_read_models_are_available(self):
         dashboard = self.client.get("/")

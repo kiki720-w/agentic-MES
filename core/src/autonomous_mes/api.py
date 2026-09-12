@@ -3,7 +3,7 @@ import binascii
 import csv
 import io
 import json
-from datetime import datetime
+from datetime import date, datetime
 from pathlib import Path
 from typing import Annotated
 from uuid import uuid4
@@ -56,6 +56,11 @@ from autonomous_mes.application.quality_policy import (
     QualityPolicyApplicationService,
 )
 from autonomous_mes.application.quality_risk import default_quality_risk_configuration
+from autonomous_mes.application.scheduling import (
+    GenerateScheduleCommand,
+    RegisterPlanningResourceCommand,
+    SchedulingApplicationService,
+)
 from autonomous_mes.application.work_orders import (
     CreateWorkOrderCommand,
     OperationCommand,
@@ -315,6 +320,42 @@ class RecordExecutionSessionBody(BaseModel):
     resources: list[ProcessResourceBody] = Field(default_factory=list)
 
 
+class RegisterPlanningResourceBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    code: str = Field(min_length=1, max_length=64)
+    name: str = Field(min_length=1, max_length=160)
+    resourceType: str
+    workshopId: str
+    workCenterId: str
+    dailyCapacityMinutes: float = Field(gt=0)
+    overtimeCapacityMinutes: float = Field(gt=0)
+    capabilityCodes: list[str] = Field(default_factory=list)
+
+
+class GenerateScheduleBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    workshopId: str
+    horizonStart: date
+    horizonDays: int = Field(default=6, ge=1, le=31)
+    useOvertime: bool = False
+    defaultMinutesPerUnit: float = Field(default=30, gt=0)
+    operationRates: dict[str, float] = Field(default_factory=dict)
+
+
+class ScheduleTransitionBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    expectedRecordVersion: int = Field(ge=1)
+
+
+class ScheduleReasonBody(ScheduleTransitionBody):
+    reason: str = Field(min_length=1, max_length=512)
+
+
+class MoveScheduleAssignmentBody(ScheduleReasonBody):
+    targetResourceId: str
+    productionDate: date
+
+
 settings = Settings()
 
 
@@ -372,6 +413,13 @@ def current_identity(
                 frozenset({"QUALITY"}),
                 factory_ids,
             )
+        if x_dev_actor == settings.dev_planner_subject_id:
+            return Identity(
+                settings.dev_planner_subject_id,
+                settings.dev_planner_display_name,
+                frozenset({"PLANNER"}),
+                factory_ids,
+            )
         raise Forbidden("unknown developer identity profile")
     token = credentials.credentials if credentials else None
     return identity_provider.authenticate(token)
@@ -418,6 +466,7 @@ quality_service = QualityApplicationService(store, store, store)
 quality_policy_service = QualityPolicyApplicationService(store)
 genealogy_service = GenealogyApplicationService(store)
 master_data_service = ManufacturingResourceApplicationService(store)
+scheduling_service = SchedulingApplicationService(store)
 connector_credentials = (
     {settings.connector_key_id: settings.connector_hmac_secret}
     if settings.connector_key_id and settings.connector_hmac_secret
@@ -432,6 +481,7 @@ get_product_genealogy_tool = GetProductGenealogyTool(store, policy)
 list_quality_candidates_tool = ListQualityCandidatesTool(store, policy)
 app = FastAPI(title="Autonomous MES Core", version="0.1.0")
 dashboard_path = Path(__file__).parent / "static" / "dashboard.html"
+planning_path = Path(__file__).parent / "static" / "planning.html"
 
 
 @app.exception_handler(DomainError)
@@ -494,6 +544,10 @@ def auth_config() -> dict[str, object]:
                 "subjectId": settings.dev_quality_subject_id,
                 "displayName": settings.dev_quality_display_name,
             },
+            {
+                "subjectId": settings.dev_planner_subject_id,
+                "displayName": settings.dev_planner_display_name,
+            },
         ]
         if settings.auth_mode.upper() == "DEV"
         else [],
@@ -530,6 +584,137 @@ def agent_chat(
 @app.get("/", response_class=HTMLResponse, include_in_schema=False)
 def dashboard() -> HTMLResponse:
     return HTMLResponse(dashboard_path.read_text(encoding="utf-8"))
+
+
+@app.get("/planning", response_class=HTMLResponse, include_in_schema=False)
+def planning_console() -> HTMLResponse:
+    return HTMLResponse(planning_path.read_text(encoding="utf-8"))
+
+
+@app.post("/api/v1/planning/resources", status_code=201)
+def register_planning_resource(
+    body: RegisterPlanningResourceBody,
+    identity: Annotated[Identity, Depends(current_identity)],
+) -> dict[str, object]:
+    authorize_human(identity, "PLANNER")
+    return scheduling_service.register_resource(
+        RegisterPlanningResourceCommand(
+            body.code,
+            body.name,
+            body.resourceType,
+            body.workshopId,
+            body.workCenterId,
+            body.dailyCapacityMinutes,
+            body.overtimeCapacityMinutes,
+            body.capabilityCodes,
+            identity.subject_id,
+            str(uuid4()),
+        )
+    )
+
+
+@app.get("/api/v1/planning/resources")
+def list_planning_resources(
+    workshopId: str,
+    identity: Annotated[Identity, Depends(current_identity)],
+) -> list[dict[str, object]]:
+    authorize_human(identity, "PLANNER", "SUPERVISOR", "OPERATOR", "QUALITY")
+    return scheduling_service.list_resources(workshopId)
+
+
+@app.post("/api/v1/planning/plans/generate", status_code=201)
+def generate_schedule_plan(
+    body: GenerateScheduleBody,
+    identity: Annotated[Identity, Depends(current_identity)],
+) -> dict[str, object]:
+    authorize_human(identity, "PLANNER")
+    return scheduling_service.generate(
+        GenerateScheduleCommand(
+            body.workshopId,
+            body.horizonStart,
+            body.horizonDays,
+            body.useOvertime,
+            body.defaultMinutesPerUnit,
+            {key.upper(): value for key, value in body.operationRates.items()},
+            identity.subject_id,
+            str(uuid4()),
+        )
+    )
+
+
+@app.get("/api/v1/planning/plans")
+def list_schedule_plans(
+    workshopId: str,
+    identity: Annotated[Identity, Depends(current_identity)],
+    limit: int = 30,
+) -> list[dict[str, object]]:
+    authorize_human(identity, "PLANNER", "SUPERVISOR", "OPERATOR", "QUALITY")
+    if not 1 <= limit <= 100:
+        raise ValidationError("limit must be between 1 and 100")
+    return scheduling_service.list_plans(workshopId, limit)
+
+
+@app.post("/api/v1/planning/plans/{plan_id}/submit")
+def submit_schedule_plan(
+    plan_id: str,
+    body: ScheduleTransitionBody,
+    identity: Annotated[Identity, Depends(current_identity)],
+) -> dict[str, object]:
+    authorize_human(identity, "PLANNER")
+    return scheduling_service.submit(plan_id, body.expectedRecordVersion, identity.subject_id)
+
+
+@app.post("/api/v1/planning/plans/{plan_id}/assignments/{assignment_id}/move")
+def move_schedule_assignment(
+    plan_id: str,
+    assignment_id: str,
+    body: MoveScheduleAssignmentBody,
+    identity: Annotated[Identity, Depends(current_identity)],
+) -> dict[str, object]:
+    authorize_human(identity, "PLANNER")
+    return scheduling_service.move_assignment(
+        plan_id,
+        assignment_id,
+        body.expectedRecordVersion,
+        body.targetResourceId,
+        body.productionDate,
+        body.reason,
+        identity.subject_id,
+    )
+
+
+@app.post("/api/v1/planning/plans/{plan_id}/approve")
+def approve_schedule_plan(
+    plan_id: str,
+    body: ScheduleReasonBody,
+    identity: Annotated[Identity, Depends(current_identity)],
+) -> dict[str, object]:
+    authorize_human(identity, "SUPERVISOR")
+    return scheduling_service.approve(
+        plan_id, body.expectedRecordVersion, identity.subject_id, body.reason
+    )
+
+
+@app.post("/api/v1/planning/plans/{plan_id}/publish")
+def publish_schedule_plan(
+    plan_id: str,
+    body: ScheduleTransitionBody,
+    identity: Annotated[Identity, Depends(current_identity)],
+) -> dict[str, object]:
+    authorize_human(identity, "SUPERVISOR")
+    return scheduling_service.publish(plan_id, body.expectedRecordVersion, identity.subject_id)
+
+
+@app.post("/api/v1/planning/plans/{plan_id}/withdraw")
+def withdraw_schedule_plan(
+    plan_id: str,
+    body: ScheduleReasonBody,
+    identity: Annotated[Identity, Depends(current_identity)],
+) -> dict[str, object]:
+    authorize_human(identity, "SUPERVISOR")
+    return scheduling_service.withdraw(
+        plan_id, body.expectedRecordVersion, identity.subject_id, body.reason
+    )
 
 
 @app.post("/api/v1/work-orders", status_code=201)

@@ -1,8 +1,10 @@
-from datetime import datetime
+from datetime import date, datetime
 from typing import Any
 
 from sqlalchemy import (
     JSON,
+    Boolean,
+    Date,
     DateTime,
     Float,
     ForeignKey,
@@ -237,6 +239,53 @@ class QualityRiskPolicyRow(Base):
     approved_by: Mapped[str | None] = mapped_column(String(64))
     approval_reason: Mapped[str | None] = mapped_column(String(512))
     effective_from: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class PlanningResourceRow(Base):
+    __tablename__ = "planning_resources"
+    __table_args__ = (
+        UniqueConstraint("workshop_id", "code", name="uq_planning_resource_workshop_code"),
+    )
+
+    resource_id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    code: Mapped[str] = mapped_column(String(64), nullable=False)
+    name: Mapped[str] = mapped_column(String(160), nullable=False)
+    resource_type: Mapped[str] = mapped_column(String(16), nullable=False)
+    workshop_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    work_center_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    daily_capacity_minutes: Mapped[float] = mapped_column(Float, nullable=False)
+    overtime_capacity_minutes: Mapped[float] = mapped_column(Float, nullable=False)
+    capability_codes: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
+    active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    version: Mapped[int] = mapped_column(Integer, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class SchedulePlanRow(Base):
+    __tablename__ = "schedule_plans"
+
+    plan_id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    plan_number: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
+    workshop_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    horizon_start: Mapped[date] = mapped_column(Date, nullable=False)
+    horizon_days: Mapped[int] = mapped_column(Integer, nullable=False)
+    use_overtime: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    generation_parameters: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
+    assignments: Mapped[list[dict[str, Any]]] = mapped_column(JSON, nullable=False)
+    shortages: Mapped[list[dict[str, Any]]] = mapped_column(JSON, nullable=False)
+    metrics: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    record_version: Mapped[int] = mapped_column(Integer, nullable=False)
+    created_by: Mapped[str] = mapped_column(String(64), nullable=False)
+    submitted_by: Mapped[str | None] = mapped_column(String(64))
+    approved_by: Mapped[str | None] = mapped_column(String(64))
+    approval_reason: Mapped[str | None] = mapped_column(String(512))
+    published_by: Mapped[str | None] = mapped_column(String(64))
+    withdrawn_by: Mapped[str | None] = mapped_column(String(64))
+    withdrawal_reason: Mapped[str | None] = mapped_column(String(512))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 

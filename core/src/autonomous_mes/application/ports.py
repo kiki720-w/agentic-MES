@@ -14,6 +14,7 @@ from autonomous_mes.domain.genealogy import (
 from autonomous_mes.domain.master_data import ManufacturingResource
 from autonomous_mes.domain.quality import QualityInspection
 from autonomous_mes.domain.quality_policy import QualityRiskPolicy
+from autonomous_mes.domain.scheduling import PlanningResource, SchedulePlan
 from autonomous_mes.domain.work_order import WorkOrder
 
 if TYPE_CHECKING:
@@ -259,6 +260,35 @@ class ConnectorSecurityStore(Protocol):
     def record_connector_receipt(self, receipt: "ConnectorReceipt") -> None: ...
 
 
+class SchedulingStore(Protocol):
+    def list_work_orders(
+        self,
+        limit: int = 100,
+        offset: int = 0,
+        query: str | None = None,
+        status: str | None = None,
+        include_test: bool = False,
+    ) -> list[WorkOrder]: ...
+    def list_equipment(
+        self,
+        limit: int = 100,
+        offset: int = 0,
+        query: str | None = None,
+        state: str | None = None,
+    ) -> list[Equipment]: ...
+    def get_planning_resource(self, resource_id: str) -> PlanningResource | None: ...
+    def list_planning_resources(self, workshop_id: str) -> list[PlanningResource]: ...
+    def add_planning_resource_atomically(
+        self, resource: PlanningResource, event: DomainEvent
+    ) -> None: ...
+    def get_schedule_plan(self, plan_id: str) -> SchedulePlan | None: ...
+    def list_schedule_plans(self, workshop_id: str, limit: int = 30) -> list[SchedulePlan]: ...
+    def add_schedule_plan_atomically(self, plan: SchedulePlan, event: DomainEvent) -> None: ...
+    def update_schedule_plan_atomically(
+        self, plan: SchedulePlan, expected_record_version: int, event: DomainEvent
+    ) -> None: ...
+
+
 class MesStore(
     WorkOrderStore,
     EquipmentStore,
@@ -269,6 +299,7 @@ class MesStore(
     ConnectorSecurityStore,
     ToolAuditSink,
     QualityPolicyStore,
+    SchedulingStore,
     Protocol,
 ):
     """Combined persistence port used by the current vertical slice."""
