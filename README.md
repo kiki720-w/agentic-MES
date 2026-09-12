@@ -76,10 +76,27 @@
 - `docs/step-37-agent-workspace-and-capacity-input-acceptance.md`：统一附件工作台、工艺工时、可编辑产能与全宽结果页验收记录
 - `docs/step-38-person-centric-scheduling-acceptance.md`：全页面 Agent 入口、真实输入摘要及人员日/周排程验收记录
 - `docs/step-39-provider-neutral-model-gateway-acceptance.md`：供应商中立模型网关、管理员 BYOK 设置与安全回退验收记录
+- `docs/desktop-client-foundation.md`：Windows 桌面客户端、安全 IPC、文件预检和本机打包验收记录
 - `GET /workspace`：自然语言、XLSX/CSV预检与L3排产协作工作台
 - `GET /capacity`：版本化人员与工作单元产能维护
 - `GET /planning/results`：标明人工/虚拟员工身份的全宽排产结果
 - `GET /settings/models`：管理员切换模型供应商、Base URL、模型 ID 与 API Key
+- `desktop/`：CAPAXION Windows 桌面客户端，提供统一 Agent 工作台、文件选择、Core 自动连接及原有业务页面入口
+
+## Windows 桌面版
+
+当前已提供可直接运行的第一版桌面客户端。它不是单纯的浏览器快捷方式：Electron 主进程负责窗口、文件选择、本地 Core 健康检查和受限 IPC，渲染进程不能直接访问 Node.js 或数据库。现有控制塔、排产、结果和产能页面暂时以内部业务视图接入，后续逐步迁移为原生桌面组件。
+
+开发启动：
+
+    cd D:\mes\desktop
+    pnpm dev
+
+生成 Windows 便携版：
+
+    pnpm desktop:build
+
+本机产物：`D:\mes\desktop\release\CAPAXION-0.1.0-x64.exe`。便携版从该目录启动时会查找 `D:\mes\core` 并在需要时启动本地 Core；也可通过 `CAPAXION_REPOSITORY_ROOT`、`CAPAXION_PYTHON` 和 `CAPAXION_CORE_URL` 显式配置。
 
 ## 当前决策门
 

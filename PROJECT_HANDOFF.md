@@ -62,6 +62,8 @@ GitHub：https://github.com/kiki720-w/capaxion
 - 模型设置页面：/settings/models。预设服务直接选择，只有自定义服务显示 Base URL 输入。
 - API Key 不通过状态接口回显、不进入浏览器存储；连接测试失败不会覆盖当前模型。
 - Agent 工作台入口已放入控制塔、排产中心、产能管理和排产结果等主要页面。
+- 已增加 `desktop/` Windows 客户端：WorkBuddy 式 Agent 主工作区、桌面导航、附件选择、Core 状态与安全边界检查。
+- 本机便携版路径为 `D:\mes\desktop\release\CAPAXION-0.1.0-x64.exe`；这是桌面产品化第一版，现有业务页面仍通过内部视图承载，后续逐页原生化。
 
 ## 当前页面
 
@@ -170,6 +172,8 @@ GitHub：https://github.com/kiki720-w/capaxion
 - L3 排产 Agent：core/src/autonomous_mes/application/scheduling_agent.py
 - 模型设置页：core/src/autonomous_mes/static/model_settings.html
 - 最近验收记录：docs/step-34 到 docs/step-39
+- 桌面客户端：desktop（Electron + React + Vite）；构建命令 `pnpm desktop:build`
+- 桌面验收记录：docs/desktop-client-foundation.md
 
 ## 不可破坏的原则
 

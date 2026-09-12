@@ -10,6 +10,10 @@ __pycache__/
 *.py[cod]
 .pytest_cache/
 .mypy_cache/
+.pnpm-store/
+desktop/node_modules/
+desktop/dist/
+desktop/release/
 .ruff_cache/
 .venv/
 dist/
@@ -33,4 +37,3 @@ docx_render_v2/
 docx_render_v3/
 docx_render_v4/
 docx_render_v5/
-
