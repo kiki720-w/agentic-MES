@@ -1,11 +1,19 @@
 import json
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from hashlib import sha256
 from typing import Any
 
 from autonomous_mes.domain.errors import IdempotencyConflict, NotFound, ValidationError
-from autonomous_mes.domain.work_order import FrozenRevisions, WorkOrder
+from autonomous_mes.domain.work_order import FrozenRevisions, ProductionOperation, WorkOrder
+
+
+@dataclass(frozen=True)
+class OperationSpec:
+    sequence: int
+    operation_code: str
+    operation_name: str
+    work_center_id: str
 
 from .ports import IdempotentResult, WorkOrderStore
 
@@ -24,6 +32,7 @@ class CreateWorkOrderCommand:
     routing_revision_id: str
     bom_revision_id: str
     drawing_revision_ids: list[str]
+    operations: list[OperationSpec] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -33,6 +42,20 @@ class ReleaseWorkOrderCommand:
     work_order_id: str
     expected_version: int
     actor_id: str
+
+
+@dataclass(frozen=True)
+class OperationCommand:
+    idempotency_key: str
+    correlation_id: str
+    work_order_id: str
+    sequence: int
+    expected_version: int
+    actor_id: str
+    action: str
+    resource_id: str | None = None
+    good_quantity: int = 0
+    scrap_quantity: int = 0
 
 
 class WorkOrderApplicationService:
@@ -63,6 +86,16 @@ class WorkOrderApplicationService:
                 drawing_revision_ids=command.drawing_revision_ids,
             ),
             correlation_id=command.correlation_id,
+            operations=[
+                ProductionOperation(
+                    sequence=item.sequence,
+                    operation_code=item.operation_code,
+                    operation_name=item.operation_name,
+                    work_center_id=item.work_center_id,
+                    planned_quantity=command.quantity,
+                )
+                for item in command.operations
+            ],
         )
         result = IdempotentResult(
             "create_work_order", work_order.work_order_id, work_order.version, request_hash
@@ -114,6 +147,63 @@ class WorkOrderApplicationService:
             raise ValidationError("limit must be between 1 and 500")
         return [_serialize(item) for item in self._store.list_work_orders(limit)]
 
+    def execute_operation(self, command: OperationCommand) -> dict[str, Any]:
+        request_hash = _command_hash(command)
+        operation_name = f"{command.action}_operation"
+        prior = self._store.get_idempotent_result(command.idempotency_key)
+        if prior:
+            _require_same_request(prior, operation_name, request_hash)
+            return self.get(prior.resource_id)
+
+        current = self._store.get(command.work_order_id)
+        if current is None:
+            raise NotFound("work order not found")
+        if command.action == "dispatch":
+            changed = current.dispatch_operation(
+                command.sequence,
+                command.resource_id or "",
+                command.actor_id,
+                command.expected_version,
+                command.correlation_id,
+            )
+        elif command.action == "start":
+            changed = current.start_operation(
+                command.sequence,
+                command.actor_id,
+                command.expected_version,
+                command.correlation_id,
+            )
+        elif command.action == "report":
+            changed = current.report_operation(
+                command.sequence,
+                command.good_quantity,
+                command.scrap_quantity,
+                command.actor_id,
+                command.expected_version,
+                command.correlation_id,
+            )
+        elif command.action == "complete":
+            changed = current.complete_operation(
+                command.sequence,
+                command.actor_id,
+                command.expected_version,
+                command.correlation_id,
+            )
+        else:
+            raise ValidationError("unsupported operation action")
+
+        result = IdempotentResult(
+            operation_name, changed.work_order_id, changed.version, request_hash
+        )
+        self._store.save_atomically(
+            work_order=changed.clear_pending_events(),
+            expected_stored_version=current.version,
+            events=changed.pending_events,
+            idempotency_key=command.idempotency_key,
+            idempotent_result=result,
+        )
+        return self.get(changed.work_order_id)
+
 
 def _serialize(item: WorkOrder) -> dict[str, Any]:
     return {
@@ -132,19 +222,36 @@ def _serialize(item: WorkOrder) -> dict[str, Any]:
             "bomRevisionId": item.revisions.bom_revision_id,
             "drawingRevisionIds": list(item.revisions.drawing_revision_ids),
         },
+        "operations": [
+            {
+                "sequence": operation.sequence,
+                "operationCode": operation.operation_code,
+                "operationName": operation.operation_name,
+                "workCenterId": operation.work_center_id,
+                "plannedQuantity": operation.planned_quantity,
+                "status": operation.status.value,
+                "assignedResourceId": operation.assigned_resource_id,
+                "goodQuantity": operation.good_quantity,
+                "scrapQuantity": operation.scrap_quantity,
+            }
+            for operation in item.operations
+        ],
         "asOf": item.updated_at.isoformat(),
         "dataFreshness": "CURRENT",
         "sourceObjects": [{"type": "WorkOrder", "id": item.work_order_id}],
     }
 
 
-def _command_hash(command: object) -> str:
-    payload = {
-        key: value.isoformat() if isinstance(value, datetime) else value
-        for key, value in vars(command).items()
-        if key not in {"idempotency_key", "correlation_id"}
-    }
-    encoded = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
+def _command_hash(command: Any) -> str:
+    payload = asdict(command)
+    payload.pop("idempotency_key", None)
+    payload.pop("correlation_id", None)
+    encoded = json.dumps(
+        payload,
+        sort_keys=True,
+        separators=(",", ":"),
+        default=lambda value: value.isoformat() if isinstance(value, datetime) else str(value),
+    ).encode()
     return sha256(encoded).hexdigest()
 
 

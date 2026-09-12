@@ -1,6 +1,6 @@
 # Autonomous MES Core
 
-第一条垂直切片：创建工单、释放工单、原子写入Outbox、查询工单，以及Agent只读`get_work_order`工具。
+当前垂直切片覆盖创建/释放工单，以及机械加工工序的派工、开工、报工、完工；每个动作都会原子写入Outbox，并支持Agent只读`get_work_order`工具。
 
 本目录是自主实现，不依赖`candidates/`中的任何候选MES代码。
 
@@ -23,6 +23,10 @@ uvicorn autonomous_mes.api:app --app-dir src --reload
 
 - `POST /api/v1/work-orders`
 - `POST /api/v1/work-orders/{workOrderId}/release`
+- `POST /api/v1/work-orders/{workOrderId}/operations/{sequence}/dispatch`
+- `POST /api/v1/work-orders/{workOrderId}/operations/{sequence}/start`
+- `POST /api/v1/work-orders/{workOrderId}/operations/{sequence}/report`
+- `POST /api/v1/work-orders/{workOrderId}/operations/{sequence}/complete`
 - `GET /api/v1/work-orders/{workOrderId}`
 - `POST /api/v1/agent-tools/get-work-order`
 - `GET /health/live`
@@ -40,7 +44,7 @@ docker compose up -d postgres
 .\.venv\Scripts\alembic.exe upgrade head
 ```
 
-首个迁移创建`work_orders`、`idempotency_records`、`event_outbox`和`agent_tool_audits`。`.env`不会进入Git。
+迁移创建`work_orders`、`idempotency_records`、`event_outbox`和`agent_tool_audits`，并在工单中持久化已冻结的生产工序路线。`.env`不会进入Git。
 
 单次运行Outbox发布Worker：
 

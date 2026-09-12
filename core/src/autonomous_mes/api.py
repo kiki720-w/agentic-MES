@@ -10,6 +10,8 @@ from autonomous_mes.application.agent_tools import GetWorkOrderTool, ToolContext
 from autonomous_mes.application.ports import MesStore
 from autonomous_mes.application.work_orders import (
     CreateWorkOrderCommand,
+    OperationCommand,
+    OperationSpec,
     ReleaseWorkOrderCommand,
     WorkOrderApplicationService,
 )
@@ -28,6 +30,14 @@ class RevisionsBody(BaseModel):
     drawingRevisionIds: list[str] = Field(default_factory=list)
 
 
+class OperationBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    sequence: int
+    operationCode: str
+    operationName: str
+    workCenterId: str
+
+
 class CreateWorkOrderBody(BaseModel):
     model_config = ConfigDict(extra="forbid")
     humanCode: str
@@ -37,12 +47,22 @@ class CreateWorkOrderBody(BaseModel):
     dueAt: datetime
     priority: int = 50
     revisions: RevisionsBody
+    operations: list[OperationBody] = Field(default_factory=list)
 
 
 class ReleaseWorkOrderBody(BaseModel):
     model_config = ConfigDict(extra="forbid")
     expectedVersion: int
     actorId: str
+
+
+class OperationActionBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    expectedVersion: int
+    actorId: str
+    resourceId: str | None = None
+    goodQuantity: int = 0
+    scrapQuantity: int = 0
 
 
 class AgentToolBody(BaseModel):
@@ -126,6 +146,15 @@ def create_work_order(
             routing_revision_id=body.revisions.routingRevisionId,
             bom_revision_id=body.revisions.bomRevisionId,
             drawing_revision_ids=body.revisions.drawingRevisionIds,
+            operations=[
+                OperationSpec(
+                    sequence=item.sequence,
+                    operation_code=item.operationCode,
+                    operation_name=item.operationName,
+                    work_center_id=item.workCenterId,
+                )
+                for item in body.operations
+            ],
         )
     )
 
@@ -162,6 +191,30 @@ def release_work_order(
 @app.get("/api/v1/work-orders/{work_order_id}")
 def get_work_order(work_order_id: str) -> dict[str, object]:
     return service.get(work_order_id)
+
+
+@app.post("/api/v1/work-orders/{work_order_id}/operations/{sequence}/{action}")
+def execute_operation(
+    work_order_id: str,
+    sequence: int,
+    action: str,
+    body: OperationActionBody,
+    idempotency_key: str = Header(...),
+) -> dict[str, object]:
+    return service.execute_operation(
+        OperationCommand(
+            idempotency_key=idempotency_key,
+            correlation_id=str(uuid4()),
+            work_order_id=work_order_id,
+            sequence=sequence,
+            expected_version=body.expectedVersion,
+            actor_id=body.actorId,
+            action=action,
+            resource_id=body.resourceId,
+            good_quantity=body.goodQuantity,
+            scrap_quantity=body.scrapQuantity,
+        )
+    )
 
 
 @app.post("/api/v1/agent-tools/get-work-order")

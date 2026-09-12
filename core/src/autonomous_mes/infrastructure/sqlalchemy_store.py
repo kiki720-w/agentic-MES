@@ -8,7 +8,13 @@ from sqlalchemy.orm import Session, sessionmaker
 from autonomous_mes.application.ports import IdempotentResult
 from autonomous_mes.domain.errors import IdempotencyConflict, InvalidTransition
 from autonomous_mes.domain.events import DomainEvent
-from autonomous_mes.domain.work_order import FrozenRevisions, WorkOrder, WorkOrderStatus
+from autonomous_mes.domain.work_order import (
+    FrozenRevisions,
+    OperationStatus,
+    ProductionOperation,
+    WorkOrder,
+    WorkOrderStatus,
+)
 
 from .models import AgentToolAuditRow, EventOutboxRow, IdempotencyRecordRow, WorkOrderRow
 
@@ -132,6 +138,7 @@ def _row_values(item: WorkOrder) -> dict[str, Any]:
         "routing_revision_id": item.revisions.routing_revision_id,
         "bom_revision_id": item.revisions.bom_revision_id,
         "drawing_revision_ids": list(item.revisions.drawing_revision_ids),
+        "operations": [_operation_to_dict(operation) for operation in item.operations],
         "status": item.status.value,
         "version": item.version,
         "created_at": item.created_at,
@@ -162,6 +169,35 @@ def _to_domain(row: WorkOrderRow) -> WorkOrder:
         version=row.version,
         created_at=row.created_at,
         updated_at=row.updated_at,
+        operations=[_operation_from_dict(item) for item in row.operations],
+    )
+
+
+def _operation_to_dict(item: ProductionOperation) -> dict[str, Any]:
+    return {
+        "sequence": item.sequence,
+        "operationCode": item.operation_code,
+        "operationName": item.operation_name,
+        "workCenterId": item.work_center_id,
+        "plannedQuantity": item.planned_quantity,
+        "status": item.status.value,
+        "assignedResourceId": item.assigned_resource_id,
+        "goodQuantity": item.good_quantity,
+        "scrapQuantity": item.scrap_quantity,
+    }
+
+
+def _operation_from_dict(item: dict[str, Any]) -> ProductionOperation:
+    return ProductionOperation(
+        sequence=int(item["sequence"]),
+        operation_code=str(item["operationCode"]),
+        operation_name=str(item["operationName"]),
+        work_center_id=str(item["workCenterId"]),
+        planned_quantity=int(item["plannedQuantity"]),
+        status=OperationStatus(str(item.get("status", "PENDING"))),
+        assigned_resource_id=item.get("assignedResourceId"),
+        good_quantity=int(item.get("goodQuantity", 0)),
+        scrap_quantity=int(item.get("scrapQuantity", 0)),
     )
 
 

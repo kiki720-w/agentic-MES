@@ -22,6 +22,7 @@ class WorkOrderRow(Base):
     routing_revision_id: Mapped[str] = mapped_column(String(64), nullable=False)
     bom_revision_id: Mapped[str] = mapped_column(String(64), nullable=False)
     drawing_revision_ids: Mapped[list[str]] = mapped_column(JSON, nullable=False)
+    operations: Mapped[list[dict[str, Any]]] = mapped_column(JSON, nullable=False, default=list)
     status: Mapped[str] = mapped_column(String(32), nullable=False)
     version: Mapped[int] = mapped_column(Integer, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)

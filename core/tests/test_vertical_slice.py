@@ -8,6 +8,8 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..",
 from autonomous_mes.application.agent_tools import GetWorkOrderTool, ToolContext
 from autonomous_mes.application.work_orders import (
     CreateWorkOrderCommand,
+    OperationCommand,
+    OperationSpec,
     ReleaseWorkOrderCommand,
     WorkOrderApplicationService,
 )
@@ -137,6 +139,102 @@ class VerticalSliceTests(unittest.TestCase):
         audit = self.store.list_outbox()[-1]
         self.assertEqual("AgentToolCallRecorded", audit["eventType"])
         self.assertEqual("DENY", audit["payload"]["policyDecision"])
+
+    def test_operation_route_executes_dispatch_start_report_complete(self):
+        command = create_command("operation-create")
+        command = CreateWorkOrderCommand(
+            **{
+                **command.__dict__,
+                "operations": [
+                    OperationSpec(10, "TURN", "车削", "WC-LATHE-01"),
+                    OperationSpec(20, "GRIND", "外圆磨", "WC-GRIND-01"),
+                ],
+            }
+        )
+        created = self.service.create(command)
+        current = self.service.release(
+            ReleaseWorkOrderCommand(
+                "operation-release", "corr-release", created["workOrderId"], 1, "planner-1"
+            )
+        )
+
+        actions = [
+            ("dispatch", {"resource_id": "LATHE-01"}),
+            ("start", {}),
+            ("report", {"good_quantity": 9, "scrap_quantity": 1}),
+            ("complete", {}),
+        ]
+        for index, (action, detail) in enumerate(actions):
+            current = self.service.execute_operation(
+                OperationCommand(
+                    idempotency_key=f"operation-{action}",
+                    correlation_id=f"corr-{action}",
+                    work_order_id=created["workOrderId"],
+                    sequence=10,
+                    expected_version=current["version"],
+                    actor_id="operator-1",
+                    action=action,
+                    **detail,
+                )
+            )
+            self.assertEqual(3 + index, current["version"])
+
+        self.assertEqual("RELEASED", current["status"])
+        self.assertEqual("COMPLETED", current["operations"][0]["status"])
+        self.assertEqual(9, current["operations"][0]["goodQuantity"])
+        self.assertEqual(1, current["operations"][0]["scrapQuantity"])
+
+        for action, detail in [
+            ("dispatch", {"resource_id": "GRIND-01"}),
+            ("start", {}),
+            ("report", {"good_quantity": 10}),
+            ("complete", {}),
+        ]:
+            current = self.service.execute_operation(
+                OperationCommand(
+                    idempotency_key=f"operation-second-{action}",
+                    correlation_id=f"corr-second-{action}",
+                    work_order_id=created["workOrderId"],
+                    sequence=20,
+                    expected_version=current["version"],
+                    actor_id="operator-1",
+                    action=action,
+                    **detail,
+                )
+            )
+        self.assertEqual("COMPLETED", current["status"])
+        self.assertEqual("COMPLETED", current["operations"][1]["status"])
+
+    def test_cannot_dispatch_second_operation_before_first_completes(self):
+        command = create_command("sequence-create")
+        command = CreateWorkOrderCommand(
+            **{
+                **command.__dict__,
+                "operations": [
+                    OperationSpec(10, "TURN", "车削", "WC-LATHE-01"),
+                    OperationSpec(20, "GRIND", "外圆磨", "WC-GRIND-01"),
+                ],
+            }
+        )
+        created = self.service.create(command)
+        released = self.service.release(
+            ReleaseWorkOrderCommand(
+                "sequence-release", "corr-release", created["workOrderId"], 1, "planner-1"
+            )
+        )
+        with self.assertRaises(InvalidTransition):
+            self.service.execute_operation(
+                OperationCommand(
+                    "sequence-dispatch",
+                    "corr-dispatch",
+                    created["workOrderId"],
+                    20,
+                    released["version"],
+                    "operator-1",
+                    "dispatch",
+                    resource_id="GRIND-01",
+                )
+            )
 
 
 if __name__ == "__main__":
