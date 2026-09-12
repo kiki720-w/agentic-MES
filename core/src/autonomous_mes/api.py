@@ -826,6 +826,16 @@ def latest_scheduling_snapshot(
     return scheduling_service.latest_snapshot(workshopId, include_payload=includePayload)
 
 
+@app.get("/api/v1/planning/input-summary")
+def planning_input_summary(
+    workshopId: str,
+    identity: Annotated[Identity, Depends(current_identity)],
+    limit: int = 100,
+) -> dict[str, object]:
+    authorize_human(identity, "PLANNER", "SUPERVISOR", "OPERATOR", "QUALITY")
+    return scheduling_service.input_summary(workshopId, limit)
+
+
 @app.post("/api/v1/planning/imports/spreadsheet/preview")
 async def preview_scheduling_spreadsheet(
     request: Request,

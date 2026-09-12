@@ -114,6 +114,103 @@ class SchedulingApplicationService:
             for item in self._store.list_planning_resources(workshop_id)
         ]
 
+    def input_summary(self, workshop_id: str, limit: int = 100) -> dict[str, Any]:
+        if not 1 <= limit <= 500:
+            raise ValidationError("input summary limit must be between 1 and 500")
+        snapshot = self._store.get_latest_scheduling_snapshot(workshop_id)
+        resources = self._candidates(workshop_id, snapshot)
+        orders, constraints = self._orders(workshop_id, snapshot)
+        demand_rows: list[dict[str, Any]] = []
+        standard_count = 0
+        if snapshot is not None:
+            raw_orders = snapshot.payload["workOrders"]
+            for order in raw_orders:
+                for operation in order.get("operations", []):
+                    planned = float(operation.get("plannedQuantity", order["quantity"]))
+                    remaining = max(
+                        0.0,
+                        planned
+                        - float(operation.get("goodQuantity", 0))
+                        - float(operation.get("scrapQuantity", 0)),
+                    )
+                    unit_minutes = operation.get("minutesPerUnit")
+                    setup_minutes = float(operation.get("setupMinutes", 0))
+                    if unit_minutes is not None:
+                        standard_count += 1
+                    demand_rows.append(
+                        {
+                            "workOrderCode": str(order["code"]),
+                            "operationSequence": int(operation["sequence"]),
+                            "operationCode": str(operation["operationCode"]),
+                            "operationName": str(operation["operationName"]),
+                            "workCenterId": str(operation["workCenterId"]),
+                            "plannedQuantity": planned,
+                            "remainingQuantity": remaining,
+                            "minutesPerUnit": unit_minutes,
+                            "setupMinutes": setup_minutes,
+                            "requiredMinutes": (
+                                round(remaining * float(unit_minutes) + setup_minutes, 3)
+                                if unit_minutes is not None
+                                else None
+                            ),
+                            "demandSource": (
+                                "SNAPSHOT_PROCESS_STANDARD"
+                                if unit_minutes is not None
+                                else "FALLBACK_REQUIRED"
+                            ),
+                        }
+                    )
+            source = {
+                "type": "EXTERNAL_SCHEDULING_SNAPSHOT",
+                "sourceSystem": snapshot.source_system,
+                "sourceRevision": snapshot.source_revision,
+                "observedAt": snapshot.observed_at.isoformat(),
+                "checksum": snapshot.checksum,
+            }
+        else:
+            for order in orders:
+                for operation in order.operations:
+                    remaining = max(
+                        0,
+                        operation.planned_quantity
+                        - operation.good_quantity
+                        - operation.scrap_quantity,
+                    )
+                    demand_rows.append(
+                        {
+                            "workOrderCode": order.human_code,
+                            "operationSequence": operation.sequence,
+                            "operationCode": operation.operation_code,
+                            "operationName": operation.operation_name,
+                            "workCenterId": operation.work_center_id,
+                            "plannedQuantity": operation.planned_quantity,
+                            "remainingQuantity": remaining,
+                            "minutesPerUnit": None,
+                            "setupMinutes": 0,
+                            "requiredMinutes": None,
+                            "demandSource": "FALLBACK_REQUIRED",
+                        }
+                    )
+            source = {
+                "type": "DEMO_PROJECTION",
+                "sourceSystem": "LEGACY_SIMULATOR_READ_MODEL",
+                "warning": "仅用于演示排产样式，不是已连接的真实生产快照",
+            }
+        return {
+            "workshopId": workshop_id,
+            "source": source,
+            "workOrderCount": len(orders),
+            "operationCount": len(demand_rows),
+            "resourceCount": len(resources),
+            "personResourceCount": sum(item.resource_type == "PERSON" for item in resources),
+            "cellResourceCount": sum(item.resource_type != "PERSON" for item in resources),
+            "processStandardCount": standard_count,
+            "fallbackOperationCount": len(demand_rows) - standard_count,
+            "blockedOrderCount": len(constraints),
+            "demandRows": demand_rows[:limit],
+            "truncated": len(demand_rows) > limit,
+        }
+
     def update_resource(self, command: UpdatePlanningResourceCommand) -> dict[str, Any]:
         current = self._store.get_planning_resource(command.resource_id)
         if current is None:
@@ -246,6 +343,9 @@ class SchedulingApplicationService:
                             "resourceCode": selected.code,
                             "resourceName": selected.name,
                             "resourceType": selected.resource_type,
+                            "resourceDailyCapacityMinutes": selected.capacity(
+                                command.use_overtime
+                            ),
                             "productionDate": production_day.isoformat(),
                             "plannedWorkMinutes": round(minutes, 3),
                             "plannedQuantity": round(productive_minutes / rate, 3),
@@ -446,6 +546,7 @@ class SchedulingApplicationService:
                 "resourceCode": target.code,
                 "resourceName": target.name,
                 "resourceType": target.resource_type,
+                "resourceDailyCapacityMinutes": target.capacity(current.use_overtime),
             },
             production_date,
             reason,

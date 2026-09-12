@@ -84,6 +84,7 @@ class SchedulingTests(unittest.TestCase):
         self.assertIsInstance(assignments, list)
         assert isinstance(assignments, list)
         self.assertEqual("WO-HIGH", assignments[0]["workOrderCode"])
+        self.assertEqual(480, assignments[0]["resourceDailyCapacityMinutes"])
         per_day: dict[str, float] = {}
         for item in assignments:
             day = str(item["productionDate"])
@@ -92,6 +93,19 @@ class SchedulingTests(unittest.TestCase):
         self.assertNotIn("2026-09-13", per_day)
         self.assertEqual(2, plan["metrics"]["scheduledOrderCount"])
         self.assertEqual(0, plan["metrics"]["shortageCount"])
+
+    def test_input_summary_exposes_demo_projection_instead_of_zeroes(self) -> None:
+        self.create_order("WO-VISIBLE", 70)
+        self.register_person()
+
+        summary = self.scheduling.input_summary("WS-1")
+
+        self.assertEqual("DEMO_PROJECTION", summary["source"]["type"])
+        self.assertEqual(1, summary["workOrderCount"])
+        self.assertEqual(1, summary["operationCount"])
+        self.assertEqual(1, summary["personResourceCount"])
+        self.assertEqual(1, summary["fallbackOperationCount"])
+        self.assertEqual("WO-VISIBLE", summary["demandRows"][0]["workOrderCode"])
 
     def test_plan_lifecycle_enforces_maker_checker(self) -> None:
         self.create_order("WO-GOVERNED", 90)
@@ -146,8 +160,8 @@ class SchedulingTests(unittest.TestCase):
                 "PERSON",
                 "WS-1",
                 "WC-TURN",
+                360,
                 480,
-                600,
                 ["TURN"],
                 "demo-planner",
                 str(uuid4()),
@@ -168,6 +182,7 @@ class SchedulingTests(unittest.TestCase):
 
         self.assertEqual(2, moved["recordVersion"])
         self.assertEqual("P-02", moved["assignments"][0]["resourceCode"])
+        self.assertEqual(360, moved["assignments"][0]["resourceDailyCapacityMinutes"])
         self.assertEqual("2026-09-15", moved["assignments"][0]["productionDate"])
         self.assertEqual("ScheduleAssignmentMoved", self.store.list_outbox()[-1]["eventType"])
 

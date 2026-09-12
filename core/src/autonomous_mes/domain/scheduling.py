@@ -306,7 +306,7 @@ class SchedulePlan:
         self,
         expected_record_version: int,
         assignment_id: str,
-        target_resource: dict[str, str],
+        target_resource: dict[str, Any],
         production_date: date,
         reason: str,
         actor_id: str,
@@ -327,6 +327,9 @@ class SchedulePlan:
             "resourceCode": target_resource["resourceCode"],
             "resourceName": target_resource["resourceName"],
             "resourceType": target_resource["resourceType"],
+            "resourceDailyCapacityMinutes": target_resource[
+                "resourceDailyCapacityMinutes"
+            ],
             "productionDate": production_date.isoformat(),
             "deliveryStatus": (
                 "LATE"

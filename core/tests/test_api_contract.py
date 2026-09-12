@@ -236,10 +236,19 @@ class ApiContractTests(unittest.TestCase):
         self.assertEqual(200, planning_page.status_code)
         self.assertIn("有限产能排产", planning_page.text)
         self.assertIn("人员与工作单元产能", planning_page.text)
-        self.assertIn("全宽排产结果", planning_page.text)
-        self.assertEqual(200, self.client.get("/planning/results").status_code)
-        self.assertEqual(200, self.client.get("/capacity").status_code)
-        self.assertEqual(200, self.client.get("/workspace").status_code)
+        self.assertIn("人员日排程与周计划", planning_page.text)
+        input_summary = self.client.get(
+            "/api/v1/planning/input-summary",
+            params={"workshopId": "WS-MACH-01"},
+            headers=planner_headers,
+        )
+        self.assertEqual(200, input_summary.status_code, input_summary.text)
+        self.assertIn("operationCount", input_summary.json())
+        self.assertIn("fallbackOperationCount", input_summary.json())
+        for path in ("/planning/results", "/capacity", "/workspace", "/simulator"):
+            page = self.client.get(path)
+            self.assertEqual(200, page.status_code)
+            self.assertIn("Agent 工作台", page.text)
 
     def test_dashboard_and_read_models_are_available(self):
         dashboard = self.client.get("/")

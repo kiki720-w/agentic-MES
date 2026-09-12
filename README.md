@@ -71,6 +71,7 @@
 - `docs/step-35-control-plane-and-scheduling-agent-acceptance.md`：控制层产品重构、外部排产快照和L3智能体迁移验收记录
 - `docs/step-36-connector-developer-kit-acceptance.md`：供应商中立排产快照Schema、样例和HMAC推送客户端验收记录
 - `docs/step-37-agent-workspace-and-capacity-input-acceptance.md`：统一附件工作台、工艺工时、可编辑产能与全宽结果页验收记录
+- `docs/step-38-person-centric-scheduling-acceptance.md`：全页面 Agent 入口、真实输入摘要及人员日/周排程验收记录
 - `GET /workspace`：自然语言、XLSX/CSV预检与L3排产协作工作台
 - `GET /capacity`：版本化人员与工作单元产能维护
 - `GET /planning/results`：标明人工/虚拟员工身份的全宽排产结果
