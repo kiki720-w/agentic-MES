@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from datetime import datetime
 from typing import TYPE_CHECKING, Any, Protocol
 
 from autonomous_mes.domain.agent import AgentProposal, ProposalStatus
@@ -61,6 +62,16 @@ class WorkOrderStore(Protocol):
     def get_idempotent_result(self, idempotency_key: str) -> IdempotentResult | None: ...
 
     def list_outbox(self) -> list[dict[str, Any]]: ...
+
+    def list_recent_outbox(
+        self,
+        limit: int = 100,
+        offset: int = 0,
+        before_occurred_at: datetime | None = None,
+        before_event_id: str | None = None,
+    ) -> list[dict[str, Any]]: ...
+
+    def count_outbox(self) -> int: ...
 
 
 class AuthorizationPolicy(Protocol):

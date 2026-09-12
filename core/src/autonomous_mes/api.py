@@ -1,5 +1,8 @@
+import base64
+import binascii
 import csv
 import io
+import json
 from datetime import datetime
 from pathlib import Path
 from typing import Annotated
@@ -498,9 +501,51 @@ def work_order_summary(includeTest: bool = False) -> dict[str, object]:
 
 
 @app.get("/api/v1/system/outbox")
-def list_outbox() -> dict[str, object]:
-    items = store.list_outbox()[-100:]
-    return {"items": list(reversed(items)), "count": len(items)}
+def list_outbox(
+    limit: int = 100,
+    offset: int = 0,
+    cursor: str | None = None,
+) -> dict[str, object]:
+    if limit < 1 or limit > 100:
+        raise ValidationError("limit must be between 1 and 100")
+    if offset < 0 or offset > 10_000_000:
+        raise ValidationError("offset must be between 0 and 10000000")
+    if cursor and offset:
+        raise ValidationError("cursor and offset cannot be combined")
+    before_occurred_at: datetime | None = None
+    before_event_id: str | None = None
+    if cursor:
+        try:
+            padding = "=" * (-len(cursor) % 4)
+            values = json.loads(base64.urlsafe_b64decode(cursor + padding))
+            before_occurred_at = datetime.fromisoformat(values["occurredAt"])
+            before_event_id = str(values["eventId"])
+            if before_occurred_at.tzinfo is None or not before_event_id:
+                raise ValueError("cursor values are incomplete")
+        except (ValueError, KeyError, TypeError, binascii.Error) as exc:
+            raise ValidationError("cursor is invalid") from exc
+    candidates = store.list_recent_outbox(
+        limit + 1,
+        offset,
+        before_occurred_at,
+        before_event_id,
+    )
+    items = candidates[:limit]
+    next_cursor: str | None = None
+    if len(candidates) > limit:
+        cursor_payload = json.dumps(
+            {"occurredAt": items[-1]["occurredAt"], "eventId": items[-1]["eventId"]},
+            separators=(",", ":"),
+        ).encode()
+        next_cursor = base64.urlsafe_b64encode(cursor_payload).decode().rstrip("=")
+    return {
+        "items": items,
+        "count": len(items),
+        "total": store.count_outbox(),
+        "limit": limit,
+        "offset": offset,
+        "nextCursor": next_cursor,
+    }
 
 
 @app.post("/api/v1/agent/incidents/analyze")

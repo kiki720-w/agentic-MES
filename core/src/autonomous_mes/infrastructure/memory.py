@@ -1,4 +1,5 @@
 from copy import deepcopy
+from datetime import datetime
 from threading import RLock
 from typing import Any
 
@@ -151,6 +152,28 @@ class InMemoryWorkOrderStore:
     def list_outbox(self) -> list[dict[str, Any]]:
         with self._lock:
             return deepcopy(self._outbox)
+
+    def list_recent_outbox(
+        self,
+        limit: int = 100,
+        offset: int = 0,
+        before_occurred_at: datetime | None = None,
+        before_event_id: str | None = None,
+    ) -> list[dict[str, Any]]:
+        with self._lock:
+            items = list(reversed(self._outbox))
+            if before_occurred_at and before_event_id:
+                cursor = (before_occurred_at, before_event_id)
+                items = [
+                    item
+                    for item in items
+                    if (datetime.fromisoformat(item["occurredAt"]), item["eventId"]) < cursor
+                ]
+            return deepcopy(items[offset : offset + limit])
+
+    def count_outbox(self) -> int:
+        with self._lock:
+            return len(self._outbox)
 
     def record_tool_event(self, event: DomainEvent) -> None:
         with self._lock:

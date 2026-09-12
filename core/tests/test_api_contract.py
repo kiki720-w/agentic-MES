@@ -80,6 +80,22 @@ class ApiContractTests(unittest.TestCase):
         self.assertEqual(200, outbox.status_code)
         self.assertIn("items", outbox.json())
 
+        first_events = self.client.get("/api/v1/system/outbox", params={"limit": 2}).json()
+        if first_events["nextCursor"]:
+            next_events = self.client.get(
+                "/api/v1/system/outbox",
+                params={"limit": 2, "cursor": first_events["nextCursor"]},
+            ).json()
+            first_ids = {item["eventId"] for item in first_events["items"]}
+            next_ids = {item["eventId"] for item in next_events["items"]}
+            self.assertFalse(first_ids.intersection(next_ids))
+
+        invalid_cursor = self.client.get(
+            "/api/v1/system/outbox",
+            params={"cursor": "eyJvY2N1cnJlZEF0IjoiMjAyNi0wMS0wMVQwMDowMDowMCIsImV2ZW50SWQiOiJ4In0"},
+        )
+        self.assertEqual(409, invalid_cursor.status_code)
+
     def test_create_is_idempotent_over_http(self):
         body, key, first = self._create()
         second = self.client.post(

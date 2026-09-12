@@ -1,3 +1,4 @@
+from datetime import datetime
 from typing import Any
 from uuid import uuid4
 
@@ -179,6 +180,47 @@ class SqlAlchemyWorkOrderStore:
                 }
                 for row in rows
             ]
+
+    def list_recent_outbox(
+        self,
+        limit: int = 100,
+        offset: int = 0,
+        before_occurred_at: datetime | None = None,
+        before_event_id: str | None = None,
+    ) -> list[dict[str, Any]]:
+        with self._sessions() as session:
+            statement = select(EventOutboxRow)
+            if before_occurred_at and before_event_id:
+                statement = statement.where(
+                    or_(
+                        EventOutboxRow.occurred_at < before_occurred_at,
+                        (
+                            (EventOutboxRow.occurred_at == before_occurred_at)
+                            & (EventOutboxRow.event_id < before_event_id)
+                        ),
+                    )
+                )
+            rows = session.scalars(
+                statement
+                .order_by(EventOutboxRow.occurred_at.desc(), EventOutboxRow.event_id.desc())
+                .offset(offset)
+                .limit(limit)
+            ).all()
+            return [
+                {
+                    "eventId": row.event_id,
+                    "eventType": row.event_type,
+                    "aggregateId": row.aggregate_id,
+                    "occurredAt": row.occurred_at.isoformat(),
+                    "payload": row.payload,
+                    "publishStatus": row.publish_status,
+                }
+                for row in rows
+            ]
+
+    def count_outbox(self) -> int:
+        with self._sessions() as session:
+            return int(session.scalar(select(func.count()).select_from(EventOutboxRow)) or 0)
 
     def record_tool_event(self, event: DomainEvent) -> None:
         payload = event.payload

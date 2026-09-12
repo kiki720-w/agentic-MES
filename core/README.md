@@ -104,6 +104,8 @@ Agent可通过`POST /api/v1/agent-tools/get-product-genealogy`读取序列号谱
 
 生产控制台按大样本场景改为工单服务端分页、编号搜索、状态筛选和数据库全量KPI聚合。模块切换只请求当前模块，浏览器页签不可见时暂停轮询，长列表元素启用延迟渲染。`GET /api/v1/work-orders`支持`limit`、`offset`、`query`和`status`，返回`total`；数据库迁移`0014`增加状态/更新时间查询索引。
 
+事件追溯API只读取有界窗口，并支持基于`occurred_at + event_id`的游标翻页；页面通过“加载更早”逐批追加，不使用百万级深offset。迁移`0015`增加事件时间线复合索引。`scripts/scale-benchmark.py`只能在`agentic_mes_scale*`隔离schema内运行，已用于10万工单、100万事件实测。
+
 启用 DeepSeek 时只需在本机 `.env` 设置 `AUTONOMOUS_MES_DEEPSEEK_API_KEY` 并重启 API。默认使用 `deepseek-v4-flash`、JSON 输出、关闭思考模式和 12 秒超时。每条提案记录 `narrativeSource` 与 `modelName`；不要把真实密钥写入仓库。
 
 ### 本机D盘免安装环境
