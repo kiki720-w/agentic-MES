@@ -72,6 +72,7 @@ class ApiContractTests(unittest.TestCase):
         self.assertIn("质量检验与返工", dashboard.text)
         self.assertIn("DeepSeek 诊断解释网关", dashboard.text)
         self.assertIn("自然语言 Agent", dashboard.text)
+        self.assertIn("确认并创建检验", dashboard.text)
 
         orders = self.client.get("/api/v1/work-orders")
         outbox = self.client.get("/api/v1/system/outbox")
@@ -97,6 +98,12 @@ class ApiContractTests(unittest.TestCase):
         self.assertEqual(409, invalid_cursor.status_code)
         projection = self.client.get("/api/v1/system/operation-projection-health").json()
         self.assertEqual("CONSISTENT", projection["status"])
+
+        missing_quality_proposal = self.client.post(
+            f"/api/v1/agent/proposals/{uuid4()}/create-inspection",
+            json={"sampleSize": 1, "reason": "contract check"},
+        )
+        self.assertEqual(404, missing_quality_proposal.status_code)
 
     def test_operational_read_models_are_paginated_and_filterable(self):
         equipment_code = f"CNC-PAGE-{uuid4().hex[:8]}"

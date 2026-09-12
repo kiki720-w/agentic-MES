@@ -98,7 +98,13 @@ class QualityInspection:
             updated_at=utc_now(),
         )
 
-    def event(self, event_type: str, correlation_id: str, actor_id: str) -> DomainEvent:
+    def event(
+        self,
+        event_type: str,
+        correlation_id: str,
+        actor_id: str,
+        source_proposal_id: str | None = None,
+    ) -> DomainEvent:
         return DomainEvent.create(
             event_type=event_type,
             aggregate_type="QualityInspection",
@@ -116,5 +122,6 @@ class QualityInspection:
                     self.calibration_due_at.isoformat() if self.calibration_due_at else None
                 ),
                 "actorId": actor_id,
+                **({"sourceProposalId": source_proposal_id} if source_proposal_id else {}),
             },
         )

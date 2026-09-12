@@ -14,7 +14,11 @@ from autonomous_mes.application.master_data import (
     RegisterManufacturingResourceCommand,
 )
 from autonomous_mes.application.outbox import OutboxMessage
-from autonomous_mes.application.quality import CreateInspectionCommand, QualityApplicationService
+from autonomous_mes.application.quality import (
+    ConfirmQualityRecommendationCommand,
+    CreateInspectionCommand,
+    QualityApplicationService,
+)
 from autonomous_mes.application.work_orders import (
     CreateWorkOrderCommand,
     OperationCommand,
@@ -22,6 +26,7 @@ from autonomous_mes.application.work_orders import (
     ReleaseWorkOrderCommand,
     WorkOrderApplicationService,
 )
+from autonomous_mes.domain.agent import AgentProposal, ProposalStatus
 from autonomous_mes.infrastructure.memory import InMemoryWorkOrderStore, ScopedReadPolicy
 
 
@@ -173,6 +178,74 @@ class QualityWorkflowTests(TestCase):
 
         self.assertEqual([], IncidentResponseAgent(self.store).list())
         downstream.publish.assert_called_once_with(message)
+
+    def test_quality_user_confirms_draft_atomically_and_idempotently(self) -> None:
+        order = self.completed_order()
+        draft = IncidentResponseAgent(self.store).recommend_quality_inspection(
+            str(order["workOrderId"]), 10
+        )
+        command = ConfirmQualityRecommendationCommand(
+            str(draft["proposalId"]),
+            1,
+            "quality-user",
+            "抽样方案已确认",
+            "quality-confirm-correlation",
+        )
+
+        first = self.quality.confirm_recommendation(command)
+        event_count = len(self.store.list_outbox())
+        second = self.quality.confirm_recommendation(command)
+
+        self.assertEqual("OPEN", first["inspection"]["status"])
+        self.assertEqual("EXECUTED", first["proposal"]["status"])
+        self.assertEqual(
+            first["inspection"]["inspectionId"], second["inspection"]["inspectionId"]
+        )
+        self.assertEqual(event_count, len(self.store.list_outbox()))
+        events = self.store.list_outbox()[-2:]
+        self.assertEqual(
+            ["QualityInspectionCreated", "AgentProposalExecuted"],
+            [item["eventType"] for item in events],
+        )
+        self.assertEqual(draft["proposalId"], events[0]["payload"]["sourceProposalId"])
+        with self.assertRaisesRegex(Exception, "already exists"):
+            self.quality.create(
+                CreateInspectionCommand(
+                    "duplicate-quality-target",
+                    str(order["workOrderId"]),
+                    10,
+                    1,
+                    "quality-user",
+                )
+            )
+
+    def test_quality_confirmation_rejects_non_quality_proposal(self) -> None:
+        order = self.completed_order()
+        proposal, event = AgentProposal.create(
+            "not-a-quality-proposal",
+            "HOLD_AND_INSPECT",
+            "R0",
+            ProposalStatus.OBSERVED,
+            str(order["workOrderId"]),
+            int(order["version"]),
+            10,
+            "equipment-id",
+            1,
+            "diagnosis",
+            "rationale",
+        )
+        self.store.add_agent_proposal_atomically(proposal, event)
+
+        with self.assertRaisesRegex(Exception, "not a quality inspection recommendation"):
+            self.quality.confirm_recommendation(
+                ConfirmQualityRecommendationCommand(
+                    proposal.proposal_id,
+                    1,
+                    "quality-user",
+                    "invalid action check",
+                    "invalid-quality-confirmation",
+                )
+            )
 
     def test_failed_inspection_is_quarantined_and_rework_requires_approval(self) -> None:
         order = self.completed_order()

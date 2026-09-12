@@ -2,7 +2,8 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
 
-from autonomous_mes.domain.errors import NotFound, ValidationError
+from autonomous_mes.domain.agent import AgentProposal, ProposalStatus
+from autonomous_mes.domain.errors import InvalidTransition, NotFound, ValidationError
 from autonomous_mes.domain.quality import QualityInspection
 
 from .ports import ManufacturingResourceStore, QualityStore, WorkOrderStore
@@ -15,6 +16,15 @@ class CreateInspectionCommand:
     operation_sequence: int
     sample_size: int
     actor_id: str
+
+
+@dataclass(frozen=True)
+class ConfirmQualityRecommendationCommand:
+    proposal_id: str
+    sample_size: int
+    actor_id: str
+    reason: str
+    correlation_id: str
 
 
 class QualityApplicationService:
@@ -36,6 +46,10 @@ class QualityApplicationService:
         )
         if operation is None or operation.status.value != "COMPLETED":
             raise ValidationError("inspection requires a completed operation")
+        if self._store.get_inspection_for_operation(
+            command.work_order_id, command.operation_sequence
+        ):
+            raise InvalidTransition("inspection already exists for this operation")
         item = QualityInspection.create(
             command.work_order_id, command.operation_sequence, command.sample_size
         )
@@ -43,6 +57,65 @@ class QualityApplicationService:
             item, item.event("QualityInspectionCreated", command.correlation_id, command.actor_id)
         )
         return _serialize(item)
+
+    def confirm_recommendation(
+        self, command: ConfirmQualityRecommendationCommand
+    ) -> dict[str, Any]:
+        proposal = self._store.get_agent_proposal(command.proposal_id)
+        if proposal is None:
+            raise NotFound("agent proposal not found")
+        if proposal.action != "CREATE_QUALITY_INSPECTION":
+            raise InvalidTransition("proposal is not a quality inspection recommendation")
+        existing = self._store.get_inspection_for_operation(
+            proposal.work_order_id, proposal.operation_sequence
+        )
+        if proposal.status is ProposalStatus.EXECUTED:
+            if existing is None:
+                raise InvalidTransition("executed quality proposal has no inspection")
+            return {
+                "proposal": _serialize_proposal_confirmation(proposal),
+                "inspection": _serialize(existing),
+            }
+        if proposal.status is not ProposalStatus.OBSERVED:
+            raise InvalidTransition("quality recommendation is no longer actionable")
+        if existing is not None:
+            raise InvalidTransition("inspection already exists for this operation")
+        order = self._orders.get(proposal.work_order_id)
+        if order is None:
+            raise NotFound("work order not found")
+        operation = next(
+            (item for item in order.operations if item.sequence == proposal.operation_sequence),
+            None,
+        )
+        if operation is None or operation.status.value != "COMPLETED":
+            raise InvalidTransition("operation is no longer eligible for quality inspection")
+        inspection = QualityInspection.create(
+            proposal.work_order_id,
+            proposal.operation_sequence,
+            command.sample_size,
+        )
+        changed_proposal, proposal_event = proposal.accept_quality_recommendation(
+            command.actor_id,
+            command.reason,
+            inspection.inspection_id,
+            command.correlation_id,
+        )
+        inspection_event = inspection.event(
+            "QualityInspectionCreated",
+            command.correlation_id,
+            command.actor_id,
+            proposal.proposal_id,
+        )
+        self._store.create_inspection_from_proposal_atomically(
+            inspection,
+            changed_proposal,
+            ProposalStatus.OBSERVED,
+            [inspection_event, proposal_event],
+        )
+        return {
+            "proposal": _serialize_proposal_confirmation(changed_proposal),
+            "inspection": _serialize(inspection),
+        }
 
     def record(
         self,
@@ -185,4 +258,15 @@ def _serialize(x: QualityInspection) -> dict[str, Any]:
         ),
         "createdAt": x.created_at.isoformat(),
         "updatedAt": x.updated_at.isoformat(),
+    }
+
+
+def _serialize_proposal_confirmation(item: AgentProposal) -> dict[str, Any]:
+    return {
+        "proposalId": item.proposal_id,
+        "action": item.action,
+        "risk": item.risk,
+        "status": item.status.value,
+        "approvedBy": item.approved_by,
+        "approvalReason": item.approval_reason,
     }

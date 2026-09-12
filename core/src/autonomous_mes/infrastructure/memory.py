@@ -427,6 +427,12 @@ class InMemoryWorkOrderStore:
 
     def add_inspection_atomically(self, inspection: QualityInspection, event: DomainEvent) -> None:
         with self._lock:
+            if any(
+                item.work_order_id == inspection.work_order_id
+                and item.operation_sequence == inspection.operation_sequence
+                for item in self._inspections.values()
+            ):
+                raise InvalidTransition("inspection already exists for this operation")
             self._inspections[inspection.inspection_id] = deepcopy(inspection)
             self._append_event(event)
 
@@ -439,6 +445,28 @@ class InMemoryWorkOrderStore:
                 raise InvalidTransition("quality inspection version changed")
             self._inspections[inspection.inspection_id] = deepcopy(inspection)
             self._append_event(event)
+
+    def create_inspection_from_proposal_atomically(
+        self,
+        inspection: QualityInspection,
+        proposal: AgentProposal,
+        expected_proposal_status: ProposalStatus,
+        events: list[DomainEvent],
+    ) -> None:
+        with self._lock:
+            current = self._agent_proposals.get(proposal.proposal_id)
+            if current is None or current.status is not expected_proposal_status:
+                raise InvalidTransition("agent proposal status changed")
+            if any(
+                item.work_order_id == inspection.work_order_id
+                and item.operation_sequence == inspection.operation_sequence
+                for item in self._inspections.values()
+            ):
+                raise InvalidTransition("inspection already exists for this operation")
+            self._inspections[inspection.inspection_id] = deepcopy(inspection)
+            self._agent_proposals[proposal.proposal_id] = deepcopy(proposal)
+            for event in events:
+                self._append_event(event)
 
     def get_agent_proposal(self, proposal_id: str) -> AgentProposal | None:
         with self._lock:

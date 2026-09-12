@@ -45,6 +45,7 @@ uvicorn autonomous_mes.api:app --app-dir src --reload
 - `GET /api/v1/agent/model-status`
 - `GET /api/v1/agent/proposals`
 - `POST /api/v1/agent/proposals/{proposalId}/approve`
+- `POST /api/v1/agent/proposals/{proposalId}/create-inspection`：QUALITY角色确认R2建议并创建检验
 - `GET /api/v1/identity/me`
 - `GET /health/live`
 - `GET /health/ready`
@@ -124,6 +125,8 @@ Agent可通过`POST /api/v1/agent-tools/get-product-genealogy`读取序列号谱
 工序兼容期已增加在线投影巡检：PostgreSQL在数据库内比较JSON与`work_order_operations`的数量和业务字段，返回`CONSISTENT`或`DRIFT_DETECTED`供监控告警。质量Agent只能通过`list_quality_candidates`按获授权车间分页读取待检候选；该R1工具的允许与拒绝都会审计，且没有创建检验或修改数据库的能力。
 
 质量Agent可由独立Outbox Worker消费`OperationCompleted`事件，按当前权威状态自动生成`CREATE_QUALITY_INSPECTION`的R2/`OBSERVED`草稿。去重目标固定为工单与工序，事件重放或工单后续版本变化不会重复生成；提案事件保存源事件因果ID。自动化没有检验写接口，建议转检验仍需质量角色明确确认。
+
+质量人员可在Agent页面确认`CREATE_QUALITY_INSPECTION`草稿并输入抽样数量。服务会在执行时重查提案、工序和已有检验，迁移`0018`保证每个工单工序只有一条检验；检验创建、提案转为`EXECUTED`和两个关联Outbox事件在同一事务提交。重复确认返回原检验。该入口只接受`QUALITY`身份，Agent没有调用权限。
 
 启用 DeepSeek 时只需在本机 `.env` 设置 `AUTONOMOUS_MES_DEEPSEEK_API_KEY` 并重启 API。默认使用 `deepseek-v4-flash`、JSON 输出、关闭思考模式和 12 秒超时。每条提案记录 `narrativeSource` 与 `modelName`；不要把真实密钥写入仓库。
 

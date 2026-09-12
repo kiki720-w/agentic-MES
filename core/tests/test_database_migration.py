@@ -60,6 +60,7 @@ class DatabaseMigrationTests(unittest.TestCase):
                 item["name"] for item in schema.get_indexes("quality_inspections")
             }
             self.assertIn("ix_quality_status_updated_id", quality_indexes)
+            self.assertIn("uq_quality_work_order_operation", quality_indexes)
             resource_indexes = {
                 item["name"] for item in schema.get_indexes("manufacturing_resources")
             }

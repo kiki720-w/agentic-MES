@@ -129,6 +129,7 @@ class AgentProposalStore(Protocol):
 
 
 class QualityStore(Protocol):
+    def get_agent_proposal(self, proposal_id: str) -> AgentProposal | None: ...
     def get_inspection(self, inspection_id: str) -> QualityInspection | None: ...
     def get_inspection_for_operation(
         self, work_order_id: str, operation_sequence: int
@@ -161,6 +162,14 @@ class QualityStore(Protocol):
     ) -> None: ...
     def update_inspection_atomically(
         self, inspection: QualityInspection, expected_version: int, event: DomainEvent
+    ) -> None: ...
+
+    def create_inspection_from_proposal_atomically(
+        self,
+        inspection: QualityInspection,
+        proposal: AgentProposal,
+        expected_proposal_status: ProposalStatus,
+        events: list[DomainEvent],
     ) -> None: ...
 
     def update_agent_proposal_atomically(

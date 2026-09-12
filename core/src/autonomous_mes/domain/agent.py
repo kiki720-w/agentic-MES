@@ -123,3 +123,39 @@ class AgentProposal:
             self.proposal_id,
         )
         return changed, event
+
+    def accept_quality_recommendation(
+        self,
+        actor_id: str,
+        reason: str,
+        inspection_id: str,
+        correlation_id: str,
+    ) -> tuple["AgentProposal", DomainEvent]:
+        if self.action != "CREATE_QUALITY_INSPECTION":
+            raise InvalidTransition("proposal is not a quality inspection recommendation")
+        if self.status is not ProposalStatus.OBSERVED:
+            raise InvalidTransition("quality recommendation is no longer actionable")
+        if not actor_id.strip() or not reason.strip() or not inspection_id.strip():
+            raise ValidationError("quality confirmer, reason and inspection are required")
+        changed = replace(
+            self,
+            status=ProposalStatus.EXECUTED,
+            approved_by=actor_id,
+            approval_reason=reason,
+            updated_at=utc_now(),
+        )
+        event = DomainEvent.create(
+            "AgentProposalExecuted",
+            "AgentProposal",
+            self.proposal_id,
+            {
+                "action": self.action,
+                "executedBy": actor_id,
+                "executionReason": reason,
+                "workOrderId": self.work_order_id,
+                "operationSequence": self.operation_sequence,
+                "inspectionId": inspection_id,
+            },
+            correlation_id,
+        )
+        return changed, event

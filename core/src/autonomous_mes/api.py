@@ -46,7 +46,11 @@ from autonomous_mes.application.master_data import (
 )
 from autonomous_mes.application.natural_language import NaturalLanguageQueryService
 from autonomous_mes.application.ports import MesStore
-from autonomous_mes.application.quality import CreateInspectionCommand, QualityApplicationService
+from autonomous_mes.application.quality import (
+    ConfirmQualityRecommendationCommand,
+    CreateInspectionCommand,
+    QualityApplicationService,
+)
 from autonomous_mes.application.work_orders import (
     CreateWorkOrderCommand,
     OperationCommand,
@@ -155,6 +159,12 @@ class TelemetryBody(BaseModel):
 class ApproveProposalBody(BaseModel):
     model_config = ConfigDict(extra="forbid")
     reason: str
+
+
+class ConfirmQualityRecommendationBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    sampleSize: int = Field(default=1, ge=1)
+    reason: str = Field(min_length=1, max_length=512)
 
 
 class CreateInspectionBody(BaseModel):
@@ -714,6 +724,27 @@ def approve_agent_proposal(
 ) -> dict[str, object]:
     authorize_human(identity, "SUPERVISOR")
     return incident_agent.approve(proposal_id, identity.subject_id, body.reason)
+
+
+@app.post(
+    "/api/v1/agent/proposals/{proposal_id}/create-inspection",
+    status_code=201,
+)
+def create_inspection_from_agent_proposal(
+    proposal_id: str,
+    body: ConfirmQualityRecommendationBody,
+    identity: Annotated[Identity, Depends(current_identity)],
+) -> dict[str, object]:
+    authorize_human(identity, "QUALITY")
+    return quality_service.confirm_recommendation(
+        ConfirmQualityRecommendationCommand(
+            proposal_id,
+            body.sampleSize,
+            identity.subject_id,
+            body.reason,
+            str(uuid4()),
+        )
+    )
 
 
 @app.post("/api/v1/equipment", status_code=201)

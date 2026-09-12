@@ -612,9 +612,12 @@ class SqlAlchemyWorkOrderStore:
             }
 
     def add_inspection_atomically(self, inspection: QualityInspection, event: DomainEvent) -> None:
-        with self._sessions.begin() as session:
-            session.add(QualityInspectionRow(**_inspection_values(inspection)))
-            session.add_all(_event_rows([event]))
+        try:
+            with self._sessions.begin() as session:
+                session.add(QualityInspectionRow(**_inspection_values(inspection)))
+                session.add_all(_event_rows([event]))
+        except IntegrityError as exc:
+            raise InvalidTransition("inspection already exists for this operation") from exc
 
     def update_inspection_atomically(
         self, inspection: QualityInspection, expected_version: int, event: DomainEvent
@@ -631,6 +634,31 @@ class SqlAlchemyWorkOrderStore:
             if getattr(result, "rowcount", 0) != 1:
                 raise InvalidTransition("quality inspection version changed")
             session.add_all(_event_rows([event]))
+
+    def create_inspection_from_proposal_atomically(
+        self,
+        inspection: QualityInspection,
+        proposal: AgentProposal,
+        expected_proposal_status: ProposalStatus,
+        events: list[DomainEvent],
+    ) -> None:
+        try:
+            with self._sessions.begin() as session:
+                result = session.execute(
+                    update(AgentProposalRow)
+                    .where(
+                        AgentProposalRow.proposal_id == proposal.proposal_id,
+                        AgentProposalRow.status == expected_proposal_status.value,
+                        AgentProposalRow.action == "CREATE_QUALITY_INSPECTION",
+                    )
+                    .values(**_proposal_values(proposal, include_id=False))
+                )
+                if getattr(result, "rowcount", 0) != 1:
+                    raise InvalidTransition("agent proposal status changed")
+                session.add(QualityInspectionRow(**_inspection_values(inspection)))
+                session.add_all(_event_rows(events))
+        except IntegrityError as exc:
+            raise InvalidTransition("inspection already exists for this operation") from exc
 
     def get_product_unit(self, product_serial: str) -> ProductUnit | None:
         with self._sessions() as session:

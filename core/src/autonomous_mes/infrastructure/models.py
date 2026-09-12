@@ -179,6 +179,13 @@ class AgentProposalRow(Base):
 
 class QualityInspectionRow(Base):
     __tablename__ = "quality_inspections"
+    __table_args__ = (
+        UniqueConstraint(
+            "work_order_id",
+            "operation_sequence",
+            name="uq_quality_work_order_operation",
+        ),
+    )
 
     inspection_id: Mapped[str] = mapped_column(String(36), primary_key=True)
     work_order_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)

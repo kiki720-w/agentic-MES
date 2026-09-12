@@ -56,6 +56,7 @@
 - `docs/step-27-normalized-work-order-operations-acceptance.md`：工单工序关系化、兼容回填和全库待检池验收记录
 - `docs/step-28-operation-projection-and-agent-quality-tool-acceptance.md`：工序双写一致性巡检与Agent质量候选只读工具验收记录
 - `docs/step-29-event-driven-quality-agent-acceptance.md`：OperationCompleted事件触发、幂等R2质检建议与因果链验收记录
+- `docs/step-30-human-confirmed-quality-inspection-acceptance.md`：质量人员确认Agent建议、单事务建检与目标唯一性验收记录
 
 ## 当前决策门
 
