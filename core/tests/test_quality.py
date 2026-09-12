@@ -136,6 +136,11 @@ class QualityWorkflowTests(TestCase):
         self.assertEqual("CREATE_QUALITY_INSPECTION", first["action"])
         self.assertEqual("OBSERVED", first["status"])
         self.assertEqual("quality-recommendation-agent-v1", first["agentId"])
+        self.assertEqual(0, first["qualityRiskScore"])
+        self.assertEqual("LOW", first["qualityRiskLevel"])
+        self.assertEqual(1, first["recommendedSampleSize"])
+        self.assertEqual("QUALITY-RISK-V1", first["assessmentRuleset"])
+        self.assertEqual(4, len(first["assessmentFactors"]))
         self.assertEqual("COMPLETED", self.orders.get(str(order["workOrderId"]))["status"])
 
     def test_completed_event_creates_one_causally_traced_draft_on_replay(self) -> None:

@@ -3,6 +3,7 @@ from typing import Any
 
 from autonomous_mes.application.equipment import EquipmentApplicationService
 from autonomous_mes.application.ports import MesStore
+from autonomous_mes.application.quality_risk import assess_quality_risk
 from autonomous_mes.application.work_orders import OperationCommand, WorkOrderApplicationService
 from autonomous_mes.domain.agent import AgentProposal, ProposalStatus
 from autonomous_mes.domain.errors import Forbidden, InvalidTransition, NotFound, ValidationError
@@ -175,6 +176,20 @@ class IncidentResponseAgent:
         equipment = self._equipment.get(str(operation["assignedResourceId"]))
         proposal = self._store.get_quality_recommendation(work_order_id, operation_sequence)
         if proposal is None:
+            risk_facts = self._store.quality_risk_facts(
+                work_order_id,
+                operation_sequence,
+                str(equipment["equipmentId"]),
+            )
+            assessment = assess_quality_risk(
+                planned_quantity=int(operation["plannedQuantity"]),
+                good_quantity=int(operation["goodQuantity"]),
+                scrap_quantity=int(operation["scrapQuantity"]),
+                historical_inspections=int(risk_facts["historicalInspections"]),
+                historical_failures=int(risk_facts["historicalFailures"]),
+                recent_alarm_count=int(risk_facts["recentAlarmCount"]),
+                minimum_tool_life_percent=risk_facts["minimumToolLifePercent"],
+            )
             fingerprint = sha256(
                 f"quality:{work_order_id}:{operation_sequence}".encode()
             ).hexdigest()
@@ -190,11 +205,22 @@ class IncidentResponseAgent:
                 operation_sequence,
                 str(equipment["equipmentId"]),
                 int(equipment["version"]),
-                "工序已完工且尚无检验任务，建议由检验员创建质量检验。",
-                "该记录仅为建议草稿，不会创建检验、隔离产品或批准返工。",
+                (
+                    f"工序已完工，确定性规则评分为{assessment.score}分"
+                    f"（{assessment.level}），建议抽样{assessment.recommended_sample_size}件。"
+                ),
+                (
+                    f"{assessment.ruleset_version}仅用于排序和抽样建议；"
+                    "不会判定质量、创建检验、隔离产品或批准返工。"
+                ),
                 agent_id="quality-recommendation-agent-v1",
                 correlation_id=source_correlation_id,
                 causation_id=source_event_id,
+                quality_risk_score=assessment.score,
+                quality_risk_level=assessment.level,
+                recommended_sample_size=assessment.recommended_sample_size,
+                assessment_factors=assessment.factors,
+                assessment_ruleset=assessment.ruleset_version,
             )
             self._store.add_agent_proposal_atomically(proposal, event)
             proposal = self._store.get_agent_proposal_by_fingerprint(fingerprint) or proposal
@@ -217,6 +243,11 @@ def _serialize(item: AgentProposal) -> dict[str, Any]:
         "rationale": item.rationale,
         "narrativeSource": item.narrative_source,
         "modelName": item.model_name,
+        "qualityRiskScore": item.quality_risk_score,
+        "qualityRiskLevel": item.quality_risk_level,
+        "recommendedSampleSize": item.recommended_sample_size,
+        "assessmentFactors": list(item.assessment_factors),
+        "assessmentRuleset": item.assessment_ruleset,
         "approvedBy": item.approved_by,
         "approvalReason": item.approval_reason,
         "createdAt": item.created_at.isoformat(),

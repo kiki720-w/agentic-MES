@@ -31,6 +31,11 @@ class AgentProposal:
     rationale: str
     narrative_source: str
     model_name: str | None
+    quality_risk_score: int | None
+    quality_risk_level: str | None
+    recommended_sample_size: int | None
+    assessment_factors: tuple[dict[str, object], ...]
+    assessment_ruleset: str | None
     approved_by: str | None
     approval_reason: str | None
     created_at: datetime
@@ -55,6 +60,11 @@ class AgentProposal:
         agent_id: str = "incident-response-agent-v1",
         correlation_id: str | None = None,
         causation_id: str | None = None,
+        quality_risk_score: int | None = None,
+        quality_risk_level: str | None = None,
+        recommended_sample_size: int | None = None,
+        assessment_factors: tuple[dict[str, object], ...] = (),
+        assessment_ruleset: str | None = None,
     ) -> tuple["AgentProposal", DomainEvent]:
         now = utc_now()
         proposal = cls(
@@ -73,6 +83,11 @@ class AgentProposal:
             rationale=rationale,
             narrative_source=narrative_source,
             model_name=model_name,
+            quality_risk_score=quality_risk_score,
+            quality_risk_level=quality_risk_level,
+            recommended_sample_size=recommended_sample_size,
+            assessment_factors=assessment_factors,
+            assessment_ruleset=assessment_ruleset,
             approved_by=None,
             approval_reason=None,
             created_at=now,
@@ -91,6 +106,17 @@ class AgentProposal:
                 "equipmentId": equipment_id,
                 "narrativeSource": narrative_source,
                 "modelName": model_name,
+                **(
+                    {
+                        "qualityRiskScore": quality_risk_score,
+                        "qualityRiskLevel": quality_risk_level,
+                        "recommendedSampleSize": recommended_sample_size,
+                        "assessmentFactors": list(assessment_factors),
+                        "assessmentRuleset": assessment_ruleset,
+                    }
+                    if quality_risk_score is not None
+                    else {}
+                ),
                 **({"triggerEventId": causation_id} if causation_id else {}),
             },
             correlation_id or proposal.proposal_id,

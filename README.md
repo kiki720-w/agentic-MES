@@ -57,6 +57,7 @@
 - `docs/step-28-operation-projection-and-agent-quality-tool-acceptance.md`：工序双写一致性巡检与Agent质量候选只读工具验收记录
 - `docs/step-29-event-driven-quality-agent-acceptance.md`：OperationCompleted事件触发、幂等R2质检建议与因果链验收记录
 - `docs/step-30-human-confirmed-quality-inspection-acceptance.md`：质量人员确认Agent建议、单事务建检与目标唯一性验收记录
+- `docs/step-31-quality-risk-and-event-explorer-acceptance.md`：确定性质量风险评分、抽样建议与制造事件双向检索验收记录
 
 ## 当前决策门
 

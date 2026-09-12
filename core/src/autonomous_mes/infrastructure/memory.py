@@ -1,5 +1,5 @@
 from copy import deepcopy
-from datetime import datetime
+from datetime import UTC, datetime, timedelta
 from threading import RLock
 from typing import Any
 
@@ -161,9 +161,31 @@ class InMemoryWorkOrderStore:
         offset: int = 0,
         before_occurred_at: datetime | None = None,
         before_event_id: str | None = None,
+        query: str | None = None,
+        publish_status: str | None = None,
     ) -> list[dict[str, Any]]:
         with self._lock:
             items = list(reversed(self._outbox))
+            if query:
+                needle = query.casefold()
+                items = [
+                    item
+                    for item in items
+                    if any(
+                        needle in str(item.get(field) or "").casefold()
+                        for field in (
+                            "eventId",
+                            "eventType",
+                            "aggregateType",
+                            "aggregateId",
+                            "correlationId",
+                        )
+                    )
+                ]
+            if publish_status:
+                items = [
+                    item for item in items if item["publishStatus"] == publish_status
+                ]
             if before_occurred_at and before_event_id:
                 cursor = (before_occurred_at, before_event_id)
                 items = [
@@ -173,9 +195,32 @@ class InMemoryWorkOrderStore:
                 ]
             return deepcopy(items[offset : offset + limit])
 
-    def count_outbox(self) -> int:
+    def count_outbox(
+        self, query: str | None = None, publish_status: str | None = None
+    ) -> int:
         with self._lock:
-            return len(self._outbox)
+            items = self._outbox
+            if query:
+                needle = query.casefold()
+                items = [
+                    item
+                    for item in items
+                    if any(
+                        needle in str(item.get(field) or "").casefold()
+                        for field in (
+                            "eventId",
+                            "eventType",
+                            "aggregateType",
+                            "aggregateId",
+                            "correlationId",
+                        )
+                    )
+                ]
+            if publish_status:
+                items = [
+                    item for item in items if item["publishStatus"] == publish_status
+                ]
+            return len(items)
 
     def record_tool_event(self, event: DomainEvent) -> None:
         with self._lock:
@@ -497,7 +542,13 @@ class InMemoryWorkOrderStore:
     def list_agent_proposals(self, limit: int = 100) -> list[AgentProposal]:
         with self._lock:
             items = sorted(
-                self._agent_proposals.values(), key=lambda item: item.updated_at, reverse=True
+                self._agent_proposals.values(),
+                key=lambda item: (
+                    item.quality_risk_score is not None,
+                    item.quality_risk_score or -1,
+                    item.updated_at,
+                ),
+                reverse=True,
             )
             return deepcopy(items[:limit])
 
@@ -508,6 +559,59 @@ class InMemoryWorkOrderStore:
             self._agent_proposals[proposal.proposal_id] = deepcopy(proposal)
             self._proposal_fingerprints[proposal.fingerprint] = proposal.proposal_id
             self._append_event(event)
+
+    def quality_risk_facts(
+        self, work_order_id: str, operation_sequence: int, equipment_id: str
+    ) -> dict[str, Any]:
+        with self._lock:
+            inspected = failed = 0
+            for inspection in self._inspections.values():
+                if (
+                    inspection.result is None
+                    or (
+                        inspection.work_order_id == work_order_id
+                        and inspection.operation_sequence == operation_sequence
+                    )
+                ):
+                    continue
+                order = self._orders.get(inspection.work_order_id)
+                operation = next(
+                    (
+                        item
+                        for item in order.operations
+                        if item.sequence == inspection.operation_sequence
+                    ),
+                    None,
+                ) if order else None
+                if operation and operation.assigned_resource_id == equipment_id:
+                    inspected += 1
+                    failed += int(inspection.result == "FAIL")
+            cutoff = datetime.now(UTC) - timedelta(days=30)
+            alarms = sum(
+                item["eventType"] == "EquipmentTelemetryRecorded"
+                and item["aggregateId"] == equipment_id
+                and datetime.fromisoformat(item["occurredAt"]) >= cutoff
+                and bool(
+                    item["payload"].get("alarmCode")
+                    or item["payload"].get("state") in {"ALARM", "DOWN"}
+                )
+                for item in self._outbox
+            )
+            tool_lives = [
+                resource.life_remaining_percent
+                for session in self._execution_sessions.values()
+                if session.work_order_id == work_order_id
+                and session.operation_sequence == operation_sequence
+                for resource in session.resources
+                if resource.resource_type == "TOOL"
+                and resource.life_remaining_percent is not None
+            ]
+            return {
+                "historicalInspections": inspected,
+                "historicalFailures": failed,
+                "recentAlarmCount": alarms,
+                "minimumToolLifePercent": min(tool_lives) if tool_lives else None,
+            }
 
     def update_agent_proposal_atomically(
         self, proposal: AgentProposal, expected_status: ProposalStatus, event: DomainEvent

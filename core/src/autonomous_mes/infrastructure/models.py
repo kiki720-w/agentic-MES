@@ -171,6 +171,13 @@ class AgentProposalRow(Base):
     rationale: Mapped[str] = mapped_column(Text, nullable=False)
     narrative_source: Mapped[str] = mapped_column(String(32), nullable=False, default="RULES")
     model_name: Mapped[str | None] = mapped_column(String(96))
+    quality_risk_score: Mapped[int | None] = mapped_column(Integer)
+    quality_risk_level: Mapped[str | None] = mapped_column(String(16))
+    recommended_sample_size: Mapped[int | None] = mapped_column(Integer)
+    assessment_factors: Mapped[list[dict[str, Any]]] = mapped_column(
+        JSON, nullable=False, default=list
+    )
+    assessment_ruleset: Mapped[str | None] = mapped_column(String(32))
     approved_by: Mapped[str | None] = mapped_column(String(64))
     approval_reason: Mapped[str | None] = mapped_column(String(512))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)

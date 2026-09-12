@@ -73,6 +73,8 @@ class ApiContractTests(unittest.TestCase):
         self.assertIn("DeepSeek 诊断解释网关", dashboard.text)
         self.assertIn("自然语言 Agent", dashboard.text)
         self.assertIn("确认并创建检验", dashboard.text)
+        self.assertIn("搜索事件类型、聚合ID、事件ID或关联ID", dashboard.text)
+        self.assertIn("changeEventPage(-1)", dashboard.text)
 
         orders = self.client.get("/api/v1/work-orders")
         outbox = self.client.get("/api/v1/system/outbox")
@@ -80,6 +82,14 @@ class ApiContractTests(unittest.TestCase):
         self.assertIn("items", orders.json())
         self.assertEqual(200, outbox.status_code)
         self.assertIn("items", outbox.json())
+        if outbox.json()["items"]:
+            event = outbox.json()["items"][0]
+            filtered = self.client.get(
+                "/api/v1/system/outbox",
+                params={"query": event["eventId"], "publishStatus": event["publishStatus"]},
+            ).json()
+            self.assertGreaterEqual(filtered["total"], 1)
+            self.assertEqual(event["eventId"], filtered["items"][0]["eventId"])
 
         first_events = self.client.get("/api/v1/system/outbox", params={"limit": 2}).json()
         if first_events["nextCursor"]:

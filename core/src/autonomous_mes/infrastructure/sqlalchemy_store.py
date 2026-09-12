@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 from uuid import uuid4
 
@@ -200,9 +200,26 @@ class SqlAlchemyWorkOrderStore:
         offset: int = 0,
         before_occurred_at: datetime | None = None,
         before_event_id: str | None = None,
+        query: str | None = None,
+        publish_status: str | None = None,
     ) -> list[dict[str, Any]]:
         with self._sessions() as session:
             statement = select(EventOutboxRow)
+            if query:
+                pattern = f"%{query}%"
+                statement = statement.where(
+                    or_(
+                        EventOutboxRow.event_id.ilike(pattern),
+                        EventOutboxRow.event_type.ilike(pattern),
+                        EventOutboxRow.aggregate_type.ilike(pattern),
+                        EventOutboxRow.aggregate_id.ilike(pattern),
+                        EventOutboxRow.correlation_id.ilike(pattern),
+                    )
+                )
+            if publish_status:
+                statement = statement.where(
+                    EventOutboxRow.publish_status == publish_status
+                )
             if before_occurred_at and before_event_id:
                 statement = statement.where(
                     or_(
@@ -236,9 +253,27 @@ class SqlAlchemyWorkOrderStore:
                 for row in rows
             ]
 
-    def count_outbox(self) -> int:
+    def count_outbox(
+        self, query: str | None = None, publish_status: str | None = None
+    ) -> int:
         with self._sessions() as session:
-            return int(session.scalar(select(func.count()).select_from(EventOutboxRow)) or 0)
+            statement = select(func.count()).select_from(EventOutboxRow)
+            if query:
+                pattern = f"%{query}%"
+                statement = statement.where(
+                    or_(
+                        EventOutboxRow.event_id.ilike(pattern),
+                        EventOutboxRow.event_type.ilike(pattern),
+                        EventOutboxRow.aggregate_type.ilike(pattern),
+                        EventOutboxRow.aggregate_id.ilike(pattern),
+                        EventOutboxRow.correlation_id.ilike(pattern),
+                    )
+                )
+            if publish_status:
+                statement = statement.where(
+                    EventOutboxRow.publish_status == publish_status
+                )
+            return int(session.scalar(statement) or 0)
 
     def record_tool_event(self, event: DomainEvent) -> None:
         payload = event.payload
@@ -391,7 +426,12 @@ class SqlAlchemyWorkOrderStore:
     def list_agent_proposals(self, limit: int = 100) -> list[AgentProposal]:
         with self._sessions() as session:
             rows = session.scalars(
-                select(AgentProposalRow).order_by(AgentProposalRow.updated_at.desc()).limit(limit)
+                select(AgentProposalRow)
+                .order_by(
+                    AgentProposalRow.quality_risk_score.desc().nullslast(),
+                    AgentProposalRow.updated_at.desc(),
+                )
+                .limit(limit)
             ).all()
             return [_proposal_to_domain(row) for row in rows]
 
@@ -402,6 +442,67 @@ class SqlAlchemyWorkOrderStore:
                 session.add_all(_event_rows([event]))
         except IntegrityError:
             return
+
+    def quality_risk_facts(
+        self, work_order_id: str, operation_sequence: int, equipment_id: str
+    ) -> dict[str, Any]:
+        with self._sessions() as session:
+            history_base = (
+                select(func.count())
+                .select_from(QualityInspectionRow)
+                .join(
+                    WorkOrderOperationRow,
+                    (WorkOrderOperationRow.work_order_id == QualityInspectionRow.work_order_id)
+                    & (WorkOrderOperationRow.sequence == QualityInspectionRow.operation_sequence),
+                )
+                .where(
+                    WorkOrderOperationRow.assigned_resource_id == equipment_id,
+                    QualityInspectionRow.result.is_not(None),
+                    ~(
+                        (QualityInspectionRow.work_order_id == work_order_id)
+                        & (QualityInspectionRow.operation_sequence == operation_sequence)
+                    ),
+                )
+            )
+            inspected = int(session.scalar(history_base) or 0)
+            failed = int(
+                session.scalar(history_base.where(QualityInspectionRow.result == "FAIL")) or 0
+            )
+            cutoff = datetime.now(UTC) - timedelta(days=30)
+            alarms = int(
+                session.scalar(
+                    select(func.count())
+                    .select_from(EquipmentTelemetryRow)
+                    .where(
+                        EquipmentTelemetryRow.equipment_id == equipment_id,
+                        EquipmentTelemetryRow.observed_at >= cutoff,
+                        or_(
+                            EquipmentTelemetryRow.alarm_code.is_not(None),
+                            EquipmentTelemetryRow.state.in_(("ALARM", "DOWN")),
+                        ),
+                    )
+                )
+                or 0
+            )
+            contexts = session.scalars(
+                select(ExecutionSessionRow.resource_context).where(
+                    ExecutionSessionRow.work_order_id == work_order_id,
+                    ExecutionSessionRow.operation_sequence == operation_sequence,
+                )
+            ).all()
+            tool_lives = [
+                float(resource["life_remaining_percent"])
+                for context in contexts
+                for resource in context
+                if resource.get("resource_type") == "TOOL"
+                and resource.get("life_remaining_percent") is not None
+            ]
+            return {
+                "historicalInspections": inspected,
+                "historicalFailures": failed,
+                "recentAlarmCount": alarms,
+                "minimumToolLifePercent": min(tool_lives) if tool_lives else None,
+            }
 
     def update_agent_proposal_atomically(
         self, proposal: AgentProposal, expected_status: ProposalStatus, event: DomainEvent
@@ -1206,6 +1307,11 @@ def _proposal_values(item: AgentProposal, *, include_id: bool = True) -> dict[st
         "rationale": item.rationale,
         "narrative_source": item.narrative_source,
         "model_name": item.model_name,
+        "quality_risk_score": item.quality_risk_score,
+        "quality_risk_level": item.quality_risk_level,
+        "recommended_sample_size": item.recommended_sample_size,
+        "assessment_factors": list(item.assessment_factors),
+        "assessment_ruleset": item.assessment_ruleset,
         "approved_by": item.approved_by,
         "approval_reason": item.approval_reason,
         "created_at": item.created_at,
@@ -1233,6 +1339,11 @@ def _proposal_to_domain(row: AgentProposalRow) -> AgentProposal:
         rationale=row.rationale,
         narrative_source=row.narrative_source,
         model_name=row.model_name,
+        quality_risk_score=row.quality_risk_score,
+        quality_risk_level=row.quality_risk_level,
+        recommended_sample_size=row.recommended_sample_size,
+        assessment_factors=tuple(row.assessment_factors),
+        assessment_ruleset=row.assessment_ruleset,
         approved_by=row.approved_by,
         approval_reason=row.approval_reason,
         created_at=row.created_at,

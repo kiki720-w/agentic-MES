@@ -69,9 +69,13 @@ class WorkOrderStore(Protocol):
         offset: int = 0,
         before_occurred_at: datetime | None = None,
         before_event_id: str | None = None,
+        query: str | None = None,
+        publish_status: str | None = None,
     ) -> list[dict[str, Any]]: ...
 
-    def count_outbox(self) -> int: ...
+    def count_outbox(
+        self, query: str | None = None, publish_status: str | None = None
+    ) -> int: ...
 
 
 class AuthorizationPolicy(Protocol):
@@ -126,6 +130,10 @@ class AgentProposalStore(Protocol):
     def add_agent_proposal_atomically(
         self, proposal: AgentProposal, event: DomainEvent
     ) -> None: ...
+
+    def quality_risk_facts(
+        self, work_order_id: str, operation_sequence: int, equipment_id: str
+    ) -> dict[str, Any]: ...
 
 
 class QualityStore(Protocol):

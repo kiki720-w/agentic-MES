@@ -116,7 +116,7 @@ Agent可通过`POST /api/v1/agent-tools/get-product-genealogy`读取序列号谱
 
 生产控制台按大样本场景改为工单服务端分页、编号搜索、状态筛选和数据库全量KPI聚合。模块切换只请求当前模块，浏览器页签不可见时暂停轮询，长列表元素启用延迟渲染。`GET /api/v1/work-orders`支持`limit`、`offset`、`query`和`status`，返回`total`；数据库迁移`0014`增加状态/更新时间查询索引。
 
-事件追溯API只读取有界窗口，并支持基于`occurred_at + event_id`的游标翻页；页面通过“加载更早”逐批追加，不使用百万级深offset。迁移`0015`增加事件时间线复合索引。`scripts/scale-benchmark.py`只能在`agentic_mes_scale*`隔离schema内运行，已用于10万工单、100万事件实测。
+事件追溯API只读取有界窗口，并支持基于`occurred_at + event_id`的游标翻页以及事件ID、类型、聚合ID、关联ID和发布状态筛选。页面每页保留50条并维护访问游标栈，可向后查看和返回上一页，不使用百万级深offset。迁移`0015`增加事件时间线复合索引。`scripts/scale-benchmark.py`只能在`agentic_mes_scale*`隔离schema内运行，已用于10万工单、100万事件实测。
 
 设备、制造资源和质量任务列表支持数据库分页、搜索与状态/类型筛选，并分别提供全量汇总端点。控制台每页仅保留24条记录，迁移`0016`增加运营读模型复合索引。
 
@@ -127,6 +127,8 @@ Agent可通过`POST /api/v1/agent-tools/get-product-genealogy`读取序列号谱
 质量Agent可由独立Outbox Worker消费`OperationCompleted`事件，按当前权威状态自动生成`CREATE_QUALITY_INSPECTION`的R2/`OBSERVED`草稿。去重目标固定为工单与工序，事件重放或工单后续版本变化不会重复生成；提案事件保存源事件因果ID。自动化没有检验写接口，建议转检验仍需质量角色明确确认。
 
 质量人员可在Agent页面确认`CREATE_QUALITY_INSPECTION`草稿并输入抽样数量。服务会在执行时重查提案、工序和已有检验，迁移`0018`保证每个工单工序只有一条检验；检验创建、提案转为`EXECUTED`和两个关联Outbox事件在同一事务提交。重复确认返回原检验。该入口只接受`QUALITY`身份，Agent没有调用权限。
+
+`QUALITY-RISK-V1`在质量草稿生成时按当前报废率、同设备历史质量结果、近30天设备报警和实绩刀具最低剩余寿命计算0—100分，给出`LOW/MEDIUM/HIGH`等级与有上限的抽样数量建议。评分因子、规则版本和建议随提案持久化并用于队列排序。该启发式规则不替代企业控制计划，DeepSeek不参与打分，质量结论与放行权仍在人和确定性业务规则中。
 
 启用 DeepSeek 时只需在本机 `.env` 设置 `AUTONOMOUS_MES_DEEPSEEK_API_KEY` 并重启 API。默认使用 `deepseek-v4-flash`、JSON 输出、关闭思考模式和 12 秒超时。每条提案记录 `narrativeSource` 与 `modelName`；不要把真实密钥写入仓库。
 

@@ -523,6 +523,8 @@ def list_outbox(
     limit: int = 100,
     offset: int = 0,
     cursor: str | None = None,
+    query: str | None = None,
+    publishStatus: str | None = None,
 ) -> dict[str, object]:
     if limit < 1 or limit > 100:
         raise ValidationError("limit must be between 1 and 100")
@@ -530,6 +532,17 @@ def list_outbox(
         raise ValidationError("offset must be between 0 and 10000000")
     if cursor and offset:
         raise ValidationError("cursor and offset cannot be combined")
+    normalized_query = query.strip() if query else None
+    if normalized_query and len(normalized_query) > 128:
+        raise ValidationError("query must not exceed 128 characters")
+    normalized_status = publishStatus.strip().upper() if publishStatus else None
+    if normalized_status and normalized_status not in {
+        "PENDING",
+        "PROCESSING",
+        "PUBLISHED",
+        "QUARANTINED",
+    }:
+        raise ValidationError("publishStatus is invalid")
     before_occurred_at: datetime | None = None
     before_event_id: str | None = None
     if cursor:
@@ -547,6 +560,8 @@ def list_outbox(
         offset,
         before_occurred_at,
         before_event_id,
+        normalized_query,
+        normalized_status,
     )
     items = candidates[:limit]
     next_cursor: str | None = None
@@ -559,7 +574,7 @@ def list_outbox(
     return {
         "items": items,
         "count": len(items),
-        "total": store.count_outbox(),
+        "total": store.count_outbox(normalized_query, normalized_status),
         "limit": limit,
         "offset": offset,
         "nextCursor": next_cursor,
