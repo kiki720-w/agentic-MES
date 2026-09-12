@@ -14,8 +14,8 @@ class IdentityTests(unittest.TestCase):
         cls.private_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
         cls.public_key = cls.private_key.public_key()
         cls.verifier = OidcTokenVerifier(
-            "https://identity.example.test/realms/agentic-mes",
-            "agentic-mes-api",
+            "https://identity.example.test/realms/capaxion",
+            "capaxion-api",
             "https://identity.example.test/certs",
             signing_key_resolver=lambda _: cls.public_key,
         )
@@ -25,8 +25,8 @@ class IdentityTests(unittest.TestCase):
         claims: dict[str, object] = {
             "sub": "supervisor-7",
             "name": "Shift Supervisor",
-            "iss": "https://identity.example.test/realms/agentic-mes",
-            "aud": "agentic-mes-api",
+            "iss": "https://identity.example.test/realms/capaxion",
+            "aud": "capaxion-api",
             "iat": now,
             "exp": now + timedelta(minutes=5),
             "realm_access": {"roles": ["SUPERVISOR", "OPERATOR"]},

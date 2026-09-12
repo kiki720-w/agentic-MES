@@ -1,4 +1,4 @@
-# Agentic Manufacturing Control Plane Core
+# CAPAXION Core
 
 当前核心定位是连接既有 ERP、MES、WMS、QMS、机床与传感器的制造智能控制层。正式模式从签名连接器接收来源可追溯的制造快照，执行有限产能滚动排产，并由受控 L3 智能体生成和提交计划；审批、发布与生产回写仍由独立人类权限和确定性策略控制。
 
@@ -153,7 +153,7 @@ python scripts/push-scheduling-snapshot.py ..\data\scheduling-snapshot.example.j
 
 部署上下文固定为`FACTORY_EDGE`独立工厂实例，健康检查及`GET /api/v1/system/deployment-context`返回组织、工厂和专用数据库隔离声明。本地实例已显式启用`L3_EXPERIMENTAL`；审批执行除能力开关外还要求`AUTONOMOUS_MES_AGENT_L3_APPROVER_IDS`白名单，未授权actor即使知道提案ID也不能执行。
 
-正式身份边界支持标准OIDC Bearer Token，并固定只接受`RS256`，强制校验签发方、受众、过期时间和subject。所有人工写操作都要求令牌角色与`factory_ids`工厂范围，审计actor由令牌`sub`注入，不再接受客户端自报身份；连接器继续使用独立HMAC凭据。页面内置Authorization Code + PKCE登录流程，访问令牌只保存在浏览器sessionStorage。本地演示显式使用`AUTONOMOUS_MES_AUTH_MODE=DEV`，不能用于生产。`compose.keycloak.yaml`和`keycloak/agentic-mes-realm.json`提供可选Keycloak开发参考；客户已有身份平台时只需按`.env.example`配置兼容OIDC的issuer、audience、JWKS和Web Client ID。
+正式身份边界支持标准OIDC Bearer Token，并固定只接受`RS256`，强制校验签发方、受众、过期时间和subject。所有人工写操作都要求令牌角色与`factory_ids`工厂范围，审计actor由令牌`sub`注入，不再接受客户端自报身份；连接器继续使用独立HMAC凭据。页面内置Authorization Code + PKCE登录流程，访问令牌只保存在浏览器sessionStorage。本地演示显式使用`AUTONOMOUS_MES_AUTH_MODE=DEV`，不能用于生产。`compose.keycloak.yaml`和`keycloak/capaxion-realm.json`提供可选Keycloak开发参考；客户已有身份平台时只需按`.env.example`配置兼容OIDC的issuer、audience、JWKS和Web Client ID。
 
 生产控制台按大样本场景改为工单服务端分页、编号搜索、状态筛选和数据库全量KPI聚合。模块切换只请求当前模块，浏览器页签不可见时暂停轮询，长列表元素启用延迟渲染。`GET /api/v1/work-orders`支持`limit`、`offset`、`query`和`status`，返回`total`；数据库迁移`0014`增加状态/更新时间查询索引。
 

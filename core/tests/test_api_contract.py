@@ -255,7 +255,7 @@ class ApiContractTests(unittest.TestCase):
     def test_dashboard_and_read_models_are_available(self):
         dashboard = self.client.get("/")
         self.assertEqual(200, dashboard.status_code)
-        self.assertIn("AGENTIC", dashboard.text)
+        self.assertIn("CAPAXION", dashboard.text)
         self.assertIn("制造智能控制塔", dashboard.text)
         self.assertIn("企业系统连接面", dashboard.text)
         self.assertIn("排产智能体", dashboard.text)

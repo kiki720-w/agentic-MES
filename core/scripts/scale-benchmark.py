@@ -14,7 +14,7 @@ DEFAULT_SCHEMA = "agentic_mes_scale"
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Build an isolated Agentic MES scale dataset")
+    parser = argparse.ArgumentParser(description="Build an isolated CAPAXION scale dataset")
     parser.add_argument("--database-url", default=DEFAULT_URL)
     parser.add_argument("--schema", default=DEFAULT_SCHEMA)
     parser.add_argument("--work-orders", type=int, default=100_000)

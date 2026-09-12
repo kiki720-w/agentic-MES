@@ -1,9 +1,11 @@
-# Agentic Manufacturing Control Plane · 项目续接文档
+# CAPAXION · 项目续接文档
+
+**Manufacturing Decision OS｜制造决策操作系统**
 
 更新时间：2026-09-13  
 项目目录：D:\mes  
-GitHub：https://github.com/kiki720-w/agentic-MES  
-功能基线提交：e02c63b  
+GitHub：https://github.com/kiki720-w/capaxion
+功能基线：main 最新提交
 当前分支：main
 
 ## 新对话先读这里
@@ -19,6 +21,7 @@ GitHub：https://github.com/kiki720-w/agentic-MES
 
 ## 已确认的产品定位
 
+0. 产品品牌统一为 **CAPAXION**，副标题为 **Manufacturing Decision OS｜制造决策操作系统**。`autonomous_mes` Python 包名、`AUTONOMOUS_MES_` 环境变量前缀和旧 PostgreSQL 数据目录仅作为内部兼容标识保留，不再作为用户可见品牌。
 1. 产品定位是“连接层 + 制造数字镜像 + APS + Agent 控制层”，客户原有系统继续保存权威业务事实。
 2. 早期自建 MES 页面只作为离线模拟器、演示数据源和回归测试夹具保留。
 3. Excel / CSV 导入必须保留，作为未接 API 时的正式过渡输入方式；输入先预检、确认和生成可追溯快照。
@@ -182,6 +185,6 @@ GitHub：https://github.com/kiki720-w/agentic-MES
 
 将下面这段话作为新对话的第一条消息：
 
-> 请继续开发 D:\mes 中的 Agentic Manufacturing Control Plane。先完整阅读 D:\mes\PROJECT_HANDOFF.md 和 D:\mes\README.md，再检查 git status、最近提交及现有测试。继承已经确认的产品定位、安全边界、L3 Agent、供应商中立模型网关和本地数据不出厂方向，不要重新从传统 MES 开始设计，也不要记录或暴露任何 API Key。完成当前最优先且不需要我决策的工作；只有遇到会改变产品方向、真实外部系统选择、身份提供商选择或不可逆操作时再停下来询问。
+> 请继续开发 D:\mes 中的 CAPAXION（Manufacturing Decision OS）。先完整阅读 D:\mes\PROJECT_HANDOFF.md 和 D:\mes\README.md，再检查 git status、最近提交及现有测试。继承已经确认的产品定位、安全边界、L3 Agent、供应商中立模型网关和本地数据不出厂方向，不要重新从传统 MES 开始设计，也不要记录或暴露任何 API Key。完成当前最优先且不需要我决策的工作；只有遇到会改变产品方向、真实外部系统选择、身份提供商选择或不可逆操作时再停下来询问。
 
 如果第二个对话不在本机项目上下文中，可以直接发送本文件，或让它从 GitHub main 分支读取 PROJECT_HANDOFF.md。

@@ -17,8 +17,8 @@
 
 `core/compose.keycloak.yaml`使用Keycloak 26.7.3和realm启动导入，仅用于开发验证。realm包含：
 
-- API bearer-only client：`agentic-mes-api`
-- Web public client：`agentic-mes-web`
+- API bearer-only client：`capaxion-api`
+- Web public client：`capaxion-web`
 - API audience mapper
 - `factory_ids`工厂scope mapper
 - `SUPERVISOR`、`PLANNER`、`OPERATOR`、`QUALITY`、`MASTER_DATA_ADMIN`角色
@@ -36,8 +36,8 @@ MES切换示例：
 
 ```dotenv
 AUTONOMOUS_MES_AUTH_MODE=OIDC
-AUTONOMOUS_MES_OIDC_ISSUER=http://127.0.0.1:8081/realms/agentic-mes
-AUTONOMOUS_MES_OIDC_AUDIENCE=agentic-mes-api
+AUTONOMOUS_MES_OIDC_ISSUER=http://127.0.0.1:8081/realms/capaxion
+AUTONOMOUS_MES_OIDC_AUDIENCE=capaxion-api
 ```
 
 ## 验证结果

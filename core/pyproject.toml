@@ -3,9 +3,9 @@ requires = ["hatchling>=1.25,<2"]
 build-backend = "hatchling.build"
 
 [project]
-name = "autonomous-mes-core"
+name = "capaxion-core"
 version = "0.1.0"
-description = "Agent-native manufacturing execution core"
+description = "CAPAXION manufacturing decision and control core"
 requires-python = ">=3.12,<3.14"
 dependencies = [
   "fastapi>=0.116,<1",

@@ -1,4 +1,6 @@
-# Agentic Manufacturing Control Plane
+# CAPAXION
+
+**Manufacturing Decision OS｜制造决策操作系统**
 
 本工作区正在构建面向机械加工与装备制造的制造智能控制层。产品不替换企业现有 ERP、MES、WMS、QMS 或设备平台，而是在其上建立可追溯的制造数字镜像、有限产能 APS、受控 L3 智能体和安全回写治理。
 
@@ -68,7 +70,7 @@
 - `docs/step-31-quality-risk-and-event-explorer-acceptance.md`：确定性质量风险评分、抽样建议与制造事件双向检索验收记录
 - `docs/step-32-governed-quality-risk-policy-acceptance.md`：可配置、版本化、审批生效与可追溯回滚的质量风险策略验收记录
 - `docs/step-33-policy-simulation-and-maker-checker-acceptance.md`：策略发布前历史影响回放与创建/审批双人分离验收记录
-- `docs/step-34-unified-aps-acceptance.md`：Agentic MES 与 paichan 思路统一、有限产能排产及计划治理验收记录
+- `docs/step-34-unified-aps-acceptance.md`：CAPAXION 与 paichan 排产思路统一、有限产能排产及计划治理验收记录
 - `docs/step-35-control-plane-and-scheduling-agent-acceptance.md`：控制层产品重构、外部排产快照和L3智能体迁移验收记录
 - `docs/step-36-connector-developer-kit-acceptance.md`：供应商中立排产快照Schema、样例和HMAC推送客户端验收记录
 - `docs/step-37-agent-workspace-and-capacity-input-acceptance.md`：统一附件工作台、工艺工时、可编辑产能与全宽结果页验收记录

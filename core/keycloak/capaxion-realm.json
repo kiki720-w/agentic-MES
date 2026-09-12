@@ -1,7 +1,7 @@
 {
-  "realm": "agentic-mes",
+  "realm": "capaxion",
   "enabled": true,
-  "displayName": "Agentic MES",
+  "displayName": "CAPAXION",
   "registrationAllowed": false,
   "resetPasswordAllowed": true,
   "roles": {
@@ -15,15 +15,15 @@
   },
   "clients": [
     {
-      "clientId": "agentic-mes-api",
-      "name": "Agentic MES API",
+      "clientId": "capaxion-api",
+      "name": "CAPAXION API",
       "enabled": true,
       "bearerOnly": true,
       "protocol": "openid-connect"
     },
     {
-      "clientId": "agentic-mes-web",
-      "name": "Agentic MES Web",
+      "clientId": "capaxion-web",
+      "name": "CAPAXION Web",
       "enabled": true,
       "publicClient": true,
       "standardFlowEnabled": true,
@@ -33,12 +33,12 @@
       "webOrigins": ["http://127.0.0.1:8000"],
       "protocolMappers": [
         {
-          "name": "agentic-mes-api-audience",
+          "name": "capaxion-api-audience",
           "protocol": "openid-connect",
           "protocolMapper": "oidc-audience-mapper",
           "consentRequired": false,
           "config": {
-            "included.client.audience": "agentic-mes-api",
+            "included.client.audience": "capaxion-api",
             "id.token.claim": "false",
             "access.token.claim": "true"
           }
