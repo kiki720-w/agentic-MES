@@ -45,6 +45,7 @@
 - `docs/step-16-gauge-calibration-trace-acceptance.md`：量具校准有效性和检验实绩追溯验收记录
 - `docs/step-17-agent-genealogy-tool-acceptance.md`：Agent完整制造谱系只读工具与范围审计验收记录
 - `docs/step-18-resource-master-data-center-acceptance.md`：内置制造资源权威台账与外部来源适配边界验收记录
+- `docs/step-19-resource-console-acceptance.md`：制造资源可视化台账与通用登记表单验收记录
 
 ## 当前决策门
 
