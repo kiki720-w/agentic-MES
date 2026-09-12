@@ -40,6 +40,7 @@
 - `docs/step-11-natural-language-incident-analysis-acceptance.md`：自然语言触发异常分析与提案分级验收记录
 - `docs/step-12-goal-alignment-and-quality-draft.md`：初始目标对齐审计、L2/L3隔离与质量建议草稿验收记录
 - `docs/step-13-product-genealogy-acceptance.md`：产品序列号制造谱系第一条垂直切片验收记录
+- `docs/step-14-execution-material-trace-acceptance.md`：加工会话、人员与物料批次谱系验收记录
 
 ## 当前决策门
 

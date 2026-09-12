@@ -1,8 +1,14 @@
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Any
 
 from autonomous_mes.domain.errors import InvalidTransition, NotFound
-from autonomous_mes.domain.genealogy import GenealogyLink, ProductUnit
+from autonomous_mes.domain.genealogy import (
+    ExecutionSession,
+    GenealogyLink,
+    MaterialConsumption,
+    ProductUnit,
+)
 
 from .ports import MesStore
 
@@ -13,6 +19,26 @@ class RegisterProductUnitCommand:
     product_serial: str
     work_order_id: str
     actor_id: str
+
+
+@dataclass(frozen=True)
+class MaterialLotInput:
+    material_lot: str
+    quantity: float
+    unit: str
+
+
+@dataclass(frozen=True)
+class RecordExecutionSessionCommand:
+    correlation_id: str
+    session_id: str
+    product_serial: str
+    operation_sequence: int
+    operator_id: str
+    equipment_id: str
+    started_at: datetime
+    ended_at: datetime
+    materials: list[MaterialLotInput]
 
 
 class GenealogyApplicationService:
@@ -63,6 +89,52 @@ class GenealogyApplicationService:
         )
         return self.get(unit.product_serial)
 
+    def record_execution(self, command: RecordExecutionSessionCommand) -> dict[str, Any]:
+        serial = command.product_serial.strip().upper()
+        unit = self._store.get_product_unit(serial)
+        if unit is None:
+            raise NotFound("product unit not found")
+        order = self._store.get(unit.work_order_id)
+        if order is None:
+            raise NotFound("work order not found")
+        operation = next(
+            (item for item in order.operations if item.sequence == command.operation_sequence), None
+        )
+        if operation is None or operation.status.value != "COMPLETED":
+            raise InvalidTransition("execution evidence requires a completed operation")
+        if operation.assigned_resource_id != command.equipment_id:
+            raise InvalidTransition("equipment does not match the dispatched operation")
+        session = ExecutionSession.create(
+            command.session_id,
+            serial,
+            unit.work_order_id,
+            command.operation_sequence,
+            command.operator_id,
+            command.equipment_id,
+            command.started_at,
+            command.ended_at,
+        )
+        materials = [
+            session.consume(item.material_lot, item.quantity, item.unit)
+            for item in command.materials
+        ]
+        links = [
+            ProductUnit.link(unit, "EXECUTED_BY", "Person", session.operator_id, command.operation_sequence),
+            ProductUnit.link(
+                unit, "HAS_EXECUTION", "ExecutionSession", session.session_id, command.operation_sequence
+            ),
+        ]
+        links.extend(
+            ProductUnit.link(
+                unit, "CONSUMED_MATERIAL", "MaterialLot", item.material_lot, command.operation_sequence
+            )
+            for item in materials
+        )
+        self._store.add_execution_session_atomically(
+            session, materials, links, session.event(materials, command.correlation_id)
+        )
+        return _serialize_session(session, materials)
+
     def get(self, product_serial: str) -> dict[str, Any]:
         serial = product_serial.strip().upper()
         unit = self._store.get_product_unit(serial)
@@ -74,6 +146,7 @@ class GenealogyApplicationService:
             for item in self._store.list_inspections(500)
             if item.work_order_id == unit.work_order_id
         ]
+        sessions = self._store.list_execution_sessions(serial)
         return {
             "productSerial": unit.product_serial,
             "workOrderId": unit.work_order_id,
@@ -92,6 +165,10 @@ class GenealogyApplicationService:
                 }
                 for item in inspections
             ],
+            "executionSessions": [
+                _serialize_session(item, self._store.list_material_consumptions(item.session_id))
+                for item in sessions
+            ],
         }
 
 
@@ -103,4 +180,27 @@ def _serialize_link(item: GenealogyLink) -> dict[str, Any]:
         "objectId": item.object_id,
         "operationSequence": item.operation_sequence,
         "occurredAt": item.occurred_at.isoformat(),
+    }
+
+
+def _serialize_session(
+    item: ExecutionSession, materials: list[MaterialConsumption]
+) -> dict[str, Any]:
+    return {
+        "sessionId": item.session_id,
+        "operationSequence": item.operation_sequence,
+        "operatorId": item.operator_id,
+        "equipmentId": item.equipment_id,
+        "startedAt": item.started_at.isoformat(),
+        "endedAt": item.ended_at.isoformat(),
+        "materials": [
+            {
+                "consumptionId": material.consumption_id,
+                "materialLot": material.material_lot,
+                "quantity": material.quantity,
+                "unit": material.unit,
+                "recordedAt": material.recorded_at.isoformat(),
+            }
+            for material in materials
+        ],
     }

@@ -34,6 +34,7 @@ uvicorn autonomous_mes.api:app --app-dir src --reload
 - `POST /api/v1/equipment/{equipmentId}/telemetry`
 - `POST /api/v1/genealogy/product-units`
 - `GET /api/v1/genealogy/product-units/{productSerial}`
+- `POST /api/v1/genealogy/product-units/{productSerial}/execution-sessions`
 - `POST /api/v1/agent-tools/get-work-order`
 - `POST /api/v1/agent/incidents/analyze`
 - `POST /api/v1/agent/chat`：基于 MES 实时快照的查询，以及受控自然语言动作提案
@@ -47,6 +48,8 @@ uvicorn autonomous_mes.api:app --app-dir src --reload
 API支持内存适配器和PostgreSQL持久化适配器。DeepSeek 可通过供应商中立模型网关提供诊断解释；模型只接收最小化的结构化设备/工单事实，不获得数据库连接和 MES 工具。未配置密钥或调用失败时自动回退到规则解释。
 
 产品序列号谱系使用只追加的`product_units`和`genealogy_links`保存。登记序列号时，从工单冻结快照固化工单、产品版本、工艺路线、BOM、图纸，以及已绑定的工序和设备关系；追溯查询同时聚合该工单的质量检验结果。页面“事件追溯”区支持按序列号查询。
+
+加工会话由上游采集端提供稳定`sessionId`作为幂等键，记录操作人员、实际设备、开始/结束时间和物料批次消耗。设备必须与工序派工结果一致，工序必须已经完工；会话、物料消耗、谱系链接和Outbox事件在同一数据库事务写入。
 
 ## 数据库开发
 

@@ -4,7 +4,12 @@ from typing import Any, Protocol
 from autonomous_mes.domain.agent import AgentProposal, ProposalStatus
 from autonomous_mes.domain.equipment import Equipment, TelemetrySample
 from autonomous_mes.domain.events import DomainEvent
-from autonomous_mes.domain.genealogy import GenealogyLink, ProductUnit
+from autonomous_mes.domain.genealogy import (
+    ExecutionSession,
+    GenealogyLink,
+    MaterialConsumption,
+    ProductUnit,
+)
 from autonomous_mes.domain.quality import QualityInspection
 from autonomous_mes.domain.work_order import WorkOrder
 
@@ -98,6 +103,15 @@ class GenealogyStore(Protocol):
     def list_genealogy_links(self, product_serial: str) -> list[GenealogyLink]: ...
     def add_product_unit_atomically(
         self, unit: ProductUnit, links: list[GenealogyLink], event: DomainEvent
+    ) -> None: ...
+    def list_execution_sessions(self, product_serial: str) -> list[ExecutionSession]: ...
+    def list_material_consumptions(self, session_id: str) -> list[MaterialConsumption]: ...
+    def add_execution_session_atomically(
+        self,
+        session: ExecutionSession,
+        materials: list[MaterialConsumption],
+        links: list[GenealogyLink],
+        event: DomainEvent,
     ) -> None: ...
 
 

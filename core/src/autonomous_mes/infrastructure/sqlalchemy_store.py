@@ -10,7 +10,12 @@ from autonomous_mes.domain.agent import AgentProposal, ProposalStatus
 from autonomous_mes.domain.equipment import Equipment, EquipmentState, TelemetrySample
 from autonomous_mes.domain.errors import IdempotencyConflict, InvalidTransition
 from autonomous_mes.domain.events import DomainEvent
-from autonomous_mes.domain.genealogy import GenealogyLink, ProductUnit
+from autonomous_mes.domain.genealogy import (
+    ExecutionSession,
+    GenealogyLink,
+    MaterialConsumption,
+    ProductUnit,
+)
 from autonomous_mes.domain.quality import InspectionStatus, QualityInspection
 from autonomous_mes.domain.work_order import (
     FrozenRevisions,
@@ -26,8 +31,10 @@ from .models import (
     EquipmentRow,
     EquipmentTelemetryRow,
     EventOutboxRow,
+    ExecutionSessionRow,
     GenealogyLinkRow,
     IdempotencyRecordRow,
+    MaterialConsumptionRow,
     ProductUnitRow,
     QualityInspectionRow,
     WorkOrderRow,
@@ -327,6 +334,74 @@ class SqlAlchemyWorkOrderStore:
         except IntegrityError as exc:
             raise IdempotencyConflict("product serial already exists") from exc
 
+    def list_execution_sessions(self, product_serial: str) -> list[ExecutionSession]:
+        with self._sessions() as session:
+            rows = session.scalars(
+                select(ExecutionSessionRow)
+                .where(ExecutionSessionRow.product_serial == product_serial)
+                .order_by(ExecutionSessionRow.started_at)
+            ).all()
+            return [_execution_session_to_domain(row) for row in rows]
+
+    def list_material_consumptions(self, session_id: str) -> list[MaterialConsumption]:
+        with self._sessions() as session:
+            rows = session.scalars(
+                select(MaterialConsumptionRow)
+                .where(MaterialConsumptionRow.session_id == session_id)
+                .order_by(MaterialConsumptionRow.recorded_at)
+            ).all()
+            return [_material_consumption_to_domain(row) for row in rows]
+
+    def add_execution_session_atomically(
+        self,
+        execution: ExecutionSession,
+        materials: list[MaterialConsumption],
+        links: list[GenealogyLink],
+        event: DomainEvent,
+    ) -> None:
+        try:
+            with self._sessions.begin() as session:
+                session.add(
+                    ExecutionSessionRow(
+                        session_id=execution.session_id,
+                        product_serial=execution.product_serial,
+                        work_order_id=execution.work_order_id,
+                        operation_sequence=execution.operation_sequence,
+                        operator_id=execution.operator_id,
+                        equipment_id=execution.equipment_id,
+                        started_at=execution.started_at,
+                        ended_at=execution.ended_at,
+                        created_at=execution.created_at,
+                    )
+                )
+                session.flush()
+                session.add_all(
+                    MaterialConsumptionRow(
+                        consumption_id=item.consumption_id,
+                        session_id=item.session_id,
+                        material_lot=item.material_lot,
+                        quantity=item.quantity,
+                        unit=item.unit,
+                        recorded_at=item.recorded_at,
+                    )
+                    for item in materials
+                )
+                session.add_all(
+                    GenealogyLinkRow(
+                        link_id=item.link_id,
+                        product_serial=item.product_serial,
+                        relation_type=item.relation_type,
+                        object_type=item.object_type,
+                        object_id=item.object_id,
+                        operation_sequence=item.operation_sequence,
+                        occurred_at=item.occurred_at,
+                    )
+                    for item in links
+                )
+                session.add_all(_event_rows([event]))
+        except IntegrityError as exc:
+            raise IdempotencyConflict("execution session or genealogy fact already exists") from exc
+
 
 def _row_values(item: WorkOrder) -> dict[str, Any]:
     return {
@@ -569,4 +644,29 @@ def _genealogy_link_to_domain(row: GenealogyLinkRow) -> GenealogyLink:
         row.object_id,
         row.operation_sequence,
         row.occurred_at,
+    )
+
+
+def _execution_session_to_domain(row: ExecutionSessionRow) -> ExecutionSession:
+    return ExecutionSession(
+        row.session_id,
+        row.product_serial,
+        row.work_order_id,
+        row.operation_sequence,
+        row.operator_id,
+        row.equipment_id,
+        row.started_at,
+        row.ended_at,
+        row.created_at,
+    )
+
+
+def _material_consumption_to_domain(row: MaterialConsumptionRow) -> MaterialConsumption:
+    return MaterialConsumption(
+        row.consumption_id,
+        row.session_id,
+        row.material_lot,
+        row.quantity,
+        row.unit,
+        row.recorded_at,
     )

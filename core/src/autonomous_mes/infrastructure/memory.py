@@ -7,7 +7,12 @@ from autonomous_mes.domain.agent import AgentProposal, ProposalStatus
 from autonomous_mes.domain.equipment import Equipment, TelemetrySample
 from autonomous_mes.domain.errors import Forbidden, IdempotencyConflict, InvalidTransition
 from autonomous_mes.domain.events import DomainEvent
-from autonomous_mes.domain.genealogy import GenealogyLink, ProductUnit
+from autonomous_mes.domain.genealogy import (
+    ExecutionSession,
+    GenealogyLink,
+    MaterialConsumption,
+    ProductUnit,
+)
 from autonomous_mes.domain.quality import QualityInspection
 from autonomous_mes.domain.work_order import WorkOrder
 
@@ -29,6 +34,8 @@ class InMemoryWorkOrderStore:
         self._inspections: dict[str, QualityInspection] = {}
         self._product_units: dict[str, ProductUnit] = {}
         self._genealogy_links: dict[str, list[GenealogyLink]] = {}
+        self._execution_sessions: dict[str, ExecutionSession] = {}
+        self._material_consumptions: dict[str, list[MaterialConsumption]] = {}
 
     def get(self, work_order_id: str) -> WorkOrder | None:
         with self._lock:
@@ -248,6 +255,35 @@ class InMemoryWorkOrderStore:
                 raise IdempotencyConflict("product serial already exists")
             self._product_units[unit.product_serial] = deepcopy(unit)
             self._genealogy_links[unit.product_serial] = deepcopy(links)
+            self._append_event(event)
+
+    def list_execution_sessions(self, product_serial: str) -> list[ExecutionSession]:
+        with self._lock:
+            return deepcopy(
+                [
+                    item
+                    for item in self._execution_sessions.values()
+                    if item.product_serial == product_serial
+                ]
+            )
+
+    def list_material_consumptions(self, session_id: str) -> list[MaterialConsumption]:
+        with self._lock:
+            return deepcopy(self._material_consumptions.get(session_id, []))
+
+    def add_execution_session_atomically(
+        self,
+        session: ExecutionSession,
+        materials: list[MaterialConsumption],
+        links: list[GenealogyLink],
+        event: DomainEvent,
+    ) -> None:
+        with self._lock:
+            if session.session_id in self._execution_sessions:
+                raise IdempotencyConflict("execution session already exists")
+            self._execution_sessions[session.session_id] = deepcopy(session)
+            self._material_consumptions[session.session_id] = deepcopy(materials)
+            self._genealogy_links.setdefault(session.product_serial, []).extend(deepcopy(links))
             self._append_event(event)
 
 

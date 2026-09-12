@@ -15,6 +15,8 @@ from autonomous_mes.application.equipment import (
 )
 from autonomous_mes.application.genealogy import (
     GenealogyApplicationService,
+    MaterialLotInput,
+    RecordExecutionSessionCommand,
     RegisterProductUnitCommand,
 )
 from autonomous_mes.application.natural_language import NaturalLanguageQueryService
@@ -148,6 +150,24 @@ class RegisterProductUnitBody(BaseModel):
     productSerial: str = Field(min_length=1, max_length=96)
     workOrderId: str
     actorId: str
+
+
+class MaterialConsumptionBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    materialLot: str
+    quantity: float = Field(gt=0)
+    unit: str
+
+
+class RecordExecutionSessionBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    sessionId: str = Field(min_length=1, max_length=96)
+    operationSequence: int = Field(gt=0)
+    operatorId: str
+    equipmentId: str
+    startedAt: datetime
+    endedAt: datetime
+    materials: list[MaterialConsumptionBody] = Field(min_length=1)
 
 
 settings = Settings()
@@ -323,6 +343,28 @@ def register_product_unit(body: RegisterProductUnitBody) -> dict[str, object]:
 @app.get("/api/v1/genealogy/product-units/{product_serial}")
 def get_product_genealogy(product_serial: str) -> dict[str, object]:
     return genealogy_service.get(product_serial)
+
+
+@app.post("/api/v1/genealogy/product-units/{product_serial}/execution-sessions", status_code=201)
+def record_execution_session(
+    product_serial: str, body: RecordExecutionSessionBody
+) -> dict[str, object]:
+    return genealogy_service.record_execution(
+        RecordExecutionSessionCommand(
+            str(uuid4()),
+            body.sessionId,
+            product_serial,
+            body.operationSequence,
+            body.operatorId,
+            body.equipmentId,
+            body.startedAt,
+            body.endedAt,
+            [
+                MaterialLotInput(item.materialLot, item.quantity, item.unit)
+                for item in body.materials
+            ],
+        )
+    )
 
 
 @app.post("/api/v1/quality/inspections", status_code=201)

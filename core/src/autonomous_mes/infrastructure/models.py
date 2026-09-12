@@ -207,3 +207,32 @@ class GenealogyLinkRow(Base):
     object_id: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
     operation_sequence: Mapped[int | None] = mapped_column(Integer)
     occurred_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class ExecutionSessionRow(Base):
+    __tablename__ = "execution_sessions"
+
+    session_id: Mapped[str] = mapped_column(String(96), primary_key=True)
+    product_serial: Mapped[str] = mapped_column(
+        String(96), ForeignKey("product_units.product_serial"), nullable=False, index=True
+    )
+    work_order_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
+    operation_sequence: Mapped[int] = mapped_column(Integer, nullable=False)
+    operator_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    equipment_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    ended_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class MaterialConsumptionRow(Base):
+    __tablename__ = "material_consumptions"
+
+    consumption_id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    session_id: Mapped[str] = mapped_column(
+        String(96), ForeignKey("execution_sessions.session_id"), nullable=False, index=True
+    )
+    material_lot: Mapped[str] = mapped_column(String(96), nullable=False, index=True)
+    quantity: Mapped[float] = mapped_column(Float, nullable=False)
+    unit: Mapped[str] = mapped_column(String(16), nullable=False)
+    recorded_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
