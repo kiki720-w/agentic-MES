@@ -78,6 +78,37 @@ class EquipmentApplicationService:
             raise ValidationError("limit must be between 1 and 500")
         return [_serialize(item) for item in self._store.list_equipment(limit)]
 
+    def list_page(
+        self,
+        limit: int = 30,
+        offset: int = 0,
+        query: str | None = None,
+        state: str | None = None,
+    ) -> dict[str, Any]:
+        if not 1 <= limit <= 100:
+            raise ValidationError("limit must be between 1 and 100")
+        if not 0 <= offset <= 1_000_000:
+            raise ValidationError("offset must be between 0 and 1000000")
+        normalized_query = query.strip() if query else None
+        normalized_state = state.strip().upper() if state else None
+        items = self._store.list_equipment(limit, offset, normalized_query, normalized_state)
+        return {
+            "items": [_serialize(item) for item in items],
+            "count": len(items),
+            "total": self._store.count_equipment(normalized_query, normalized_state),
+            "limit": limit,
+            "offset": offset,
+        }
+
+    def summary(self) -> dict[str, Any]:
+        states = self._store.summarize_equipment()
+        return {
+            "total": sum(states.values()),
+            "healthy": states.get("IDLE", 0) + states.get("RUNNING", 0),
+            "attention": states.get("DOWN", 0) + states.get("ALARM", 0),
+            "stateCounts": states,
+        }
+
     def get(self, equipment_id: str) -> dict[str, Any]:
         item = self._store.get_equipment(equipment_id)
         if item is None:

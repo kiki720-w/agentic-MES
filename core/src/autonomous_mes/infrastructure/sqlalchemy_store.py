@@ -72,8 +72,9 @@ class SqlAlchemyWorkOrderStore:
             statement = select(WorkOrderRow)
             statement = self._filter_work_orders(statement, query, status, include_test)
             rows = session.scalars(
-                statement
-                .order_by(WorkOrderRow.updated_at.desc(), WorkOrderRow.work_order_id.desc())
+                statement.order_by(
+                    WorkOrderRow.updated_at.desc(), WorkOrderRow.work_order_id.desc()
+                )
                 .offset(offset)
                 .limit(limit)
             ).all()
@@ -201,8 +202,9 @@ class SqlAlchemyWorkOrderStore:
                     )
                 )
             rows = session.scalars(
-                statement
-                .order_by(EventOutboxRow.occurred_at.desc(), EventOutboxRow.event_id.desc())
+                statement.order_by(
+                    EventOutboxRow.occurred_at.desc(), EventOutboxRow.event_id.desc()
+                )
                 .offset(offset)
                 .limit(limit)
             ).all()
@@ -253,12 +255,47 @@ class SqlAlchemyWorkOrderStore:
             row = session.scalar(select(EquipmentRow).where(EquipmentRow.code == code))
             return _equipment_to_domain(row) if row else None
 
-    def list_equipment(self, limit: int = 100) -> list[Equipment]:
+    def list_equipment(
+        self,
+        limit: int = 100,
+        offset: int = 0,
+        query: str | None = None,
+        state: str | None = None,
+    ) -> list[Equipment]:
         with self._sessions() as session:
+            statement = select(EquipmentRow)
+            if query:
+                pattern = f"%{query}%"
+                statement = statement.where(
+                    or_(EquipmentRow.code.ilike(pattern), EquipmentRow.name.ilike(pattern))
+                )
+            if state:
+                statement = statement.where(EquipmentRow.state == state)
             rows = session.scalars(
-                select(EquipmentRow).order_by(EquipmentRow.updated_at.desc()).limit(limit)
+                statement.order_by(EquipmentRow.updated_at.desc(), EquipmentRow.equipment_id.desc())
+                .offset(offset)
+                .limit(limit)
             ).all()
             return [_equipment_to_domain(row) for row in rows]
+
+    def count_equipment(self, query: str | None = None, state: str | None = None) -> int:
+        with self._sessions() as session:
+            statement = select(func.count()).select_from(EquipmentRow)
+            if query:
+                pattern = f"%{query}%"
+                statement = statement.where(
+                    or_(EquipmentRow.code.ilike(pattern), EquipmentRow.name.ilike(pattern))
+                )
+            if state:
+                statement = statement.where(EquipmentRow.state == state)
+            return int(session.scalar(statement) or 0)
+
+    def summarize_equipment(self) -> dict[str, int]:
+        with self._sessions() as session:
+            rows = session.execute(
+                select(EquipmentRow.state, func.count()).group_by(EquipmentRow.state)
+            ).all()
+            return {str(state): int(count) for state, count in rows}
 
     def telemetry_sample_exists(self, sample_id: str) -> bool:
         with self._sessions() as session:
@@ -355,14 +392,58 @@ class SqlAlchemyWorkOrderStore:
             row = session.get(QualityInspectionRow, inspection_id)
             return _inspection_to_domain(row) if row else None
 
-    def list_inspections(self, limit: int = 100) -> list[QualityInspection]:
+    def list_inspections(
+        self,
+        limit: int = 100,
+        offset: int = 0,
+        query: str | None = None,
+        status: str | None = None,
+    ) -> list[QualityInspection]:
         with self._sessions() as session:
+            statement = select(QualityInspectionRow)
+            if query:
+                pattern = f"%{query}%"
+                statement = statement.where(
+                    or_(
+                        QualityInspectionRow.work_order_id.ilike(pattern),
+                        QualityInspectionRow.defect_code.ilike(pattern),
+                    )
+                )
+            if status:
+                statement = statement.where(QualityInspectionRow.status == status)
             rows = session.scalars(
-                select(QualityInspectionRow)
-                .order_by(QualityInspectionRow.updated_at.desc())
+                statement.order_by(
+                    QualityInspectionRow.updated_at.desc(),
+                    QualityInspectionRow.inspection_id.desc(),
+                )
+                .offset(offset)
                 .limit(limit)
             ).all()
             return [_inspection_to_domain(row) for row in rows]
+
+    def count_inspections(self, query: str | None = None, status: str | None = None) -> int:
+        with self._sessions() as session:
+            statement = select(func.count()).select_from(QualityInspectionRow)
+            if query:
+                pattern = f"%{query}%"
+                statement = statement.where(
+                    or_(
+                        QualityInspectionRow.work_order_id.ilike(pattern),
+                        QualityInspectionRow.defect_code.ilike(pattern),
+                    )
+                )
+            if status:
+                statement = statement.where(QualityInspectionRow.status == status)
+            return int(session.scalar(statement) or 0)
+
+    def summarize_inspections(self) -> dict[str, int]:
+        with self._sessions() as session:
+            rows = session.execute(
+                select(QualityInspectionRow.status, func.count()).group_by(
+                    QualityInspectionRow.status
+                )
+            ).all()
+            return {str(status): int(count) for status, count in rows}
 
     def add_inspection_atomically(self, inspection: QualityInspection, event: DomainEvent) -> None:
         with self._sessions.begin() as session:
@@ -516,14 +597,86 @@ class SqlAlchemyWorkOrderStore:
             row = session.get(ManufacturingResourceRow, key)
             return _manufacturing_resource_to_domain(row) if row else None
 
-    def list_manufacturing_resources(self, limit: int = 100) -> list[ManufacturingResource]:
+    def list_manufacturing_resources(
+        self,
+        limit: int = 100,
+        offset: int = 0,
+        query: str | None = None,
+        resource_type: str | None = None,
+        status: str | None = None,
+    ) -> list[ManufacturingResource]:
         with self._sessions() as session:
+            statement = select(ManufacturingResourceRow)
+            if query:
+                pattern = f"%{query}%"
+                statement = statement.where(
+                    or_(
+                        ManufacturingResourceRow.resource_id.ilike(pattern),
+                        ManufacturingResourceRow.name.ilike(pattern),
+                    )
+                )
+            if resource_type:
+                statement = statement.where(ManufacturingResourceRow.resource_type == resource_type)
+            if status:
+                statement = statement.where(ManufacturingResourceRow.status == status)
             rows = session.scalars(
-                select(ManufacturingResourceRow)
-                .order_by(ManufacturingResourceRow.updated_at.desc())
+                statement.order_by(
+                    ManufacturingResourceRow.updated_at.desc(),
+                    ManufacturingResourceRow.resource_key.desc(),
+                )
+                .offset(offset)
                 .limit(limit)
             ).all()
             return [_manufacturing_resource_to_domain(row) for row in rows]
+
+    def count_manufacturing_resources(
+        self,
+        query: str | None = None,
+        resource_type: str | None = None,
+        status: str | None = None,
+    ) -> int:
+        with self._sessions() as session:
+            statement = select(func.count()).select_from(ManufacturingResourceRow)
+            if query:
+                pattern = f"%{query}%"
+                statement = statement.where(
+                    or_(
+                        ManufacturingResourceRow.resource_id.ilike(pattern),
+                        ManufacturingResourceRow.name.ilike(pattern),
+                    )
+                )
+            if resource_type:
+                statement = statement.where(ManufacturingResourceRow.resource_type == resource_type)
+            if status:
+                statement = statement.where(ManufacturingResourceRow.status == status)
+            return int(session.scalar(statement) or 0)
+
+    def summarize_manufacturing_resources(self) -> dict[str, int]:
+        with self._sessions() as session:
+            type_rows = session.execute(
+                select(ManufacturingResourceRow.resource_type, func.count()).group_by(
+                    ManufacturingResourceRow.resource_type
+                )
+            ).all()
+            status_rows = session.execute(
+                select(ManufacturingResourceRow.status, func.count()).group_by(
+                    ManufacturingResourceRow.status
+                )
+            ).all()
+            result = {
+                "TOTAL": int(
+                    session.scalar(select(func.count()).select_from(ManufacturingResourceRow)) or 0
+                ),
+                "SOURCE_COUNT": int(
+                    session.scalar(
+                        select(func.count(func.distinct(ManufacturingResourceRow.source_system)))
+                    )
+                    or 0
+                ),
+            }
+            result.update({f"TYPE:{kind}": int(count) for kind, count in type_rows})
+            result.update({f"STATUS:{status}": int(count) for status, count in status_rows})
+            return result
 
     def add_manufacturing_resource_atomically(
         self, resource: ManufacturingResource, event: DomainEvent

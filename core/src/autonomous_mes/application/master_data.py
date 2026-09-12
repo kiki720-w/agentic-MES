@@ -69,7 +69,56 @@ class ManufacturingResourceApplicationService:
         return serialize_resource(item)
 
     def list(self, limit: int = 100) -> list[dict[str, Any]]:
-        return [serialize_resource(item) for item in self._store.list_manufacturing_resources(limit)]
+        return [
+            serialize_resource(item) for item in self._store.list_manufacturing_resources(limit)
+        ]
+
+    def list_page(
+        self,
+        limit: int = 30,
+        offset: int = 0,
+        query: str | None = None,
+        resource_type: str | None = None,
+        status: str | None = None,
+    ) -> dict[str, Any]:
+        if not 1 <= limit <= 100:
+            raise ValidationError("limit must be between 1 and 100")
+        if not 0 <= offset <= 1_000_000:
+            raise ValidationError("offset must be between 0 and 1000000")
+        normalized_query = query.strip() if query else None
+        normalized_type = resource_type.strip().upper() if resource_type else None
+        normalized_status = status.strip().upper() if status else None
+        items = self._store.list_manufacturing_resources(
+            limit,
+            offset,
+            normalized_query,
+            normalized_type,
+            normalized_status,
+        )
+        return {
+            "items": [serialize_resource(item) for item in items],
+            "count": len(items),
+            "total": self._store.count_manufacturing_resources(
+                normalized_query,
+                normalized_type,
+                normalized_status,
+            ),
+            "limit": limit,
+            "offset": offset,
+        }
+
+    def summary(self) -> dict[str, Any]:
+        values = self._store.summarize_manufacturing_resources()
+        type_counts = {key[5:]: value for key, value in values.items() if key.startswith("TYPE:")}
+        status_counts = {
+            key[7:]: value for key, value in values.items() if key.startswith("STATUS:")
+        }
+        return {
+            "total": values.get("TOTAL", 0),
+            "sourceCount": values.get("SOURCE_COUNT", 0),
+            "typeCounts": type_counts,
+            "statusCounts": status_counts,
+        }
 
     def update(self, command: UpdateManufacturingResourceCommand) -> dict[str, Any]:
         current = self._store.get_manufacturing_resource(
@@ -146,9 +195,7 @@ class ManufacturingResourceApplicationService:
                     row.get("revision") or None,
                     row.get("name", ""),
                     row.get("status", ""),
-                    float(row["lifeRemainingPercent"])
-                    if row.get("lifeRemainingPercent")
-                    else None,
+                    float(row["lifeRemainingPercent"]) if row.get("lifeRemainingPercent") else None,
                     datetime.fromisoformat(row["calibrationDueAt"])
                     if row.get("calibrationDueAt")
                     else None,
@@ -176,7 +223,9 @@ def serialize_resource(item: ManufacturingResource) -> dict[str, Any]:
         "name": item.name,
         "status": item.status,
         "lifeRemainingPercent": item.life_remaining_percent,
-        "calibrationDueAt": item.calibration_due_at.isoformat() if item.calibration_due_at else None,
+        "calibrationDueAt": item.calibration_due_at.isoformat()
+        if item.calibration_due_at
+        else None,
         "sourceSystem": item.source_system,
         "externalReference": item.external_reference,
         "sourceUpdatedAt": item.source_updated_at.isoformat(),

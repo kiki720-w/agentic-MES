@@ -90,7 +90,9 @@ class InMemoryWorkOrderStore:
         items: list[WorkOrder], query: str | None, status: str | None, include_test: bool
     ) -> list[WorkOrder]:
         if not include_test:
-            items = [item for item in items if not InMemoryWorkOrderStore._is_test_code(item.human_code)]
+            items = [
+                item for item in items if not InMemoryWorkOrderStore._is_test_code(item.human_code)
+            ]
         if query:
             normalized = query.casefold()
             items = [item for item in items if normalized in item.human_code.casefold()]
@@ -202,10 +204,46 @@ class InMemoryWorkOrderStore:
             equipment_id = self._equipment_codes.get(code)
             return self.get_equipment(equipment_id) if equipment_id else None
 
-    def list_equipment(self, limit: int = 100) -> list[Equipment]:
+    def list_equipment(
+        self,
+        limit: int = 100,
+        offset: int = 0,
+        query: str | None = None,
+        state: str | None = None,
+    ) -> list[Equipment]:
         with self._lock:
             items = sorted(self._equipment.values(), key=lambda item: item.updated_at, reverse=True)
-            return deepcopy(items[:limit])
+            if query:
+                needle = query.casefold()
+                items = [
+                    item
+                    for item in items
+                    if needle in item.code.casefold() or needle in item.name.casefold()
+                ]
+            if state:
+                items = [item for item in items if item.state.value == state]
+            return deepcopy(items[offset : offset + limit])
+
+    def count_equipment(self, query: str | None = None, state: str | None = None) -> int:
+        with self._lock:
+            items = list(self._equipment.values())
+            if query:
+                needle = query.casefold()
+                items = [
+                    item
+                    for item in items
+                    if needle in item.code.casefold() or needle in item.name.casefold()
+                ]
+            if state:
+                items = [item for item in items if item.state.value == state]
+            return len(items)
+
+    def summarize_equipment(self) -> dict[str, int]:
+        with self._lock:
+            result: dict[str, int] = {}
+            for item in self._equipment.values():
+                result[item.state.value] = result.get(item.state.value, 0) + 1
+            return result
 
     def telemetry_sample_exists(self, sample_id: str) -> bool:
         with self._lock:
@@ -256,10 +294,48 @@ class InMemoryWorkOrderStore:
         with self._lock:
             return deepcopy(self._inspections.get(inspection_id))
 
-    def list_inspections(self, limit: int = 100) -> list[QualityInspection]:
+    def list_inspections(
+        self,
+        limit: int = 100,
+        offset: int = 0,
+        query: str | None = None,
+        status: str | None = None,
+    ) -> list[QualityInspection]:
         with self._lock:
             items = sorted(self._inspections.values(), key=lambda x: x.updated_at, reverse=True)
-            return deepcopy(items[:limit])
+            if query:
+                needle = query.casefold()
+                items = [
+                    item
+                    for item in items
+                    if needle in item.work_order_id.casefold()
+                    or needle in (item.defect_code or "").casefold()
+                ]
+            if status:
+                items = [item for item in items if item.status.value == status]
+            return deepcopy(items[offset : offset + limit])
+
+    def count_inspections(self, query: str | None = None, status: str | None = None) -> int:
+        with self._lock:
+            items = list(self._inspections.values())
+            if query:
+                needle = query.casefold()
+                items = [
+                    item
+                    for item in items
+                    if needle in item.work_order_id.casefold()
+                    or needle in (item.defect_code or "").casefold()
+                ]
+            if status:
+                items = [item for item in items if item.status.value == status]
+            return len(items)
+
+    def summarize_inspections(self) -> dict[str, int]:
+        with self._lock:
+            result: dict[str, int] = {}
+            for item in self._inspections.values():
+                result[item.status.value] = result.get(item.status.value, 0) + 1
+            return result
 
     def add_inspection_atomically(self, inspection: QualityInspection, event: DomainEvent) -> None:
         with self._lock:
@@ -365,12 +441,67 @@ class InMemoryWorkOrderStore:
         with self._lock:
             return deepcopy(self._manufacturing_resources.get(key))
 
-    def list_manufacturing_resources(self, limit: int = 100) -> list[ManufacturingResource]:
+    def list_manufacturing_resources(
+        self,
+        limit: int = 100,
+        offset: int = 0,
+        query: str | None = None,
+        resource_type: str | None = None,
+        status: str | None = None,
+    ) -> list[ManufacturingResource]:
         with self._lock:
             items = sorted(
-                self._manufacturing_resources.values(), key=lambda item: item.updated_at, reverse=True
+                self._manufacturing_resources.values(),
+                key=lambda item: item.updated_at,
+                reverse=True,
             )
-            return deepcopy(items[:limit])
+            if query:
+                needle = query.casefold()
+                items = [
+                    item
+                    for item in items
+                    if needle in item.resource_id.casefold() or needle in item.name.casefold()
+                ]
+            if resource_type:
+                items = [item for item in items if item.resource_type == resource_type]
+            if status:
+                items = [item for item in items if item.status == status]
+            return deepcopy(items[offset : offset + limit])
+
+    def count_manufacturing_resources(
+        self,
+        query: str | None = None,
+        resource_type: str | None = None,
+        status: str | None = None,
+    ) -> int:
+        with self._lock:
+            items = list(self._manufacturing_resources.values())
+            if query:
+                needle = query.casefold()
+                items = [
+                    item
+                    for item in items
+                    if needle in item.resource_id.casefold() or needle in item.name.casefold()
+                ]
+            if resource_type:
+                items = [item for item in items if item.resource_type == resource_type]
+            if status:
+                items = [item for item in items if item.status == status]
+            return len(items)
+
+    def summarize_manufacturing_resources(self) -> dict[str, int]:
+        with self._lock:
+            result: dict[str, int] = {
+                "TOTAL": len(self._manufacturing_resources),
+                "SOURCE_COUNT": len(
+                    {item.source_system for item in self._manufacturing_resources.values()}
+                ),
+            }
+            for item in self._manufacturing_resources.values():
+                type_key, status_key = f"TYPE:{item.resource_type}", f"STATUS:{item.status}"
+                result[type_key] = result.get(type_key, 0) + 1
+                result[status_key] = result.get(status_key, 0) + 1
+            return result
 
     def add_manufacturing_resource_atomically(
         self, resource: ManufacturingResource, event: DomainEvent
@@ -400,9 +531,7 @@ class InMemoryWorkOrderStore:
                 key in self._manufacturing_resources for key in keys
             ):
                 raise IdempotencyConflict("manufacturing resource batch contains duplicate key")
-            self._manufacturing_resources.update(
-                {item.key: deepcopy(item) for item in resources}
-            )
+            self._manufacturing_resources.update({item.key: deepcopy(item) for item in resources})
             for event in events:
                 self._append_event(event)
 

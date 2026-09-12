@@ -5,6 +5,7 @@ from pathlib import Path
 
 from alembic import command
 from alembic.config import Config
+from alembic.script import ScriptDirectory
 from sqlalchemy import create_engine, inspect
 
 
@@ -15,6 +16,8 @@ class DatabaseMigrationTests(unittest.TestCase):
             database_url = f"sqlite:///{database_path.as_posix()}"
             config = Config(str(Path(__file__).parents[1] / "alembic.ini"))
             config.set_main_option("script_location", str(Path(__file__).parents[1] / "migrations"))
+            revisions = ScriptDirectory.from_config(config).walk_revisions()
+            self.assertTrue(all(len(item.revision) <= 32 for item in revisions))
 
             previous = os.environ.get("AUTONOMOUS_MES_DATABASE_URL")
             os.environ["AUTONOMOUS_MES_DATABASE_URL"] = database_url
@@ -50,6 +53,16 @@ class DatabaseMigrationTests(unittest.TestCase):
             )
             outbox_indexes = {item["name"] for item in schema.get_indexes("event_outbox")}
             self.assertIn("ix_event_outbox_pending", outbox_indexes)
+            equipment_indexes = {item["name"] for item in schema.get_indexes("equipment")}
+            self.assertIn("ix_equipment_state_updated_id", equipment_indexes)
+            quality_indexes = {
+                item["name"] for item in schema.get_indexes("quality_inspections")
+            }
+            self.assertIn("ix_quality_status_updated_id", quality_indexes)
+            resource_indexes = {
+                item["name"] for item in schema.get_indexes("manufacturing_resources")
+            }
+            self.assertIn("ix_resource_type_updated_key", resource_indexes)
             execution_columns = {
                 item["name"] for item in schema.get_columns("execution_sessions")
             }

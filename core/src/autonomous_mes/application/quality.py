@@ -104,6 +104,37 @@ class QualityApplicationService:
             raise ValidationError("limit must be between 1 and 500")
         return [_serialize(x) for x in self._store.list_inspections(limit)]
 
+    def list_page(
+        self,
+        limit: int = 30,
+        offset: int = 0,
+        query: str | None = None,
+        status: str | None = None,
+    ) -> dict[str, Any]:
+        if not 1 <= limit <= 100:
+            raise ValidationError("limit must be between 1 and 100")
+        if not 0 <= offset <= 1_000_000:
+            raise ValidationError("offset must be between 0 and 1000000")
+        normalized_query = query.strip() if query else None
+        normalized_status = status.strip().upper() if status else None
+        items = self._store.list_inspections(limit, offset, normalized_query, normalized_status)
+        return {
+            "items": [_serialize(item) for item in items],
+            "count": len(items),
+            "total": self._store.count_inspections(normalized_query, normalized_status),
+            "limit": limit,
+            "offset": offset,
+        }
+
+    def summary(self) -> dict[str, Any]:
+        statuses = self._store.summarize_inspections()
+        return {
+            "total": sum(statuses.values()),
+            "open": statuses.get("OPEN", 0),
+            "quarantined": statuses.get("QUARANTINED", 0),
+            "statusCounts": statuses,
+        }
+
     def _require(self, inspection_id: str) -> QualityInspection:
         item = self._store.get_inspection(inspection_id)
         if item is None:

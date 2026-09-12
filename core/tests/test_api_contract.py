@@ -96,6 +96,53 @@ class ApiContractTests(unittest.TestCase):
         )
         self.assertEqual(409, invalid_cursor.status_code)
 
+    def test_operational_read_models_are_paginated_and_filterable(self):
+        equipment_code = f"CNC-PAGE-{uuid4().hex[:8]}"
+        created = self.client.post(
+            "/api/v1/equipment",
+            json={
+                "code": equipment_code,
+                "name": "Pagination Test Lathe",
+                "workshopId": "WS-MACH-01",
+                "workCenterId": "WC-LATHE-01",
+                "protocol": "SIMULATED",
+            },
+        )
+        self.assertEqual(201, created.status_code, created.text)
+
+        equipment = self.client.get(
+            "/api/v1/equipment",
+            params={"limit": 1, "query": equipment_code, "state": "UNKNOWN"},
+        ).json()
+        self.assertEqual(1, equipment["count"])
+        self.assertEqual(1, equipment["total"])
+        self.assertEqual(equipment_code, equipment["items"][0]["code"])
+        self.assertIn("stateCounts", self.client.get("/api/v1/equipment-summary").json())
+
+        resources = self.client.get(
+            "/api/v1/master-data/manufacturing-resources",
+            params={"limit": 1, "resourceType": "TOOL"},
+        ).json()
+        self.assertEqual(1, resources["limit"])
+        self.assertIn("total", resources)
+        self.assertIn(
+            "typeCounts",
+            self.client.get(
+                "/api/v1/master-data/manufacturing-resources-summary"
+            ).json(),
+        )
+
+        quality = self.client.get(
+            "/api/v1/quality/inspections",
+            params={"limit": 1, "status": "OPEN"},
+        ).json()
+        self.assertEqual(1, quality["limit"])
+        self.assertIn("total", quality)
+        self.assertIn(
+            "statusCounts",
+            self.client.get("/api/v1/quality/inspections-summary").json(),
+        )
+
     def test_create_is_idempotent_over_http(self):
         body, key, first = self._create()
         second = self.client.post(

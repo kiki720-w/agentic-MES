@@ -329,13 +329,7 @@ deepseek_model_gateway = (
     if settings.deepseek_api_key
     else None
 )
-deepseek_narrator = (
-    FallbackNarrator(
-        deepseek_model_gateway
-    )
-    if deepseek_model_gateway
-    else None
-)
+deepseek_narrator = FallbackNarrator(deepseek_model_gateway) if deepseek_model_gateway else None
 incident_agent = IncidentResponseAgent(
     store,
     deepseek_narrator,
@@ -388,7 +382,9 @@ def ready() -> dict[str, str]:
     return {
         "status": "READY",
         "modelGateway": "DEEPSEEK_CONFIGURED" if settings.deepseek_api_key else "DISABLED",
-        "agentRuntime": "DEEPSEEK_WITH_RULES_FALLBACK" if settings.deepseek_api_key else "RULES_ONLY",
+        "agentRuntime": "DEEPSEEK_WITH_RULES_FALLBACK"
+        if settings.deepseek_api_key
+        else "RULES_ONLY",
         "storageBackend": settings.storage_backend,
         "agentLevel": "L3_EXPERIMENTAL" if settings.agent_l3_execution_enabled else "L2",
         "deploymentMode": settings.deployment_mode,
@@ -564,9 +560,18 @@ def list_agent_proposals(limit: int = 100) -> dict[str, object]:
 
 
 @app.get("/api/v1/quality/inspections")
-def list_quality_inspections(limit: int = 100) -> dict[str, object]:
-    items = quality_service.list(limit)
-    return {"items": items, "count": len(items)}
+def list_quality_inspections(
+    limit: int = 100,
+    offset: int = 0,
+    query: str | None = None,
+    status: str | None = None,
+) -> dict[str, object]:
+    return quality_service.list_page(limit, offset, query, status)
+
+
+@app.get("/api/v1/quality/inspections-summary")
+def quality_inspections_summary() -> dict[str, object]:
+    return quality_service.summary()
 
 
 @app.post("/api/v1/genealogy/product-units", status_code=201)
@@ -611,9 +616,9 @@ def record_execution_session(
             [
                 ProcessResourceInput(
                     item.resourceType,
-                item.resourceId,
-                item.revision,
-            )
+                    item.resourceId,
+                    item.revision,
+                )
                 for item in body.resources
             ],
         )
@@ -698,9 +703,18 @@ def register_equipment(
 
 
 @app.get("/api/v1/equipment")
-def list_equipment(limit: int = 100) -> dict[str, object]:
-    items = equipment_service.list(limit)
-    return {"items": items, "count": len(items)}
+def list_equipment(
+    limit: int = 100,
+    offset: int = 0,
+    query: str | None = None,
+    state: str | None = None,
+) -> dict[str, object]:
+    return equipment_service.list_page(limit, offset, query, state)
+
+
+@app.get("/api/v1/equipment-summary")
+def equipment_summary() -> dict[str, object]:
+    return equipment_service.summary()
 
 
 @app.post("/api/v1/master-data/manufacturing-resources", status_code=201)
@@ -728,9 +742,19 @@ def register_manufacturing_resource(
 
 
 @app.get("/api/v1/master-data/manufacturing-resources")
-def list_manufacturing_resources(limit: int = 100) -> dict[str, object]:
-    items = master_data_service.list(limit)
-    return {"items": items, "count": len(items)}
+def list_manufacturing_resources(
+    limit: int = 100,
+    offset: int = 0,
+    query: str | None = None,
+    resourceType: str | None = None,
+    status: str | None = None,
+) -> dict[str, object]:
+    return master_data_service.list_page(limit, offset, query, resourceType, status)
+
+
+@app.get("/api/v1/master-data/manufacturing-resources-summary")
+def manufacturing_resources_summary() -> dict[str, object]:
+    return master_data_service.summary()
 
 
 @app.put("/api/v1/master-data/manufacturing-resources/state")
