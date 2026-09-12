@@ -43,6 +43,7 @@ class ApiContractTests(unittest.TestCase):
                 "modelGateway": "DISABLED",
                 "agentRuntime": "RULES_ONLY",
                 "storageBackend": "memory",
+                "agentLevel": "L2",
             },
             self.client.get("/health/ready").json(),
         )

@@ -15,7 +15,7 @@ from autonomous_mes.application.work_orders import (
     ReleaseWorkOrderCommand,
     WorkOrderApplicationService,
 )
-from autonomous_mes.domain.errors import InvalidTransition, ValidationError
+from autonomous_mes.domain.errors import Forbidden, InvalidTransition, ValidationError
 from autonomous_mes.infrastructure.memory import InMemoryWorkOrderStore
 
 
@@ -147,7 +147,7 @@ class EquipmentTests(unittest.TestCase):
             "OperationSuspendedByEquipmentIncident", self.store.list_outbox()[-1]["eventType"]
         )
 
-        agent = IncidentResponseAgent(self.store)
+        agent = IncidentResponseAgent(self.store, allow_production_execution=True)
         observed = agent.analyze()
         self.assertEqual("HOLD_AND_INSPECT", observed[0]["action"])
         self.assertEqual("OBSERVED", observed[0]["status"])
@@ -162,6 +162,10 @@ class EquipmentTests(unittest.TestCase):
         actionable = agent.analyze()
         proposal = next(item for item in actionable if item["action"] == "RESUME_OPERATION")
         self.assertEqual("PENDING_APPROVAL", proposal["status"])
+        with self.assertRaises(Forbidden):
+            IncidentResponseAgent(self.store).approve(
+                proposal["proposalId"], "supervisor-1", "阶段一禁止Agent执行生产动作"
+            )
         executed = agent.approve(proposal["proposalId"], "supervisor-1", "现场已确认安全")
         self.assertEqual("EXECUTED", executed["status"])
         resumed = work_orders.get(work_order["workOrderId"])

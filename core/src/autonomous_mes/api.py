@@ -171,7 +171,9 @@ deepseek_narrator = (
     if deepseek_model_gateway
     else None
 )
-incident_agent = IncidentResponseAgent(store, deepseek_narrator)
+incident_agent = IncidentResponseAgent(
+    store, deepseek_narrator, settings.agent_l3_execution_enabled
+)
 natural_language_service = NaturalLanguageQueryService(
     store, deepseek_model_gateway, incident_agent
 )
@@ -209,6 +211,7 @@ def ready() -> dict[str, str]:
         "modelGateway": "DEEPSEEK_CONFIGURED" if settings.deepseek_api_key else "DISABLED",
         "agentRuntime": "DEEPSEEK_WITH_RULES_FALLBACK" if settings.deepseek_api_key else "RULES_ONLY",
         "storageBackend": settings.storage_backend,
+        "agentLevel": "L3_EXPERIMENTAL" if settings.agent_l3_execution_enabled else "L2",
     }
 
 

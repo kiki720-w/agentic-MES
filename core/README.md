@@ -73,6 +73,8 @@ Worker通过数据库租约领取事件；失败会指数退避，超过上限�
 
 输入“分析当前设备异常并生成建议”可通过自然语言触发全局异常扫描。Agent对暂停工单形成去重提案：设备健康时生成`PENDING_APPROVAL`复工提案，设备异常时生成`OBSERVED`保持停机结论。该安全自动化会记录分析结果和Outbox事件，但不会直接改变工单或设备状态。
 
+阶段一默认运行在`L2`：即使数据库中存在待审批复工提案，Agent审批执行端点也会拒绝生产状态变更，页面不显示“审批执行”。实验性L3必须显式设置`AUTONOMOUS_MES_AGENT_L3_EXECUTION_ENABLED=true`，仅用于隔离验证环境。自然语言“为工单 WO-... 的 OP 10 生成检验建议”只创建去重、可追溯的R2建议草稿；真正创建检验、记录结果、隔离和返工仍由质量角色在业务页面完成。
+
 启用 DeepSeek 时只需在本机 `.env` 设置 `AUTONOMOUS_MES_DEEPSEEK_API_KEY` 并重启 API。默认使用 `deepseek-v4-flash`、JSON 输出、关闭思考模式和 12 秒超时。每条提案记录 `narrativeSource` 与 `modelName`；不要把真实密钥写入仓库。
 
 ### 本机D盘免安装环境

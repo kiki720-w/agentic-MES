@@ -52,12 +52,13 @@ class AgentProposal:
         rationale: str,
         narrative_source: str = "RULES",
         model_name: str | None = None,
+        agent_id: str = "incident-response-agent-v1",
     ) -> tuple["AgentProposal", DomainEvent]:
         now = utc_now()
         proposal = cls(
             proposal_id=str(uuid4()),
             fingerprint=fingerprint,
-            agent_id="incident-response-agent-v1",
+            agent_id=agent_id,
             action=action,
             risk=risk,
             status=status,

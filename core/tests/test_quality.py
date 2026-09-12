@@ -1,6 +1,11 @@
 from datetime import UTC, datetime
 from unittest import TestCase
 
+from autonomous_mes.application.agent_runtime import IncidentResponseAgent
+from autonomous_mes.application.equipment import (
+    EquipmentApplicationService,
+    RegisterEquipmentCommand,
+)
 from autonomous_mes.application.quality import CreateInspectionCommand, QualityApplicationService
 from autonomous_mes.application.work_orders import (
     CreateWorkOrderCommand,
@@ -17,8 +22,14 @@ class QualityWorkflowTests(TestCase):
         self.store = InMemoryWorkOrderStore()
         self.orders = WorkOrderApplicationService(self.store)
         self.quality = QualityApplicationService(self.store, self.store)
+        self.equipment = EquipmentApplicationService(self.store)
 
     def completed_order(self) -> dict[str, object]:
+        equipment = self.equipment.register(
+            RegisterEquipmentCommand(
+                "q-equipment", "LATHE-01", "精车设备", "WS-MACH-01", "WC-01", "SIMULATED"
+            )
+        )
         order = self.orders.create(
             CreateWorkOrderCommand(
                 "q-create",
@@ -42,7 +53,7 @@ class QualityWorkflowTests(TestCase):
             )
         )
         for action, extra in [
-            ("dispatch", {"resource_id": "LATHE-01"}),
+            ("dispatch", {"resource_id": str(equipment["equipmentId"])}),
             ("start", {}),
             ("report", {"good_quantity": 1}),
             ("complete", {}),
@@ -60,6 +71,19 @@ class QualityWorkflowTests(TestCase):
                 )
             )
         return order
+
+    def test_agent_creates_idempotent_quality_recommendation_draft(self) -> None:
+        order = self.completed_order()
+        agent = IncidentResponseAgent(self.store)
+
+        first = agent.recommend_quality_inspection(str(order["workOrderId"]), 10)
+        second = agent.recommend_quality_inspection(str(order["workOrderId"]), 10)
+
+        self.assertEqual(first["proposalId"], second["proposalId"])
+        self.assertEqual("CREATE_QUALITY_INSPECTION", first["action"])
+        self.assertEqual("OBSERVED", first["status"])
+        self.assertEqual("quality-recommendation-agent-v1", first["agentId"])
+        self.assertEqual("COMPLETED", self.orders.get(str(order["workOrderId"]))["status"])
 
     def test_failed_inspection_is_quarantined_and_rework_requires_approval(self) -> None:
         order = self.completed_order()

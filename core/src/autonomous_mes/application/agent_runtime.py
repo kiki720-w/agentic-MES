@@ -5,7 +5,7 @@ from autonomous_mes.application.equipment import EquipmentApplicationService
 from autonomous_mes.application.ports import MesStore
 from autonomous_mes.application.work_orders import OperationCommand, WorkOrderApplicationService
 from autonomous_mes.domain.agent import AgentProposal, ProposalStatus
-from autonomous_mes.domain.errors import InvalidTransition, NotFound, ValidationError
+from autonomous_mes.domain.errors import Forbidden, InvalidTransition, NotFound, ValidationError
 
 from .model_gateway import (
     DiagnosticFacts,
@@ -43,11 +43,17 @@ class FallbackNarrator:
 
 
 class IncidentResponseAgent:
-    def __init__(self, store: MesStore, narrator: DiagnosticModel | None = None) -> None:
+    def __init__(
+        self,
+        store: MesStore,
+        narrator: DiagnosticModel | None = None,
+        allow_production_execution: bool = False,
+    ) -> None:
         self._store = store
         self._work_orders = WorkOrderApplicationService(store)
         self._equipment = EquipmentApplicationService(store)
         self._narrator = narrator or RuleBasedNarrator()
+        self._allow_production_execution = allow_production_execution
 
     def analyze(self) -> list[dict[str, Any]]:
         proposals: list[dict[str, Any]] = []
@@ -112,6 +118,8 @@ class IncidentResponseAgent:
         return [_serialize(item) for item in self._store.list_agent_proposals(limit)]
 
     def approve(self, proposal_id: str, actor_id: str, reason: str) -> dict[str, Any]:
+        if not self._allow_production_execution:
+            raise Forbidden("Agent L3 production execution is disabled in the Stage-1 L2 baseline")
         proposal = self._store.get_agent_proposal(proposal_id)
         if proposal is None:
             raise NotFound("agent proposal not found")
@@ -136,6 +144,51 @@ class IncidentResponseAgent:
             executed, ProposalStatus.PENDING_APPROVAL, event
         )
         return _serialize(executed)
+
+    def recommend_quality_inspection(
+        self, work_order_id: str, operation_sequence: int
+    ) -> dict[str, Any]:
+        work_order = self._work_orders.get(work_order_id)
+        operation = next(
+            (
+                item
+                for item in work_order["operations"]
+                if item["sequence"] == operation_sequence
+            ),
+            None,
+        )
+        if operation is None or operation["status"] != "COMPLETED":
+            raise ValidationError("quality recommendation requires a completed operation")
+        if not operation["assignedResourceId"]:
+            raise ValidationError("completed operation has no traceable equipment")
+        if any(
+            item.work_order_id == work_order_id
+            and item.operation_sequence == operation_sequence
+            for item in self._store.list_inspections(500)
+        ):
+            raise InvalidTransition("quality inspection already exists for this operation")
+        equipment = self._equipment.get(str(operation["assignedResourceId"]))
+        fingerprint = sha256(
+            f"quality:{work_order_id}:{work_order['version']}:{operation_sequence}".encode()
+        ).hexdigest()
+        proposal = self._store.get_agent_proposal_by_fingerprint(fingerprint)
+        if proposal is None:
+            proposal, event = AgentProposal.create(
+                fingerprint,
+                "CREATE_QUALITY_INSPECTION",
+                "R2",
+                ProposalStatus.OBSERVED,
+                work_order_id,
+                int(work_order["version"]),
+                operation_sequence,
+                str(equipment["equipmentId"]),
+                int(equipment["version"]),
+                "工序已完工且尚无检验任务，建议由检验员创建质量检验。",
+                "该记录仅为建议草稿，不会创建检验、隔离产品或批准返工。",
+                agent_id="quality-recommendation-agent-v1",
+            )
+            self._store.add_agent_proposal_atomically(proposal, event)
+        return _serialize(proposal)
 
 
 def _serialize(item: AgentProposal) -> dict[str, Any]:

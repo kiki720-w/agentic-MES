@@ -38,6 +38,7 @@
 - `docs/step-9-natural-language-interface-acceptance.md`：只读自然语言生产查询与写意图拦截验收记录
 - `docs/step-10-governed-natural-language-action-acceptance.md`：自然语言复工提案、审批门和执行隔离验收记录
 - `docs/step-11-natural-language-incident-analysis-acceptance.md`：自然语言触发异常分析与提案分级验收记录
+- `docs/step-12-goal-alignment-and-quality-draft.md`：初始目标对齐审计、L2/L3隔离与质量建议草稿验收记录
 
 ## 当前决策门
 

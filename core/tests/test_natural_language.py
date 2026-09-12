@@ -80,3 +80,24 @@ class NaturalLanguageQueryTests(unittest.TestCase):
         self.assertIn("1 个形成待审批复工提案", result["answer"])
         action_agent.analyze.assert_called_once_with()
         model.answer.assert_not_called()
+
+    def test_quality_instruction_creates_recommendation_draft_only(self) -> None:
+        model = Mock()
+        action_agent = Mock()
+        service = NaturalLanguageQueryService(InMemoryWorkOrderStore(), model, action_agent)
+        service._orders = Mock()
+        service._orders.list.return_value = [
+            {"workOrderId": "order-1", "humanCode": "WO-1008", "status": "IN_PROGRESS"}
+        ]
+        action_agent.recommend_quality_inspection.return_value = {
+            "proposalId": "quality-draft-1",
+            "status": "OBSERVED",
+            "modelName": None,
+        }
+
+        result = service.ask("为工单 WO-1008 的 OP 10 生成检验建议")
+
+        self.assertEqual("CREATED_RECOMMENDATION_DRAFT", result["policyDecision"])
+        self.assertEqual("quality-draft-1", result["actionProposal"]["proposalId"])
+        action_agent.recommend_quality_inspection.assert_called_once_with("order-1", 10)
+        model.answer.assert_not_called()

@@ -2,7 +2,7 @@ import re
 from datetime import UTC, datetime
 from typing import Any, Protocol
 
-from autonomous_mes.domain.errors import ValidationError
+from autonomous_mes.domain.errors import InvalidTransition, NotFound, ValidationError
 
 from .equipment import EquipmentApplicationService
 from .model_gateway import (
@@ -19,14 +19,23 @@ WRITE_INTENT = re.compile(
 )
 RESUME_INTENT = re.compile(r"(?:复工|恢复)", re.IGNORECASE)
 WORK_ORDER_CODE = re.compile(r"\bWO-[A-Z0-9-]+\b", re.IGNORECASE)
+OPERATION_SEQUENCE = re.compile(r"\bOP\s*[-:]?\s*(\d+)\b", re.IGNORECASE)
 ANALYZE_INCIDENTS_INTENT = re.compile(
     r"(?:分析|诊断|检查|排查).{0,12}(?:异常|停机|暂停|故障)|"
     r"(?:异常|停机|暂停|故障).{0,12}(?:分析|诊断|检查|排查)"
+)
+QUALITY_RECOMMENDATION_INTENT = re.compile(
+    r"(?:创建|生成|发起).{0,24}(?:检验|质检).{0,12}(?:建议|申请|提案)|"
+    r"(?:检验|质检).{0,12}(?:建议|申请|提案)"
 )
 
 
 class ActionProposalAgent(Protocol):
     def analyze(self) -> list[dict[str, Any]]: ...
+
+    def recommend_quality_inspection(
+        self, work_order_id: str, operation_sequence: int
+    ) -> dict[str, Any]: ...
 
 
 class NaturalLanguageQueryService:
@@ -47,6 +56,8 @@ class NaturalLanguageQueryService:
         if not question or len(question) > 500:
             raise ValidationError("question must contain 1 to 500 characters")
         as_of = datetime.now(UTC).isoformat()
+        if QUALITY_RECOMMENDATION_INTENT.search(question):
+            return self._quality_recommendation(question, as_of)
         if ANALYZE_INCIDENTS_INTENT.search(question):
             return self._analyze_incidents(as_of)
         if WRITE_INTENT.search(question):
@@ -126,6 +137,53 @@ class NaturalLanguageQueryService:
             "asOf": as_of,
             "sourceObjects": references,
             "actionProposals": proposals,
+        }
+
+    def _quality_recommendation(self, question: str, as_of: str) -> dict[str, Any]:
+        code_match = WORK_ORDER_CODE.search(question)
+        sequence_match = OPERATION_SEQUENCE.search(question)
+        if code_match is None or sequence_match is None:
+            return {
+                "answer": "请明确工单号和工序，例如“为工单 WO-... 的 OP 10 生成检验建议”。",
+                "source": "POLICY",
+                "model": None,
+                "policyDecision": "REQUIRE_EXPLICIT_TARGET",
+                "asOf": as_of,
+                "sourceObjects": [],
+            }
+        code = code_match.group(0).upper()
+        sequence = int(sequence_match.group(1))
+        order = next(
+            (item for item in self._orders.list(500) if str(item["humanCode"]).upper() == code),
+            None,
+        )
+        if order is None:
+            return self._action_rejected(as_of, f"未找到工单 {code}。", [])
+        references = [{"type": "WorkOrder", "id": str(order["workOrderId"])}]
+        if self._action_agent is None:
+            return self._action_rejected(as_of, "质量建议服务不可用。", references)
+        try:
+            proposal = self._action_agent.recommend_quality_inspection(
+                str(order["workOrderId"]), sequence
+            )
+        except (InvalidTransition, NotFound, ValidationError):
+            return self._action_rejected(
+                as_of,
+                f"工单 {code} 的 OP {sequence} 不满足生成检验建议的条件。",
+                references,
+            )
+        references.append({"type": "AgentProposal", "id": str(proposal["proposalId"])})
+        return {
+            "answer": (
+                f"已为工单 {code} 的 OP {sequence} 生成质量检验建议草稿。"
+                "草稿不会自动创建检验、隔离产品或批准返工，请由检验员在质量页面处理。"
+            ),
+            "source": "POLICY",
+            "model": proposal["modelName"],
+            "policyDecision": "CREATED_RECOMMENDATION_DRAFT",
+            "asOf": as_of,
+            "sourceObjects": references,
+            "actionProposal": proposal,
         }
 
     def _resume_proposal(self, question: str, as_of: str) -> dict[str, Any] | None:
