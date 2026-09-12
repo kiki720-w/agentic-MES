@@ -21,9 +21,11 @@ class DeepSeekGatewayTests(unittest.TestCase):
         response.json.return_value = {"choices": [{"message": {"content": json.dumps({"diagnosis": "主轴过载导致工序暂停", "recommendation": "由维修人员检查主轴后再由主管审批复工"}, ensure_ascii=False)}}]}
         post.return_value = response
 
-        result = DeepSeekDiagnosticModel("secret").explain(facts())
+        gateway = DeepSeekDiagnosticModel("secret")
+        result = gateway.explain(facts())
 
         self.assertEqual("DEEPSEEK", result.source)
+        self.assertEqual("CONNECTED", gateway.status()["connectionStatus"])
         request = post.call_args.kwargs["json"]
         self.assertNotIn("tools", request)
         self.assertEqual({"type": "json_object"}, request["response_format"])

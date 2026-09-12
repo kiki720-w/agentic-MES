@@ -148,16 +148,21 @@ def build_store() -> MesStore:
 store = build_store()
 service = WorkOrderApplicationService(store)
 equipment_service = EquipmentApplicationService(store)
-deepseek_narrator = (
-    FallbackNarrator(
-        DeepSeekDiagnosticModel(
-            settings.deepseek_api_key,
-            settings.deepseek_model,
-            settings.deepseek_base_url,
-            settings.deepseek_timeout_seconds,
-        )
+deepseek_model_gateway = (
+    DeepSeekDiagnosticModel(
+        settings.deepseek_api_key,
+        settings.deepseek_model,
+        settings.deepseek_base_url,
+        settings.deepseek_timeout_seconds,
     )
     if settings.deepseek_api_key
+    else None
+)
+deepseek_narrator = (
+    FallbackNarrator(
+        deepseek_model_gateway
+    )
+    if deepseek_model_gateway
     else None
 )
 incident_agent = IncidentResponseAgent(store, deepseek_narrator)
@@ -196,6 +201,19 @@ def ready() -> dict[str, str]:
         "agentRuntime": "DEEPSEEK_WITH_RULES_FALLBACK" if settings.deepseek_api_key else "RULES_ONLY",
         "storageBackend": settings.storage_backend,
     }
+
+
+@app.get("/api/v1/agent/model-status")
+def agent_model_status() -> dict[str, str | None]:
+    if deepseek_model_gateway is None:
+        return {
+            "provider": "NONE",
+            "model": None,
+            "connectionStatus": "DISABLED",
+            "lastCheckedAt": None,
+            "lastError": None,
+        }
+    return deepseek_model_gateway.status()
 
 
 @app.get("/", response_class=HTMLResponse, include_in_schema=False)

@@ -53,6 +53,7 @@ class ApiContractTests(unittest.TestCase):
         self.assertIn("AGENTIC", dashboard.text)
         self.assertIn("生产执行中心", dashboard.text)
         self.assertIn("质量检验与返工", dashboard.text)
+        self.assertIn("DeepSeek 诊断解释网关", dashboard.text)
 
         orders = self.client.get("/api/v1/work-orders")
         outbox = self.client.get("/api/v1/system/outbox")
