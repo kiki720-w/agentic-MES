@@ -1,0 +1,72 @@
+{
+  "sourceSystem": "factory-edge-adapter",
+  "workshopId": "WS-MACH-01",
+  "sourceRevision": "example-20260913-001",
+  "observedAt": "2026-09-13T09:00:00+10:00",
+  "workOrders": [
+    {
+      "externalId": "MES-WO-1042",
+      "code": "WO-1042",
+      "productionOrderId": "ERP-MO-90042",
+      "quantity": 20,
+      "dueAt": "2026-09-18T17:00:00+10:00",
+      "priority": 80,
+      "productRevisionId": "PRODUCT-SHAFT-A-R3",
+      "routingRevisionId": "ROUTING-SHAFT-A-R5",
+      "bomRevisionId": "BOM-SHAFT-A-R2",
+      "drawingRevisionIds": ["DWG-SHAFT-A-R7"],
+      "status": "RELEASED",
+      "version": 12,
+      "materialReady": true,
+      "qualityHold": false,
+      "operations": [
+        {
+          "sequence": 10,
+          "operationCode": "TURN",
+          "operationName": "数控车削",
+          "workCenterId": "WC-LATHE-01",
+          "plannedQuantity": 20,
+          "status": "PENDING",
+          "goodQuantity": 0,
+          "scrapQuantity": 0
+        },
+        {
+          "sequence": 20,
+          "operationCode": "GRIND",
+          "operationName": "外圆磨削",
+          "workCenterId": "WC-GRIND-01",
+          "plannedQuantity": 20,
+          "status": "PENDING",
+          "goodQuantity": 0,
+          "scrapQuantity": 0
+        }
+      ]
+    }
+  ],
+  "resources": [
+    {
+      "externalId": "MES-CELL-LATHE-01",
+      "code": "CELL-LATHE-01",
+      "name": "车削单元一",
+      "resourceType": "CELL",
+      "workCenterId": "WC-LATHE-01",
+      "dailyCapacityMinutes": 480,
+      "overtimeCapacityMinutes": 600,
+      "capabilityCodes": ["TURN"],
+      "active": true,
+      "state": "RUNNING"
+    },
+    {
+      "externalId": "MES-CELL-GRIND-01",
+      "code": "CELL-GRIND-01",
+      "name": "磨削单元一",
+      "resourceType": "CELL",
+      "workCenterId": "WC-GRIND-01",
+      "dailyCapacityMinutes": 480,
+      "overtimeCapacityMinutes": 600,
+      "capabilityCodes": ["GRIND"],
+      "active": true,
+      "state": "IDLE"
+    }
+  ]
+}

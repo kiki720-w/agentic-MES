@@ -66,6 +66,7 @@
 - `docs/step-33-policy-simulation-and-maker-checker-acceptance.md`：策略发布前历史影响回放与创建/审批双人分离验收记录
 - `docs/step-34-unified-aps-acceptance.md`：Agentic MES 与 paichan 思路统一、有限产能排产及计划治理验收记录
 - `docs/step-35-control-plane-and-scheduling-agent-acceptance.md`：控制层产品重构、外部排产快照和L3智能体迁移验收记录
+- `docs/step-36-connector-developer-kit-acceptance.md`：供应商中立排产快照Schema、样例和HMAC推送客户端验收记录
 
 ## 当前决策门
 

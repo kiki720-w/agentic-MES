@@ -132,6 +132,14 @@ Agent可通过`POST /api/v1/agent-tools/get-product-genealogy`读取序列号谱
 
 通用入站连接器`POST /api/v1/connectors/v1/manufacturing-resources`只接收标准模型，不访问客户URL或数据库。请求必须携带Key ID、Unix时间戳、唯一Nonce和HMAC-SHA256签名；签名覆盖原始请求体，时间窗口默认5分钟，Nonce持久化后不可重放。凭据仅通过环境变量配置，不进入页面、Agent上下文或仓库。
 
+排产快照使用同一安全协议。供应商中立契约位于`../schemas/scheduling-snapshot.schema.json`，脱敏机械加工样例位于`../data/scheduling-snapshot.example.json`。接入前可离线验证并查看内容摘要：
+
+```powershell
+python scripts/push-scheduling-snapshot.py ..\data\scheduling-snapshot.example.json --validate-only
+```
+
+正式发送时从`AUTONOMOUS_MES_CONNECTOR_KEY_ID`和`AUTONOMOUS_MES_CONNECTOR_HMAC_SECRET`读取凭据。客户端拒绝向非回环HTTP地址发送，远程工厂端点必须使用HTTPS。
+
 部署上下文固定为`FACTORY_EDGE`独立工厂实例，健康检查及`GET /api/v1/system/deployment-context`返回组织、工厂和专用数据库隔离声明。本地实例已显式启用`L3_EXPERIMENTAL`；审批执行除能力开关外还要求`AUTONOMOUS_MES_AGENT_L3_APPROVER_IDS`白名单，未授权actor即使知道提案ID也不能执行。
 
 正式身份边界支持标准OIDC Bearer Token，并固定只接受`RS256`，强制校验签发方、受众、过期时间和subject。所有人工写操作都要求令牌角色与`factory_ids`工厂范围，审计actor由令牌`sub`注入，不再接受客户端自报身份；连接器继续使用独立HMAC凭据。页面内置Authorization Code + PKCE登录流程，访问令牌只保存在浏览器sessionStorage。本地演示显式使用`AUTONOMOUS_MES_AUTH_MODE=DEV`，不能用于生产。`compose.keycloak.yaml`和`keycloak/agentic-mes-realm.json`提供可选Keycloak开发参考；客户已有身份平台时只需按`.env.example`配置兼容OIDC的issuer、audience、JWKS和Web Client ID。

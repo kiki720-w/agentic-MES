@@ -1,0 +1,80 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agentic-manufacturing.local/schemas/scheduling-snapshot.schema.json",
+  "title": "SchedulingSnapshotV1",
+  "description": "Provider-neutral scheduling input assembled from ERP, MES, WMS, QMS and equipment facts.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["sourceSystem", "workshopId", "sourceRevision", "observedAt", "workOrders", "resources"],
+  "properties": {
+    "sourceSystem": { "type": "string", "minLength": 1, "maxLength": 64 },
+    "workshopId": { "type": "string", "minLength": 1, "maxLength": 64 },
+    "sourceRevision": { "type": "string", "minLength": 1, "maxLength": 128 },
+    "observedAt": { "type": "string", "format": "date-time" },
+    "workOrders": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["externalId", "code", "productionOrderId", "quantity", "dueAt", "productRevisionId", "routingRevisionId", "bomRevisionId", "status", "operations"],
+        "properties": {
+          "externalId": { "type": "string", "minLength": 1, "maxLength": 128 },
+          "code": { "type": "string", "minLength": 1, "maxLength": 64 },
+          "productionOrderId": { "type": "string", "minLength": 1, "maxLength": 128 },
+          "quantity": { "type": "integer", "minimum": 1 },
+          "dueAt": { "type": "string", "format": "date-time" },
+          "priority": { "type": "integer", "minimum": 1, "maximum": 100, "default": 50 },
+          "productRevisionId": { "type": "string", "minLength": 1, "maxLength": 128 },
+          "routingRevisionId": { "type": "string", "minLength": 1, "maxLength": 128 },
+          "bomRevisionId": { "type": "string", "minLength": 1, "maxLength": 128 },
+          "drawingRevisionIds": { "type": "array", "items": { "type": "string" }, "default": [] },
+          "status": { "enum": ["DRAFT", "RELEASED", "IN_PROGRESS", "SUSPENDED", "COMPLETED", "CLOSED", "CANCELLED"] },
+          "version": { "type": "integer", "minimum": 1, "default": 1 },
+          "createdAt": { "type": ["string", "null"], "format": "date-time" },
+          "updatedAt": { "type": ["string", "null"], "format": "date-time" },
+          "materialReady": { "type": "boolean", "default": true },
+          "qualityHold": { "type": "boolean", "default": false },
+          "operations": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["sequence", "operationCode", "operationName", "workCenterId", "plannedQuantity", "status"],
+              "properties": {
+                "sequence": { "type": "integer", "minimum": 1 },
+                "operationCode": { "type": "string", "minLength": 1, "maxLength": 64 },
+                "operationName": { "type": "string", "minLength": 1, "maxLength": 160 },
+                "workCenterId": { "type": "string", "minLength": 1, "maxLength": 64 },
+                "plannedQuantity": { "type": "integer", "minimum": 1 },
+                "status": { "enum": ["PENDING", "DISPATCHED", "IN_PROGRESS", "SUSPENDED", "COMPLETED"] },
+                "assignedResourceId": { "type": ["string", "null"] },
+                "goodQuantity": { "type": "integer", "minimum": 0, "default": 0 },
+                "scrapQuantity": { "type": "integer", "minimum": 0, "default": 0 }
+              }
+            }
+          }
+        }
+      }
+    },
+    "resources": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["externalId", "code", "name", "resourceType", "workCenterId", "dailyCapacityMinutes", "overtimeCapacityMinutes"],
+        "properties": {
+          "externalId": { "type": "string", "minLength": 1, "maxLength": 128 },
+          "code": { "type": "string", "minLength": 1, "maxLength": 64 },
+          "name": { "type": "string", "minLength": 1, "maxLength": 160 },
+          "resourceType": { "enum": ["PERSON", "CELL", "EQUIPMENT"] },
+          "workCenterId": { "type": "string", "minLength": 1, "maxLength": 64 },
+          "dailyCapacityMinutes": { "type": "number", "exclusiveMinimum": 0 },
+          "overtimeCapacityMinutes": { "type": "number", "exclusiveMinimum": 0 },
+          "capabilityCodes": { "type": "array", "items": { "type": "string" }, "default": [] },
+          "active": { "type": "boolean", "default": true },
+          "state": { "enum": ["UNKNOWN", "IDLE", "RUNNING", "DOWN", "ALARM", "OFFLINE"], "default": "UNKNOWN" }
+        }
+      }
+    }
+  }
+}
