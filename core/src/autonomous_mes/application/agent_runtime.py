@@ -48,12 +48,14 @@ class IncidentResponseAgent:
         store: MesStore,
         narrator: DiagnosticModel | None = None,
         allow_production_execution: bool = False,
+        approver_ids: set[str] | None = None,
     ) -> None:
         self._store = store
         self._work_orders = WorkOrderApplicationService(store)
         self._equipment = EquipmentApplicationService(store)
         self._narrator = narrator or RuleBasedNarrator()
         self._allow_production_execution = allow_production_execution
+        self._approver_ids = approver_ids or set()
 
     def analyze(self) -> list[dict[str, Any]]:
         proposals: list[dict[str, Any]] = []
@@ -120,6 +122,8 @@ class IncidentResponseAgent:
     def approve(self, proposal_id: str, actor_id: str, reason: str) -> dict[str, Any]:
         if not self._allow_production_execution:
             raise Forbidden("Agent L3 production execution is disabled in the Stage-1 L2 baseline")
+        if actor_id not in self._approver_ids:
+            raise Forbidden("actor is not authorized to approve Agent L3 execution")
         proposal = self._store.get_agent_proposal(proposal_id)
         if proposal is None:
             raise NotFound("agent proposal not found")

@@ -44,6 +44,9 @@ class ApiContractTests(unittest.TestCase):
                 "agentRuntime": "RULES_ONLY",
                 "storageBackend": "memory",
                 "agentLevel": "L2",
+                "deploymentMode": "FACTORY_EDGE",
+                "organizationId": "ORG-DEMO",
+                "factoryId": "FACTORY-DEMO",
             },
             self.client.get("/health/ready").json(),
         )

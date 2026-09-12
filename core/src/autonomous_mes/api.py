@@ -293,7 +293,10 @@ deepseek_narrator = (
     else None
 )
 incident_agent = IncidentResponseAgent(
-    store, deepseek_narrator, settings.agent_l3_execution_enabled
+    store,
+    deepseek_narrator,
+    settings.agent_l3_execution_enabled,
+    {item.strip() for item in settings.agent_l3_approver_ids.split(",") if item.strip()},
 )
 natural_language_service = NaturalLanguageQueryService(
     store, deepseek_model_gateway, incident_agent
@@ -344,6 +347,20 @@ def ready() -> dict[str, str]:
         "agentRuntime": "DEEPSEEK_WITH_RULES_FALLBACK" if settings.deepseek_api_key else "RULES_ONLY",
         "storageBackend": settings.storage_backend,
         "agentLevel": "L3_EXPERIMENTAL" if settings.agent_l3_execution_enabled else "L2",
+        "deploymentMode": settings.deployment_mode,
+        "organizationId": settings.organization_id,
+        "factoryId": settings.factory_id,
+    }
+
+
+@app.get("/api/v1/system/deployment-context")
+def deployment_context() -> dict[str, str]:
+    return {
+        "deploymentMode": settings.deployment_mode,
+        "organizationId": settings.organization_id,
+        "factoryId": settings.factory_id,
+        "dataIsolation": "DEDICATED_DATABASE",
+        "cloudControlPlane": "OPTIONAL_NOT_CONNECTED",
     }
 
 

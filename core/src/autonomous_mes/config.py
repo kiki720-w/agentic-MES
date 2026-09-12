@@ -16,6 +16,10 @@ class Settings(BaseSettings):
     deepseek_base_url: str = "https://api.deepseek.com"
     deepseek_timeout_seconds: float = 12.0
     agent_l3_execution_enabled: bool = False
+    agent_l3_approver_ids: str = ""
+    deployment_mode: str = "FACTORY_EDGE"
+    organization_id: str = "ORG-DEMO"
+    factory_id: str = "FACTORY-DEMO"
     connector_key_id: str | None = None
     connector_hmac_secret: str | None = None
     connector_max_clock_skew_seconds: int = 300
