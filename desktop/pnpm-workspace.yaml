@@ -1,3 +1,5 @@
 allowBuilds:
   electron: true
   electron-winstaller: false
+storeDir: ../.pnpm-store
+confirmModulesPurge: false

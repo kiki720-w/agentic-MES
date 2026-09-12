@@ -85,7 +85,7 @@
 
 ## Windows 桌面版
 
-当前已提供可直接运行的第一版桌面客户端。它不是单纯的浏览器快捷方式：Electron 主进程负责窗口、文件选择、本地 Core 健康检查和受限 IPC，渲染进程不能直接访问 Node.js 或数据库。现有控制塔、排产、结果和产能页面暂时以内部业务视图接入，后续逐步迁移为原生桌面组件。
+当前已提供可直接运行的原生桌面客户端。它不是单纯的浏览器快捷方式：Electron 主进程负责窗口、文件选择、本地 Core 健康检查和受限 IPC，React 原生组件直接调用 Core API，渲染进程不能直接访问 Node.js 或数据库。控制塔、排产、结果、产能和模型设置已经统一为同一套桌面设计系统。
 
 开发启动：
 
@@ -96,7 +96,7 @@
 
     pnpm desktop:build
 
-本机产物：`D:\mes\desktop\release\CAPAXION-0.1.0-x64.exe`。便携版从该目录启动时会查找 `D:\mes\core` 并在需要时启动本地 Core；也可通过 `CAPAXION_REPOSITORY_ROOT`、`CAPAXION_PYTHON` 和 `CAPAXION_CORE_URL` 显式配置。
+本机产物：`D:\mes\desktop\release\CAPAXION-0.2.0-x64.exe`。便携版从该目录启动时会查找 `D:\mes\core` 并在需要时启动本地 Core；也可通过 `CAPAXION_REPOSITORY_ROOT`、`CAPAXION_PYTHON` 和 `CAPAXION_CORE_URL` 显式配置。
 
 ## 当前决策门
 

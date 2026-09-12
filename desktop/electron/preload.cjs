@@ -10,6 +10,7 @@ contextBridge.exposeInMainWorld("capaxion", {
     minimize: () => ipcRenderer.invoke("window:minimize"),
     maximize: () => ipcRenderer.invoke("window:maximize"),
     close: () => ipcRenderer.invoke("window:close"),
+    zoom: (delta) => ipcRenderer.invoke("window:zoom", delta),
   },
   core: {
     request: (request) => ipcRenderer.invoke("core:request", request),

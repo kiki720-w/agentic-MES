@@ -10,7 +10,9 @@
 
 - Electron + React + Vite 桌面壳和 Windows x64 便携构建。
 - 无边框窗口、统一侧栏、Agent 对话中心、运行状态与安全边界检查器。
-- 控制塔、有限产能排产、排产结果、产能管理和模型设置的桌面内统一入口。
+- 控制塔、有限产能排产、排产结果、产能管理和模型设置已全部改造成直接调用 Core API 的 React 原生组件，不再嵌入旧 HTML 页面。
+- 统一可读性基线：14px 基准字体、放大的输入与点击区域、默认 110% 缩放，并允许在 100%—140% 间即时调整。
+- CAPAXION 专属 Windows 图标已用于应用窗口、任务栏、便携程序和品牌侧栏。
 - 自动检查本地 Core；在本机便携目录或显式仓库路径中找到 Python 环境后可自动启动 Core。
 - 通过窄 IPC 调用 Core；渲染进程启用 `contextIsolation`、关闭 `nodeIntegration` 和 `webview`。
 - 文件选择由主进程完成，只有用户明确选择且不超过 5 MB 的 XLSX/CSV 才能进入排产预检。
@@ -27,7 +29,7 @@
 
 ## 当前产物
 
-    D:\mes\desktop\release\CAPAXION-0.1.0-x64.exe
+    D:\mes\desktop\release\CAPAXION-0.2.0-x64.exe
 
 当前便携包用于这台电脑上的产品验证。正式交付客户前还需要完成 Core sidecar 安装、代码签名、自动更新、Windows 凭据库、生产 OIDC 和安装包升级/卸载策略。
 
@@ -39,3 +41,4 @@
 - 本机启动：窗口标题 `CAPAXION`，Core `/health/ready` 返回 `READY`。
 - 1280×720 界面渲染检查：侧栏、主会话、输入框和右侧状态区无重叠或截断。
 - Windows 打包运行回归：修正 Electron 44 中 `scrollIntoView()` 返回对象被 React 误识别为 effect 清理函数导致的黑屏。
+- Windows 无调试启动回归：窗口资源加载完成后显式显示，消除 `ready-to-show` 监听注册过晚造成的隐藏窗口竞态。

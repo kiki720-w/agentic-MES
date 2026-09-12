@@ -9,6 +9,7 @@ let mainWindow;
 let coreProcess;
 let coreStartedByDesktop = false;
 const selectedFiles = new Set();
+let desktopZoomFactor = 1.1;
 
 async function coreHealth() {
   try {
@@ -100,6 +101,11 @@ function registerIpc() {
     mainWindow.isMaximized() ? mainWindow.unmaximize() : mainWindow.maximize();
   });
   ipcMain.handle("window:close", () => mainWindow?.close());
+  ipcMain.handle("window:zoom", (_event, delta = 0) => {
+    desktopZoomFactor = Math.max(1, Math.min(1.4, desktopZoomFactor + Number(delta || 0)));
+    mainWindow?.webContents.setZoomFactor(desktopZoomFactor);
+    return Math.round(desktopZoomFactor * 100);
+  });
   ipcMain.handle("core:status", () => coreHealth());
   ipcMain.handle("core:request", async (_event, request = {}) => {
     const apiPath = validateCorePath(request.path);
@@ -188,6 +194,7 @@ async function createWindow() {
     minWidth: 1080,
     minHeight: 700,
     backgroundColor: "#090d12",
+    icon: path.join(__dirname, "..", "assets", "capaxion-icon.png"),
     frame: false,
     show: false,
     title: "CAPAXION",
@@ -207,7 +214,8 @@ async function createWindow() {
   } else {
     await mainWindow.loadFile(path.join(__dirname, "..", "dist", "index.html"));
   }
-  mainWindow.once("ready-to-show", () => mainWindow.show());
+  mainWindow.webContents.setZoomFactor(desktopZoomFactor);
+  mainWindow.show();
 }
 
 app.whenReady().then(async () => {

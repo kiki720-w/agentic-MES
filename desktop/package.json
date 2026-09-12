@@ -1,6 +1,6 @@
 {
   "name": "capaxion-desktop",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "author": "kiki720-w",
   "description": "CAPAXION Manufacturing Decision OS desktop client",
@@ -9,19 +9,21 @@
     "dev": "concurrently -k \"vite --host 127.0.0.1\" \"wait-on http://127.0.0.1:5173 && cross-env CAPAXION_DESKTOP_DEV_URL=http://127.0.0.1:5173 electron .\"",
     "build": "vite build",
     "preview": "vite preview --host 127.0.0.1",
-    "desktop:build": "pnpm build && electron-builder --win portable"
+    "ui:smoke": "node scripts/ui-smoke.cjs",
+    "desktop:build": "pnpm build && electron-builder --win portable --publish never"
   },
   "dependencies": {
-    "@vitejs/plugin-react": "latest",
-    "vite": "latest",
     "react": "latest",
     "react-dom": "latest"
   },
   "devDependencies": {
+    "@vitejs/plugin-react": "latest",
     "concurrently": "latest",
     "cross-env": "latest",
     "electron": "latest",
     "electron-builder": "latest",
+    "png-to-ico": "^3.0.2",
+    "vite": "latest",
     "wait-on": "latest"
   },
   "build": {
@@ -33,10 +35,12 @@
     },
     "files": [
       "dist/**/*",
+      "assets/**/*",
       "electron/**/*",
       "package.json"
     ],
     "win": {
+      "icon": "assets/capaxion-icon.ico",
       "target": [
         "portable"
       ]

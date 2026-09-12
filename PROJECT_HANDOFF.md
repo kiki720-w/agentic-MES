@@ -63,7 +63,7 @@ GitHub：https://github.com/kiki720-w/capaxion
 - API Key 不通过状态接口回显、不进入浏览器存储；连接测试失败不会覆盖当前模型。
 - Agent 工作台入口已放入控制塔、排产中心、产能管理和排产结果等主要页面。
 - 已增加 `desktop/` Windows 客户端：WorkBuddy 式 Agent 主工作区、桌面导航、附件选择、Core 状态与安全边界检查。
-- 本机便携版路径为 `D:\mes\desktop\release\CAPAXION-0.1.0-x64.exe`；这是桌面产品化第一版，现有业务页面仍通过内部视图承载，后续逐页原生化。
+- 本机便携版路径为 `D:\mes\desktop\release\CAPAXION-0.2.0-x64.exe`；控制塔、排产、结果、产能和模型设置均已原生 React 化，不再通过 iframe 承载旧页面。
 
 ## 当前页面
 
