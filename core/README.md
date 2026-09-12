@@ -33,6 +33,9 @@ uvicorn autonomous_mes.api:app --app-dir src --reload
 - `GET /api/v1/equipment`
 - `POST /api/v1/equipment/{equipmentId}/telemetry`
 - `POST /api/v1/agent-tools/get-work-order`
+- `POST /api/v1/agent/incidents/analyze`
+- `GET /api/v1/agent/proposals`
+- `POST /api/v1/agent/proposals/{proposalId}/approve`
 - `GET /health/live`
 - `GET /health/ready`
 - `GET /`：可视化生产控制台HTML
@@ -61,6 +64,8 @@ Worker通过数据库租约领取事件；失败会指数退避，超过上限�
 启动服务后访问`http://127.0.0.1:8000/`，可以查看工单指标、制造事件流、设备状态，创建演示工单并模拟机床采集。遥测样本使用`sampleId`去重，旧时间戳不能覆盖当前状态；`DOWN`和`ALARM`必须携带停机原因或报警码。该页面使用原生HTML/CSS/JavaScript，无需Node构建环境。
 
 派工必须选择同一工作中心内状态为`IDLE`或`RUNNING`的已注册设备。绑定设备上报`DOWN`或`ALARM`后，正在执行的工序和工单会自动进入`SUSPENDED`并产生联锁事件。设备未恢复时禁止复工；恢复为健康状态后仍需由人员或受控Agent明确调用`resume`，系统不会因一次正常心跳自行恢复生产。
+
+第一代异常处置Agent采用“规则决策内核 + 可替换模型解释层”的设计。没有模型API时仍可自动观察暂停工单、设备版本和健康状态，生成去重且持久化的诊断提案。`HOLD_AND_INSPECT`只记录观察结论；`RESUME_OPERATION`属于`R2`动作，必须由主管填写原因并批准，执行前会再次验证设备健康、工单版本和幂等键。模型只能增强诊断说明，不能绕过这些确定性安全规则。
 
 ### 本机D盘免安装环境
 

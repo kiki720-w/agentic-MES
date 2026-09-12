@@ -6,6 +6,7 @@ from fastapi import FastAPI, Header, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 from pydantic import BaseModel, ConfigDict, Field
 
+from autonomous_mes.application.agent_runtime import IncidentResponseAgent
 from autonomous_mes.application.agent_tools import GetWorkOrderTool, ToolContext
 from autonomous_mes.application.equipment import (
     EquipmentApplicationService,
@@ -100,6 +101,12 @@ class TelemetryBody(BaseModel):
     downtimeReason: str | None = None
 
 
+class ApproveProposalBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    actorId: str
+    reason: str
+
+
 settings = Settings()
 
 
@@ -115,6 +122,7 @@ def build_store() -> MesStore:
 store = build_store()
 service = WorkOrderApplicationService(store)
 equipment_service = EquipmentApplicationService(store)
+incident_agent = IncidentResponseAgent(store)
 policy = ScopedReadPolicy({"demo-planner": {"WS-MACH-01"}})
 get_work_order_tool = GetWorkOrderTool(store, policy, store)
 app = FastAPI(title="Autonomous MES Core", version="0.1.0")
@@ -146,6 +154,7 @@ def ready() -> dict[str, str]:
     return {
         "status": "READY",
         "modelGateway": "NOT_REQUIRED",
+        "agentRuntime": "RULES_ONLY",
         "storageBackend": settings.storage_backend,
     }
 
@@ -196,6 +205,25 @@ def list_work_orders(limit: int = 100) -> dict[str, object]:
 def list_outbox() -> dict[str, object]:
     items = store.list_outbox()[-100:]
     return {"items": list(reversed(items)), "count": len(items)}
+
+
+@app.post("/api/v1/agent/incidents/analyze")
+def analyze_incidents() -> dict[str, object]:
+    items = incident_agent.analyze()
+    return {"items": items, "count": len(items)}
+
+
+@app.get("/api/v1/agent/proposals")
+def list_agent_proposals(limit: int = 100) -> dict[str, object]:
+    items = incident_agent.list(limit)
+    return {"items": items, "count": len(items)}
+
+
+@app.post("/api/v1/agent/proposals/{proposal_id}/approve")
+def approve_agent_proposal(
+    proposal_id: str, body: ApproveProposalBody
+) -> dict[str, object]:
+    return incident_agent.approve(proposal_id, body.actorId, body.reason)
 
 
 @app.post("/api/v1/equipment", status_code=201)

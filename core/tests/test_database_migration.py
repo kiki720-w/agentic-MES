@@ -31,6 +31,7 @@ class DatabaseMigrationTests(unittest.TestCase):
             self.assertEqual(
                 {
                     "agent_tool_audits",
+                    "agent_action_proposals",
                     "alembic_version",
                     "event_outbox",
                     "equipment",

@@ -6,6 +6,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 
 from autonomous_mes.application.ports import IdempotentResult
+from autonomous_mes.domain.agent import AgentProposal, ProposalStatus
 from autonomous_mes.domain.equipment import Equipment, EquipmentState, TelemetrySample
 from autonomous_mes.domain.errors import IdempotencyConflict, InvalidTransition
 from autonomous_mes.domain.events import DomainEvent
@@ -18,6 +19,7 @@ from autonomous_mes.domain.work_order import (
 )
 
 from .models import (
+    AgentProposalRow,
     AgentToolAuditRow,
     EquipmentRow,
     EquipmentTelemetryRow,
@@ -197,6 +199,51 @@ class SqlAlchemyWorkOrderStore:
         except IntegrityError as exc:
             raise IdempotencyConflict("telemetry sample already exists") from exc
 
+    def get_agent_proposal(self, proposal_id: str) -> AgentProposal | None:
+        with self._sessions() as session:
+            row = session.get(AgentProposalRow, proposal_id)
+            return _proposal_to_domain(row) if row else None
+
+    def get_agent_proposal_by_fingerprint(self, fingerprint: str) -> AgentProposal | None:
+        with self._sessions() as session:
+            row = session.scalar(
+                select(AgentProposalRow).where(AgentProposalRow.fingerprint == fingerprint)
+            )
+            return _proposal_to_domain(row) if row else None
+
+    def list_agent_proposals(self, limit: int = 100) -> list[AgentProposal]:
+        with self._sessions() as session:
+            rows = session.scalars(
+                select(AgentProposalRow).order_by(AgentProposalRow.updated_at.desc()).limit(limit)
+            ).all()
+            return [_proposal_to_domain(row) for row in rows]
+
+    def add_agent_proposal_atomically(
+        self, proposal: AgentProposal, event: DomainEvent
+    ) -> None:
+        try:
+            with self._sessions.begin() as session:
+                session.add(AgentProposalRow(**_proposal_values(proposal)))
+                session.add_all(_event_rows([event]))
+        except IntegrityError:
+            return
+
+    def update_agent_proposal_atomically(
+        self, proposal: AgentProposal, expected_status: ProposalStatus, event: DomainEvent
+    ) -> None:
+        with self._sessions.begin() as session:
+            result = session.execute(
+                update(AgentProposalRow)
+                .where(
+                    AgentProposalRow.proposal_id == proposal.proposal_id,
+                    AgentProposalRow.status == expected_status.value,
+                )
+                .values(**_proposal_values(proposal, include_id=False))
+            )
+            if getattr(result, "rowcount", 0) != 1:
+                raise InvalidTransition("agent proposal status changed")
+            session.add_all(_event_rows([event]))
+
 
 def _row_values(item: WorkOrder) -> dict[str, Any]:
     return {
@@ -329,6 +376,52 @@ def _equipment_to_domain(row: EquipmentRow) -> Equipment:
         temperature_celsius=row.temperature_celsius,
         alarm_code=row.alarm_code,
         downtime_reason=row.downtime_reason,
+        created_at=row.created_at,
+        updated_at=row.updated_at,
+    )
+
+
+def _proposal_values(item: AgentProposal, *, include_id: bool = True) -> dict[str, Any]:
+    values: dict[str, Any] = {
+        "fingerprint": item.fingerprint,
+        "agent_id": item.agent_id,
+        "action": item.action,
+        "risk": item.risk,
+        "status": item.status.value,
+        "work_order_id": item.work_order_id,
+        "work_order_version": item.work_order_version,
+        "operation_sequence": item.operation_sequence,
+        "equipment_id": item.equipment_id,
+        "equipment_version": item.equipment_version,
+        "diagnosis": item.diagnosis,
+        "rationale": item.rationale,
+        "approved_by": item.approved_by,
+        "approval_reason": item.approval_reason,
+        "created_at": item.created_at,
+        "updated_at": item.updated_at,
+    }
+    if include_id:
+        values["proposal_id"] = item.proposal_id
+    return values
+
+
+def _proposal_to_domain(row: AgentProposalRow) -> AgentProposal:
+    return AgentProposal(
+        proposal_id=row.proposal_id,
+        fingerprint=row.fingerprint,
+        agent_id=row.agent_id,
+        action=row.action,
+        risk=row.risk,
+        status=ProposalStatus(row.status),
+        work_order_id=row.work_order_id,
+        work_order_version=row.work_order_version,
+        operation_sequence=row.operation_sequence,
+        equipment_id=row.equipment_id,
+        equipment_version=row.equipment_version,
+        diagnosis=row.diagnosis,
+        rationale=row.rationale,
+        approved_by=row.approved_by,
+        approval_reason=row.approval_reason,
         created_at=row.created_at,
         updated_at=row.updated_at,
     )

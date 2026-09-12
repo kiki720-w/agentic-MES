@@ -2,6 +2,7 @@ import unittest
 from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
+from autonomous_mes.application.agent_runtime import IncidentResponseAgent
 from autonomous_mes.application.equipment import (
     EquipmentApplicationService,
     RecordTelemetryCommand,
@@ -145,6 +146,27 @@ class EquipmentTests(unittest.TestCase):
         self.assertEqual(
             "OperationSuspendedByEquipmentIncident", self.store.list_outbox()[-1]["eventType"]
         )
+
+        agent = IncidentResponseAgent(self.store)
+        observed = agent.analyze()
+        self.assertEqual("HOLD_AND_INSPECT", observed[0]["action"])
+        self.assertEqual("OBSERVED", observed[0]["status"])
+
+        self._record(
+            expected_version=alarmed["version"],
+            observed_at=datetime.now(UTC) + timedelta(seconds=1),
+            state="IDLE",
+            spindle_load_percent=0,
+            alarm_code=None,
+        )
+        actionable = agent.analyze()
+        proposal = next(item for item in actionable if item["action"] == "RESUME_OPERATION")
+        self.assertEqual("PENDING_APPROVAL", proposal["status"])
+        executed = agent.approve(proposal["proposalId"], "supervisor-1", "现场已确认安全")
+        self.assertEqual("EXECUTED", executed["status"])
+        resumed = work_orders.get(work_order["workOrderId"])
+        self.assertEqual("IN_PROGRESS", resumed["status"])
+        self.assertEqual("IN_PROGRESS", resumed["operations"][0]["status"])
 
 
 if __name__ == "__main__":

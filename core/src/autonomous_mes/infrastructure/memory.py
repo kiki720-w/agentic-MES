@@ -3,6 +3,7 @@ from threading import RLock
 from typing import Any
 
 from autonomous_mes.application.ports import IdempotentResult
+from autonomous_mes.domain.agent import AgentProposal, ProposalStatus
 from autonomous_mes.domain.equipment import Equipment, TelemetrySample
 from autonomous_mes.domain.errors import Forbidden, IdempotencyConflict, InvalidTransition
 from autonomous_mes.domain.events import DomainEvent
@@ -21,6 +22,8 @@ class InMemoryWorkOrderStore:
         self._equipment: dict[str, Equipment] = {}
         self._equipment_codes: dict[str, str] = {}
         self._telemetry_samples: set[str] = set()
+        self._agent_proposals: dict[str, AgentProposal] = {}
+        self._proposal_fingerprints: dict[str, str] = {}
 
     def get(self, work_order_id: str) -> WorkOrder | None:
         with self._lock:
@@ -164,6 +167,43 @@ class InMemoryWorkOrderStore:
                 "publishStatus": "PENDING",
             }
         )
+
+    def get_agent_proposal(self, proposal_id: str) -> AgentProposal | None:
+        with self._lock:
+            item = self._agent_proposals.get(proposal_id)
+            return deepcopy(item) if item else None
+
+    def get_agent_proposal_by_fingerprint(self, fingerprint: str) -> AgentProposal | None:
+        with self._lock:
+            proposal_id = self._proposal_fingerprints.get(fingerprint)
+            return self.get_agent_proposal(proposal_id) if proposal_id else None
+
+    def list_agent_proposals(self, limit: int = 100) -> list[AgentProposal]:
+        with self._lock:
+            items = sorted(
+                self._agent_proposals.values(), key=lambda item: item.updated_at, reverse=True
+            )
+            return deepcopy(items[:limit])
+
+    def add_agent_proposal_atomically(
+        self, proposal: AgentProposal, event: DomainEvent
+    ) -> None:
+        with self._lock:
+            if proposal.fingerprint in self._proposal_fingerprints:
+                return
+            self._agent_proposals[proposal.proposal_id] = deepcopy(proposal)
+            self._proposal_fingerprints[proposal.fingerprint] = proposal.proposal_id
+            self._append_event(event)
+
+    def update_agent_proposal_atomically(
+        self, proposal: AgentProposal, expected_status: ProposalStatus, event: DomainEvent
+    ) -> None:
+        with self._lock:
+            current = self._agent_proposals.get(proposal.proposal_id)
+            if current is None or current.status is not expected_status:
+                raise InvalidTransition("agent proposal status changed")
+            self._agent_proposals[proposal.proposal_id] = deepcopy(proposal)
+            self._append_event(event)
 
 
 class ScopedReadPolicy:

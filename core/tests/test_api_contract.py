@@ -41,6 +41,7 @@ class ApiContractTests(unittest.TestCase):
             {
                 "status": "READY",
                 "modelGateway": "NOT_REQUIRED",
+                "agentRuntime": "RULES_ONLY",
                 "storageBackend": "memory",
             },
             self.client.get("/health/ready").json(),

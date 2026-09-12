@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 from typing import Any, Protocol
 
+from autonomous_mes.domain.agent import AgentProposal, ProposalStatus
 from autonomous_mes.domain.equipment import Equipment, TelemetrySample
 from autonomous_mes.domain.events import DomainEvent
 from autonomous_mes.domain.work_order import WorkOrder
@@ -63,5 +64,21 @@ class EquipmentStore(Protocol):
     ) -> None: ...
 
 
-class MesStore(WorkOrderStore, EquipmentStore, ToolAuditSink, Protocol):
+class AgentProposalStore(Protocol):
+    def get_agent_proposal(self, proposal_id: str) -> AgentProposal | None: ...
+
+    def get_agent_proposal_by_fingerprint(self, fingerprint: str) -> AgentProposal | None: ...
+
+    def list_agent_proposals(self, limit: int = 100) -> list[AgentProposal]: ...
+
+    def add_agent_proposal_atomically(
+        self, proposal: AgentProposal, event: DomainEvent
+    ) -> None: ...
+
+    def update_agent_proposal_atomically(
+        self, proposal: AgentProposal, expected_status: ProposalStatus, event: DomainEvent
+    ) -> None: ...
+
+
+class MesStore(WorkOrderStore, EquipmentStore, AgentProposalStore, ToolAuditSink, Protocol):
     """Combined persistence port used by the current vertical slice."""

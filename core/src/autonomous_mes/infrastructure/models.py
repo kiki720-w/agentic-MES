@@ -132,3 +132,25 @@ class EquipmentTelemetryRow(Base):
     received_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
+
+
+class AgentProposalRow(Base):
+    __tablename__ = "agent_action_proposals"
+
+    proposal_id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    fingerprint: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
+    agent_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    action: Mapped[str] = mapped_column(String(64), nullable=False)
+    risk: Mapped[str] = mapped_column(String(8), nullable=False)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    work_order_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
+    work_order_version: Mapped[int] = mapped_column(Integer, nullable=False)
+    operation_sequence: Mapped[int] = mapped_column(Integer, nullable=False)
+    equipment_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
+    equipment_version: Mapped[int] = mapped_column(Integer, nullable=False)
+    diagnosis: Mapped[str] = mapped_column(Text, nullable=False)
+    rationale: Mapped[str] = mapped_column(Text, nullable=False)
+    approved_by: Mapped[str | None] = mapped_column(String(64))
+    approval_reason: Mapped[str | None] = mapped_column(String(512))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
