@@ -264,6 +264,41 @@ class ApiContractTests(unittest.TestCase):
         self.assertIn("Agent 工作台", dashboard.text)
         self.assertIn("mes_dev_actor", dashboard.text)
 
+        model_settings = self.client.get("/settings/models")
+        self.assertEqual(200, model_settings.status_code)
+        self.assertIn("模型与 API 设置", model_settings.text)
+        self.assertIn("Kimi / Moonshot", model_settings.text)
+
+        planner_headers = {"X-Dev-Actor": "demo-planner"}
+        forbidden = self.client.put(
+            "/api/v1/system/model-gateway/configuration",
+            headers=planner_headers,
+            json={
+                "provider": "KIMI",
+                "baseUrl": "https://api.moonshot.cn/v1",
+                "model": "customer-model",
+                "apiKey": "customer-secret",
+                "verifyConnection": False,
+            },
+        )
+        self.assertEqual(403, forbidden.status_code)
+        configured = self.client.put(
+            "/api/v1/system/model-gateway/configuration",
+            json={
+                "provider": "KIMI",
+                "baseUrl": "https://api.moonshot.cn/v1",
+                "model": "customer-model",
+                "apiKey": "customer-secret",
+                "verifyConnection": False,
+            },
+        )
+        self.assertEqual(200, configured.status_code, configured.text)
+        self.assertEqual("KIMI", configured.json()["provider"])
+        self.assertTrue(configured.json()["apiKeyConfigured"])
+        self.assertNotIn("customer-secret", configured.text)
+        disabled = self.client.delete("/api/v1/system/model-gateway/configuration")
+        self.assertEqual("DISABLED", disabled.json()["connectionStatus"])
+
         default_policy = self.client.get("/api/v1/quality/risk-policies/default-configuration")
         self.assertEqual(200, default_policy.status_code)
         self.assertEqual(30, default_policy.json()["lookbackDays"])

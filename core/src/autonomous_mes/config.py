@@ -11,6 +11,12 @@ class Settings(BaseSettings):
     database_url: str = "postgresql+psycopg://mes:local-development-only@localhost:5432/agentic_mes"
     storage_backend: str = "memory"
     log_level: str = "INFO"
+    model_provider: str | None = None
+    model_api_key: str | None = None
+    model_name: str | None = None
+    model_base_url: str | None = None
+    model_timeout_seconds: float | None = None
+    # Legacy DeepSeek variables remain supported for existing deployments.
     deepseek_api_key: str | None = None
     deepseek_model: str = "deepseek-v4-flash"
     deepseek_base_url: str = "https://api.deepseek.com"

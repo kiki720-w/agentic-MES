@@ -14,7 +14,7 @@
 - 输出：形成建议或待审批计划，经授权人员批准后再由专用连接器回写
 - 异常：插单、设备停机、缺料、质量失败、刀具异常
 - Agent：L3 排产智能体可自动感知变化、生成并提交方案，但不能自批、自发或直接控制设备
-- 推理：DeepSeek API，经可替换模型网关调用
+- 推理：DeepSeek、Kimi 或其他 OpenAI 兼容 API，经可热切换模型网关调用
 - 部署：本地 MES/边缘采集 + 云端模型
 - 人工输入：Agent 工作台支持文字与附件入口；XLSX 经预检、指纹确认后生成标准快照
 - 工时模型：工序需求 = 准备工时 + 剩余数量 × 单件工时，缺失时才使用排产回退值
@@ -72,9 +72,11 @@
 - `docs/step-36-connector-developer-kit-acceptance.md`：供应商中立排产快照Schema、样例和HMAC推送客户端验收记录
 - `docs/step-37-agent-workspace-and-capacity-input-acceptance.md`：统一附件工作台、工艺工时、可编辑产能与全宽结果页验收记录
 - `docs/step-38-person-centric-scheduling-acceptance.md`：全页面 Agent 入口、真实输入摘要及人员日/周排程验收记录
+- `docs/step-39-provider-neutral-model-gateway-acceptance.md`：供应商中立模型网关、管理员 BYOK 设置与安全回退验收记录
 - `GET /workspace`：自然语言、XLSX/CSV预检与L3排产协作工作台
 - `GET /capacity`：版本化人员与工作单元产能维护
 - `GET /planning/results`：标明人工/虚拟员工身份的全宽排产结果
+- `GET /settings/models`：管理员切换模型供应商、Base URL、模型 ID 与 API Key
 
 ## 当前决策门
 

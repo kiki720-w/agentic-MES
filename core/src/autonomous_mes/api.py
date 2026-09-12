@@ -6,7 +6,7 @@ import json
 from datetime import date, datetime
 from pathlib import Path
 from typing import Annotated, Literal
-from urllib.parse import unquote
+from urllib.parse import unquote, urlsplit
 from uuid import uuid4
 
 from fastapi import Depends, FastAPI, Header, Request
@@ -45,6 +45,7 @@ from autonomous_mes.application.master_data import (
     RegisterManufacturingResourceCommand,
     UpdateManufacturingResourceCommand,
 )
+from autonomous_mes.application.model_gateway import ModelGatewayError
 from autonomous_mes.application.natural_language import NaturalLanguageQueryService
 from autonomous_mes.application.ports import MesStore
 from autonomous_mes.application.quality import (
@@ -84,7 +85,7 @@ from autonomous_mes.application.work_orders import (
 from autonomous_mes.config import Settings
 from autonomous_mes.domain.errors import DomainError, Forbidden, NotFound, ValidationError
 from autonomous_mes.infrastructure.database import build_engine, build_session_factory
-from autonomous_mes.infrastructure.deepseek_gateway import DeepSeekDiagnosticModel
+from autonomous_mes.infrastructure.deepseek_gateway import ConfigurableModelGateway
 from autonomous_mes.infrastructure.memory import InMemoryWorkOrderStore, ScopedReadPolicy
 from autonomous_mes.infrastructure.sqlalchemy_store import SqlAlchemyWorkOrderStore
 
@@ -300,6 +301,31 @@ class ReworkApprovalBody(BaseModel):
 class NaturalLanguageBody(BaseModel):
     model_config = ConfigDict(extra="forbid")
     question: str = Field(min_length=1, max_length=500)
+
+
+class ModelGatewayConfigurationBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    provider: str = Field(min_length=1, max_length=40, pattern=r"^[A-Za-z0-9_-]+$")
+    baseUrl: str = Field(min_length=8, max_length=500)
+    model: str = Field(min_length=1, max_length=160)
+    apiKey: str | None = Field(default=None, min_length=8, max_length=512)
+    timeoutSeconds: float = Field(default=12, ge=1, le=120)
+    verifyConnection: bool = True
+
+    @model_validator(mode="after")
+    def validate_base_url(self) -> "ModelGatewayConfigurationBody":
+        value = self.baseUrl.strip().rstrip("/")
+        parsed = urlsplit(value)
+        if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+            raise ValueError("baseUrl must use http or https")
+        if parsed.username or parsed.password or parsed.query or parsed.fragment:
+            raise ValueError("baseUrl must not contain credentials, query, or fragment")
+        if parsed.path.rstrip("/").endswith("/chat/completions"):
+            raise ValueError("baseUrl must not include /chat/completions")
+        self.baseUrl = value
+        self.provider = self.provider.strip().upper()
+        self.model = self.model.strip()
+        return self
 
 
 class RegisterProductUnitBody(BaseModel):
@@ -560,20 +586,17 @@ def build_store() -> MesStore:
 store = build_store()
 service = WorkOrderApplicationService(store)
 equipment_service = EquipmentApplicationService(store)
-deepseek_model_gateway = (
-    DeepSeekDiagnosticModel(
-        settings.deepseek_api_key,
-        settings.deepseek_model,
-        settings.deepseek_base_url,
-        settings.deepseek_timeout_seconds,
-    )
-    if settings.deepseek_api_key
-    else None
+model_gateway = ConfigurableModelGateway(
+    settings.model_api_key or settings.deepseek_api_key,
+    settings.model_name or settings.deepseek_model,
+    settings.model_base_url or settings.deepseek_base_url,
+    settings.model_timeout_seconds or settings.deepseek_timeout_seconds,
+    settings.model_provider or "DEEPSEEK",
 )
-deepseek_narrator = FallbackNarrator(deepseek_model_gateway) if deepseek_model_gateway else None
+model_narrator = FallbackNarrator(model_gateway)
 incident_agent = IncidentResponseAgent(
     store,
-    deepseek_narrator,
+    model_narrator,
     settings.agent_l3_execution_enabled,
     {item.strip() for item in settings.agent_l3_approver_ids.split(",") if item.strip()},
 )
@@ -589,7 +612,7 @@ scheduling_agent = SchedulingAgent(
 )
 natural_language_service = NaturalLanguageQueryService(
     store,
-    deepseek_model_gateway,
+    model_gateway,
     incident_agent,
     scheduling_agent=scheduling_agent,
     scheduling_workshop_id=settings.scheduling_agent_workshop_ids.split(",")[0].strip(),
@@ -616,6 +639,7 @@ planning_path = Path(__file__).parent / "static" / "planning.html"
 workspace_path = Path(__file__).parent / "static" / "agent_workspace.html"
 capacity_path = Path(__file__).parent / "static" / "capacity.html"
 planning_results_path = Path(__file__).parent / "static" / "planning_results.html"
+model_settings_path = Path(__file__).parent / "static" / "model_settings.html"
 
 
 @app.exception_handler(DomainError)
@@ -640,12 +664,11 @@ def live() -> dict[str, str]:
 
 @app.get("/health/ready")
 def ready() -> dict[str, str]:
+    gateway_enabled = bool(model_gateway.status()["apiKeyConfigured"])
     return {
         "status": "READY",
-        "modelGateway": "DEEPSEEK_CONFIGURED" if settings.deepseek_api_key else "DISABLED",
-        "agentRuntime": "DEEPSEEK_WITH_RULES_FALLBACK"
-        if settings.deepseek_api_key
-        else "RULES_ONLY",
+        "modelGateway": "CONFIGURED" if gateway_enabled else "DISABLED",
+        "agentRuntime": "MODEL_WITH_RULES_FALLBACK" if gateway_enabled else "RULES_ONLY",
         "storageBackend": settings.storage_backend,
         "agentLevel": "L3_EXPERIMENTAL" if settings.agent_l3_execution_enabled else "L2",
         "schedulingAgentLevel": "L3_BOUNDED" if settings.scheduling_agent_enabled else "DISABLED",
@@ -698,16 +721,44 @@ def identity_me(identity: Annotated[Identity, Depends(current_identity)]) -> dic
 
 
 @app.get("/api/v1/agent/model-status")
-def agent_model_status() -> dict[str, str | None]:
-    if deepseek_model_gateway is None:
-        return {
-            "provider": "NONE",
-            "model": None,
-            "connectionStatus": "DISABLED",
-            "lastCheckedAt": None,
-            "lastError": None,
-        }
-    return deepseek_model_gateway.status()
+def agent_model_status() -> dict[str, object]:
+    return model_gateway.status()
+
+
+@app.get("/api/v1/system/model-gateway/configuration")
+def model_gateway_configuration(
+    identity: Annotated[Identity, Depends(current_identity)],
+) -> dict[str, object]:
+    authorize_human(identity, "SUPERVISOR", "MASTER_DATA_ADMIN")
+    return model_gateway.status()
+
+
+@app.put("/api/v1/system/model-gateway/configuration")
+def update_model_gateway_configuration(
+    body: ModelGatewayConfigurationBody,
+    identity: Annotated[Identity, Depends(current_identity)],
+) -> dict[str, object]:
+    authorize_human(identity, "SUPERVISOR", "MASTER_DATA_ADMIN")
+    try:
+        return model_gateway.configure(
+            body.provider,
+            body.model,
+            body.baseUrl,
+            body.timeoutSeconds,
+            body.apiKey,
+            "RUNTIME",
+            body.verifyConnection,
+        )
+    except (ValueError, ModelGatewayError) as exc:
+        raise ValidationError(str(exc)) from exc
+
+
+@app.delete("/api/v1/system/model-gateway/configuration")
+def disable_model_gateway_configuration(
+    identity: Annotated[Identity, Depends(current_identity)],
+) -> dict[str, object]:
+    authorize_human(identity, "SUPERVISOR", "MASTER_DATA_ADMIN")
+    return model_gateway.disable()
 
 
 @app.post("/api/v1/agent/chat")
@@ -748,6 +799,11 @@ def capacity_console() -> HTMLResponse:
 @app.get("/planning/results", response_class=HTMLResponse, include_in_schema=False)
 def planning_results_console() -> HTMLResponse:
     return HTMLResponse(planning_results_path.read_text(encoding="utf-8"))
+
+
+@app.get("/settings/models", response_class=HTMLResponse, include_in_schema=False)
+def model_settings_console() -> HTMLResponse:
+    return HTMLResponse(model_settings_path.read_text(encoding="utf-8"))
 
 
 @app.get("/api/v1/planning/imports/spreadsheet/template")

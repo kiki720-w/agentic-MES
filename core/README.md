@@ -175,7 +175,7 @@ python scripts/push-scheduling-snapshot.py ..\data\scheduling-snapshot.example.j
 
 策略提交前必须运行最多500条历史完工工序的只读影响回放，记录基线/候选风险分布、等级变化、抽样增量、覆盖排除和变化示例。审批人必须同时具有`QUALITY`角色且身份不同于创建人和提交人；此约束由领域层执行。DEV控制台提供两个固定身份档案用于验证双人流程，生产OIDC仍以签名令牌的`sub`为准。
 
-启用 DeepSeek 时只需在本机 `.env` 设置 `AUTONOMOUS_MES_DEEPSEEK_API_KEY` 并重启 API。默认使用 `deepseek-v4-flash`、JSON 输出、关闭思考模式和 12 秒超时。每条提案记录 `narrativeSource` 与 `modelName`；不要把真实密钥写入仓库。
+模型网关支持 DeepSeek、Kimi / Moonshot 及其他 OpenAI Chat Completions 兼容服务。管理员可在 `/settings/models` 进行运行时测试和热切换；计划员与质量角色只能查看。正式部署通过 `AUTONOMOUS_MES_MODEL_PROVIDER`、`AUTONOMOUS_MES_MODEL_API_KEY`、`AUTONOMOUS_MES_MODEL_NAME`、`AUTONOMOUS_MES_MODEL_BASE_URL` 和 `AUTONOMOUS_MES_MODEL_TIMEOUT_SECONDS` 持久配置，原 DeepSeek 环境变量继续兼容。API Key 不会从状态接口回显或写入浏览器存储；不要把真实密钥写入仓库。
 
 ### 本机D盘免安装环境
 

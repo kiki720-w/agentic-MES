@@ -4,7 +4,10 @@ from unittest.mock import Mock, patch
 
 from autonomous_mes.application.agent_runtime import FallbackNarrator
 from autonomous_mes.application.model_gateway import DiagnosticFacts, ModelGatewayError
-from autonomous_mes.infrastructure.deepseek_gateway import DeepSeekDiagnosticModel
+from autonomous_mes.infrastructure.deepseek_gateway import (
+    ConfigurableModelGateway,
+    DeepSeekDiagnosticModel,
+)
 
 
 def facts() -> DiagnosticFacts:
@@ -28,7 +31,35 @@ class DeepSeekGatewayTests(unittest.TestCase):
         self.assertEqual("CONNECTED", gateway.status()["connectionStatus"])
         request = post.call_args.kwargs["json"]
         self.assertNotIn("tools", request)
-        self.assertEqual({"type": "json_object"}, request["response_format"])
+        self.assertNotIn("response_format", request)
+        self.assertNotIn("secret", json.dumps(gateway.status()))
+
+    @patch("autonomous_mes.infrastructure.deepseek_gateway.httpx.post")
+    def test_configurable_gateway_switches_provider_without_exposing_key(self, post: Mock) -> None:
+        response = Mock()
+        response.json.return_value = {
+            "choices": [{"message": {"content": '```json\n{"answer":"连接成功"}\n```'}}]
+        }
+        post.return_value = response
+        gateway = ConfigurableModelGateway()
+
+        status = gateway.configure(
+            "KIMI",
+            "customer-model",
+            "https://api.moonshot.cn/v1",
+            15,
+            "customer-secret",
+            verify_connection=True,
+        )
+
+        self.assertEqual("KIMI", status["provider"])
+        self.assertEqual("CONNECTED", status["connectionStatus"])
+        self.assertTrue(status["apiKeyConfigured"])
+        self.assertNotIn("customer-secret", json.dumps(status))
+        self.assertEqual(
+            "https://api.moonshot.cn/v1/chat/completions",
+            post.call_args.args[0],
+        )
 
     def test_gateway_failure_falls_back_to_deterministic_rules(self) -> None:
         primary = Mock()

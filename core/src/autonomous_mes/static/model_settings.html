@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>模型设置 · Agentic Manufacturing</title>
+  <style>
+    :root{--bg:#06121b;--panel:#0c1d28;--panel2:#102733;--line:#203c49;--text:#e7f0f2;--muted:#8fa7b0;--cyan:#59dec9;--amber:#ffd37c;--red:#ff98a4;--green:#79e2bd}
+    *{box-sizing:border-box}body{margin:0;background:radial-gradient(circle at 75% -10%,#194759 0,transparent 38%),var(--bg);color:var(--text);font:13px/1.55 Inter,"Microsoft YaHei",sans-serif}
+    button,input,select{font:inherit}.shell{max-width:1220px;margin:auto;padding:22px}.top,.row{display:flex;align-items:center;gap:10px;flex-wrap:wrap}.top{justify-content:space-between;margin-bottom:18px}h1,h2,p{margin-top:0}h1{margin-bottom:2px;font-size:24px}h2{font-size:16px;margin-bottom:4px}.muted{color:var(--muted)}
+    .btn{border:1px solid #2b5a67;border-radius:9px;padding:8px 12px;background:#102d39;color:var(--text);text-decoration:none;cursor:pointer}.btn.primary{background:var(--cyan);border-color:var(--cyan);color:#06221b;font-weight:800}.btn.danger{border-color:#71404a;color:#ffc0c7}.btn:disabled{opacity:.4;cursor:not-allowed}.badge{display:inline-flex;padding:3px 8px;border-radius:99px;background:#17423a;color:var(--green);font-size:10px;font-weight:800}
+    .identity select,input,select{background:#071722;color:var(--text);border:1px solid #2c5260;border-radius:9px;padding:10px 11px}.grid{display:grid;grid-template-columns:minmax(0,1.35fr) minmax(300px,.65fr);gap:18px}.stack{display:grid;gap:18px;align-content:start}.panel{min-width:0;border:1px solid var(--line);background:linear-gradient(145deg,var(--panel2),var(--panel));border-radius:15px;overflow:hidden}.head{padding:14px 17px;border-bottom:1px solid var(--line);display:flex;justify-content:space-between;align-items:center;gap:12px}.body{padding:18px}
+    .form{display:grid;grid-template-columns:1fr 1fr;gap:15px}.form label{display:grid;gap:6px;color:#bed0d5}.form .wide{grid-column:1/-1}.hint{font-size:11px;color:var(--muted)}.secret{display:grid;grid-template-columns:1fr auto;gap:8px}.check{display:flex!important;grid-column:1/-1;align-items:flex-start;gap:8px}.check input{width:auto;margin-top:3px}.actions{grid-column:1/-1;display:flex;gap:9px;flex-wrap:wrap;padding-top:4px}
+    .status{display:grid;grid-template-columns:1fr 1fr;gap:9px}.fact{padding:12px;background:#071722;border:1px solid #183543;border-radius:10px;min-width:0}.fact span,.fact strong{display:block}.fact span{font-size:10px;color:var(--muted);margin-bottom:4px}.fact strong{word-break:break-word}.boundary{border-left:3px solid var(--cyan);padding:11px 13px;background:#081923;margin-bottom:10px}.notice{min-height:23px;margin:12px 0 0;color:var(--amber)}code{color:#8ee5d4;word-break:break-all}.warning{border-color:#65532e;background:#1c1b15}.provider-note{padding:10px 12px;border:1px solid var(--line);border-radius:9px;background:#081923}
+    @media(max-width:900px){.grid{grid-template-columns:1fr}}@media(max-width:620px){.shell{padding:14px}.form{grid-template-columns:1fr}.form .wide{grid-column:auto}.secret{grid-template-columns:1fr}.status{grid-template-columns:1fr}}
+  </style>
+</head>
+<body>
+<main class="shell">
+  <header class="top">
+    <div><div class="muted">MODEL GATEWAY · BYOK</div><h1>模型与 API 设置</h1><div class="muted">为当前工厂部署切换推理供应商，业务规则与 L3 权限边界不随模型改变</div></div>
+    <div class="row">
+      <span class="badge">ADMIN</span>
+      <a class="btn" href="/workspace">Agent 工作台</a><a class="btn" href="/">控制塔</a><a class="btn" href="/planning">排产中心</a><a class="btn" href="/planning/results">排产结果</a><a class="btn" href="/capacity">产能管理</a>
+      <span class="identity"><span class="muted">当前身份</span> <select id="actor"></select></span>
+    </div>
+  </header>
+  <div class="grid">
+    <section class="panel">
+      <div class="head"><div><h2>供应商配置</h2><span class="muted">兼容 OpenAI Chat Completions 协议</span></div><span class="badge" id="access">检查权限…</span></div>
+      <form class="body form" id="form">
+        <label>供应商
+          <select id="provider">
+            <option value="DEEPSEEK">DeepSeek</option>
+            <option value="KIMI">Kimi / Moonshot</option>
+            <option value="OPENAI_COMPATIBLE">其他兼容接口</option>
+          </select>
+        </label>
+        <label>模型 ID
+          <input id="model" maxlength="160" required placeholder="填写供应商控制台中的模型 ID">
+        </label>
+        <label class="wide">API Base URL
+          <input id="baseUrl" maxlength="500" required placeholder="https://provider.example/v1">
+          <span class="hint">系统会在该地址后调用 <code>/chat/completions</code>；请不要填写密钥、查询参数或完整接口路径。</span>
+        </label>
+        <label>请求超时（秒）
+          <input id="timeout" type="number" min="1" max="120" step="1" value="12" required>
+        </label>
+        <label>API Key
+          <span class="secret"><input id="apiKey" type="password" minlength="8" maxlength="512" autocomplete="new-password" placeholder="已配置时留空可继续使用"><button class="btn" id="reveal" type="button">显示</button></span>
+          <span class="hint">密钥只发送到后端；页面不会读取、回显或写入浏览器存储。</span>
+        </label>
+        <label class="check"><input id="verify" type="checkbox" checked> 启用前先发起一次真实连接测试。测试失败时保留当前可用模型，不切换。</label>
+        <div class="wide provider-note" id="providerNote"></div>
+        <div class="actions"><button class="btn primary" id="save" type="submit">测试并启用</button><button class="btn danger" id="disable" type="button">停用远程模型</button></div>
+        <div class="notice wide" id="notice"></div>
+      </form>
+    </section>
+    <aside class="stack">
+      <section class="panel">
+        <div class="head"><h2>当前生效配置</h2><button class="btn" id="refresh">刷新</button></div>
+        <div class="body status">
+          <div class="fact"><span>供应商</span><strong id="sProvider">—</strong></div>
+          <div class="fact"><span>连接状态</span><strong id="sConnection">—</strong></div>
+          <div class="fact"><span>模型</span><strong id="sModel">—</strong></div>
+          <div class="fact"><span>密钥</span><strong id="sKey">—</strong></div>
+          <div class="fact wide"><span>Base URL</span><strong id="sUrl">—</strong></div>
+          <div class="fact wide"><span>配置来源</span><strong id="sSource">—</strong></div>
+        </div>
+      </section>
+      <section class="panel warning">
+        <div class="head"><h2>安全与生效范围</h2></div>
+        <div class="body">
+          <div class="boundary"><strong>模型只负责理解与解释</strong><br><span class="muted">有限产能计算、权限判断、审批、发布与设备联锁仍由确定性代码执行。</span></div>
+          <p>本页修改对当前服务器进程立即生效，适用于这个工厂部署中的所有 Agent 对话。</p>
+          <p class="muted">服务器重启后会重新读取部署环境变量。正式交付时应由客户在服务器密钥管理系统中配置自己的 Key，而不是共用开发者密钥。</p>
+        </div>
+      </section>
+    </aside>
+  </div>
+</main>
+<script>
+const $=id=>document.getElementById(id),state={identity:null,status:null};
+const presets={
+  DEEPSEEK:{baseUrl:"https://api.deepseek.com",model:"deepseek-chat",note:"DeepSeek 官方接口。也可以填写账户中实际可用的其他模型 ID。"},
+  KIMI:{baseUrl:"https://api.moonshot.cn/v1",model:"",note:"Kimi / Moonshot 兼容接口。模型 ID 更新较快，请以客户账户控制台显示的名称为准。"},
+  OPENAI_COMPATIBLE:{baseUrl:"",model:"",note:"适用于其他兼容 Chat Completions 的云服务或本地模型网关；请填写服务方提供的 Base URL 与模型 ID。"}
+};
+function actorId(){return sessionStorage.getItem("mes_dev_actor")||"demo-planner"}
+async function api(path,options={}){const h=new Headers(options.headers||{});h.set("X-Dev-Actor",actorId());const r=await fetch(path,{...options,headers:h});if(!r.ok){const b=await r.json().catch(()=>({detail:r.statusText}));throw Error(b.detail||r.statusText)}return r.json()}
+function allowed(){return state.identity?.roles?.some(role=>["SUPERVISOR","MASTER_DATA_ADMIN"].includes(role))}
+function showStatus(s){state.status=s;$("sProvider").textContent=s.provider||"NONE";$("sConnection").textContent=s.connectionStatus||"—";$("sModel").textContent=s.model||"—";$("sKey").textContent=s.apiKeyConfigured?"已配置（不可读取）":"未配置";$("sUrl").textContent=s.baseUrl||"—";$("sSource").textContent=s.configurationSource||"—";if(s.provider&&s.provider!=="NONE"){$("provider").value=["DEEPSEEK","KIMI"].includes(s.provider)?s.provider:"OPENAI_COMPATIBLE";$("model").value=s.model||"";$("baseUrl").value=s.baseUrl||""}updateProvider(false)}
+function updateProvider(applyPreset=true){const p=presets[$("provider").value];$("providerNote").textContent=p.note;if(applyPreset){$("baseUrl").value=p.baseUrl;$("model").value=p.model}updateSaveLabel()}
+function updateSaveLabel(){$("save").textContent=$("verify").checked?"测试并启用":"直接启用"}
+async function init(){const auth=await fetch("/api/v1/system/auth-config").then(r=>r.json());$("actor").replaceChildren(...auth.devProfiles.map(p=>{const o=document.createElement("option");o.value=p.subjectId;o.textContent=p.displayName;o.selected=p.subjectId===actorId();return o}));state.identity=await api("/api/v1/identity/me");const ok=allowed();$("access").textContent=ok?"可修改":"只读 · 需要管理员";["provider","model","baseUrl","timeout","apiKey","verify","save","disable"].forEach(id=>$(id).disabled=!ok);const status=await fetch("/api/v1/agent/model-status").then(r=>r.json());showStatus(status)}
+$("form").onsubmit=async e=>{e.preventDefault();$("save").disabled=true;$("notice").textContent=$("verify").checked?"正在测试连接，成功后才会切换…":"正在启用…";try{const body={provider:$("provider").value,baseUrl:$("baseUrl").value.trim(),model:$("model").value.trim(),apiKey:$("apiKey").value||null,timeoutSeconds:Number($("timeout").value),verifyConnection:$("verify").checked};const s=await api("/api/v1/system/model-gateway/configuration",{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});$("apiKey").value="";showStatus(s);$("notice").textContent=s.provider+" · "+s.model+" 已立即生效。"}catch(e){$("notice").textContent="未切换："+e.message}finally{$("save").disabled=!allowed()}};
+$("disable").onclick=async()=>{if(!confirm("停用后 Agent 将退回规则推理。确认停用远程模型吗？"))return;try{showStatus(await api("/api/v1/system/model-gateway/configuration",{method:"DELETE"}));$("notice").textContent="远程模型已停用，Agent 已回退到规则推理。"}catch(e){$("notice").textContent=e.message}};
+$("reveal").onclick=()=>{const visible=$("apiKey").type==="text";$("apiKey").type=visible?"password":"text";$("reveal").textContent=visible?"显示":"隐藏"};
+$("provider").onchange=()=>updateProvider(true);$("verify").onchange=updateSaveLabel;$("refresh").onclick=()=>fetch("/api/v1/agent/model-status").then(r=>r.json()).then(showStatus);$("actor").onchange=()=>{sessionStorage.setItem("mes_dev_actor",$("actor").value);init().catch(e=>$("notice").textContent=e.message)};
+init().catch(e=>$("notice").textContent=e.message);
+</script>
+</body>
+</html>
