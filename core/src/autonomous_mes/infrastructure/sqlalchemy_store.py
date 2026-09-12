@@ -2,7 +2,7 @@ from datetime import datetime
 from typing import Any
 from uuid import uuid4
 
-from sqlalchemy import func, or_, select, update
+from sqlalchemy import delete, exists, func, or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 
@@ -42,6 +42,7 @@ from .models import (
     MaterialConsumptionRow,
     ProductUnitRow,
     QualityInspectionRow,
+    WorkOrderOperationRow,
     WorkOrderRow,
 )
 
@@ -139,6 +140,7 @@ class SqlAlchemyWorkOrderStore:
             with self._sessions.begin() as session:
                 if expected_stored_version is None:
                     session.add(_to_row(work_order))
+                    session.flush()
                 else:
                     result = session.execute(
                         update(WorkOrderRow)
@@ -150,7 +152,13 @@ class SqlAlchemyWorkOrderStore:
                     )
                     if getattr(result, "rowcount", 0) != 1:
                         raise InvalidTransition("optimistic lock conflict")
+                    session.execute(
+                        delete(WorkOrderOperationRow).where(
+                            WorkOrderOperationRow.work_order_id == work_order.work_order_id
+                        )
+                    )
 
+                session.add_all(_operation_rows(work_order))
                 session.add_all(_event_rows(events))
                 session.add(
                     IdempotencyRecordRow(
@@ -444,6 +452,80 @@ class SqlAlchemyWorkOrderStore:
                 )
             ).all()
             return {str(status): int(count) for status, count in rows}
+
+    def list_eligible_quality_operations(
+        self,
+        limit: int = 30,
+        offset: int = 0,
+        query: str | None = None,
+    ) -> list[dict[str, Any]]:
+        with self._sessions() as session:
+            statement = self._eligible_quality_operations_statement(
+                select(
+                    WorkOrderOperationRow,
+                    WorkOrderRow.human_code,
+                    WorkOrderRow.version,
+                ),
+                query,
+            )
+            rows = session.execute(
+                statement.order_by(
+                    WorkOrderRow.updated_at.desc(),
+                    WorkOrderOperationRow.work_order_id.desc(),
+                    WorkOrderOperationRow.sequence,
+                )
+                .offset(offset)
+                .limit(limit)
+            ).all()
+            return [
+                {
+                    "workOrderId": operation.work_order_id,
+                    "humanCode": human_code,
+                    "workOrderVersion": work_order_version,
+                    "operationSequence": operation.sequence,
+                    "operationCode": operation.operation_code,
+                    "operationName": operation.operation_name,
+                    "workCenterId": operation.work_center_id,
+                    "plannedQuantity": operation.planned_quantity,
+                }
+                for operation, human_code, work_order_version in rows
+            ]
+
+    def count_eligible_quality_operations(self, query: str | None = None) -> int:
+        with self._sessions() as session:
+            statement = self._eligible_quality_operations_statement(
+                select(func.count()).select_from(WorkOrderOperationRow),
+                query,
+            )
+            return int(session.scalar(statement) or 0)
+
+    @staticmethod
+    def _eligible_quality_operations_statement(statement: Any, query: str | None) -> Any:
+        inspection_exists = exists(
+            select(QualityInspectionRow.inspection_id).where(
+                QualityInspectionRow.work_order_id == WorkOrderOperationRow.work_order_id,
+                QualityInspectionRow.operation_sequence == WorkOrderOperationRow.sequence,
+            )
+        )
+        statement = statement.join(
+            WorkOrderRow,
+            WorkOrderRow.work_order_id == WorkOrderOperationRow.work_order_id,
+        ).where(
+            WorkOrderOperationRow.status == "COMPLETED",
+            ~inspection_exists,
+        )
+        if query:
+            pattern = f"%{query}%"
+            statement = statement.where(
+                or_(
+                    WorkOrderRow.human_code.ilike(pattern),
+                    WorkOrderRow.production_order_id.ilike(pattern),
+                    WorkOrderOperationRow.operation_code.ilike(pattern),
+                    WorkOrderOperationRow.operation_name.ilike(pattern),
+                    WorkOrderOperationRow.work_center_id.ilike(pattern),
+                )
+            )
+        return statement
 
     def add_inspection_atomically(self, inspection: QualityInspection, event: DomainEvent) -> None:
         with self._sessions.begin() as session:
@@ -795,6 +877,24 @@ def _row_values(item: WorkOrder) -> dict[str, Any]:
 
 def _to_row(item: WorkOrder) -> WorkOrderRow:
     return WorkOrderRow(work_order_id=item.work_order_id, **_row_values(item))
+
+
+def _operation_rows(item: WorkOrder) -> list[WorkOrderOperationRow]:
+    return [
+        WorkOrderOperationRow(
+            work_order_id=item.work_order_id,
+            sequence=operation.sequence,
+            operation_code=operation.operation_code,
+            operation_name=operation.operation_name,
+            work_center_id=operation.work_center_id,
+            planned_quantity=operation.planned_quantity,
+            status=operation.status.value,
+            assigned_resource_id=operation.assigned_resource_id,
+            good_quantity=operation.good_quantity,
+            scrap_quantity=operation.scrap_quantity,
+        )
+        for operation in item.operations
+    ]
 
 
 def _to_domain(row: WorkOrderRow) -> WorkOrder:

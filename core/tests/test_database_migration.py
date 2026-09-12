@@ -48,6 +48,7 @@ class DatabaseMigrationTests(unittest.TestCase):
                     "manufacturing_resources",
                     "connector_receipts",
                     "work_orders",
+                    "work_order_operations",
                 },
                 set(schema.get_table_names()),
             )
@@ -63,6 +64,10 @@ class DatabaseMigrationTests(unittest.TestCase):
                 item["name"] for item in schema.get_indexes("manufacturing_resources")
             }
             self.assertIn("ix_resource_type_updated_key", resource_indexes)
+            operation_indexes = {
+                item["name"] for item in schema.get_indexes("work_order_operations")
+            }
+            self.assertIn("ix_operation_status_order_sequence", operation_indexes)
             execution_columns = {
                 item["name"] for item in schema.get_columns("execution_sessions")
             }

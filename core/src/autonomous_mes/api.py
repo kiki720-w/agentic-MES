@@ -574,6 +574,15 @@ def quality_inspections_summary() -> dict[str, object]:
     return quality_service.summary()
 
 
+@app.get("/api/v1/quality/eligible-operations")
+def list_quality_eligible_operations(
+    limit: int = 30,
+    offset: int = 0,
+    query: str | None = None,
+) -> dict[str, object]:
+    return quality_service.list_eligible_page(limit, offset, query)
+
+
 @app.post("/api/v1/genealogy/product-units", status_code=201)
 def register_product_unit(
     body: RegisterProductUnitBody,

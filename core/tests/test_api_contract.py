@@ -142,6 +142,12 @@ class ApiContractTests(unittest.TestCase):
             "statusCounts",
             self.client.get("/api/v1/quality/inspections-summary").json(),
         )
+        eligible = self.client.get(
+            "/api/v1/quality/eligible-operations",
+            params={"limit": 1},
+        ).json()
+        self.assertEqual(1, eligible["limit"])
+        self.assertIn("total", eligible)
 
     def test_create_is_idempotent_over_http(self):
         body, key, first = self._create()

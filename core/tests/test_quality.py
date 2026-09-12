@@ -140,6 +140,19 @@ class QualityWorkflowTests(TestCase):
             "ReworkRouteApproved",
         ]
 
+    def test_completed_operation_enters_and_leaves_global_quality_queue(self) -> None:
+        order = self.completed_order()
+
+        before = self.quality.list_eligible_page(query="WO-Q-1")
+        self.assertEqual(1, before["total"])
+        self.assertEqual("WO-Q-1", before["items"][0]["humanCode"])
+
+        self.quality.create(
+            CreateInspectionCommand("q-queue", str(order["workOrderId"]), 10, 1, "inspector")
+        )
+        after = self.quality.list_eligible_page(query="WO-Q-1")
+        self.assertEqual(0, after["total"])
+
     def test_expired_gauge_cannot_record_result(self) -> None:
         order = self.completed_order()
         inspection = self.quality.create(

@@ -39,6 +39,25 @@ class WorkOrderRow(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
 
+class WorkOrderOperationRow(Base):
+    __tablename__ = "work_order_operations"
+
+    work_order_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("work_orders.work_order_id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    sequence: Mapped[int] = mapped_column(Integer, primary_key=True)
+    operation_code: Mapped[str] = mapped_column(String(64), nullable=False)
+    operation_name: Mapped[str] = mapped_column(String(160), nullable=False)
+    work_center_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    planned_quantity: Mapped[int] = mapped_column(Integer, nullable=False)
+    status: Mapped[str] = mapped_column(String(32), nullable=False)
+    assigned_resource_id: Mapped[str | None] = mapped_column(String(36), index=True)
+    good_quantity: Mapped[int] = mapped_column(Integer, nullable=False)
+    scrap_quantity: Mapped[int] = mapped_column(Integer, nullable=False)
+
+
 class IdempotencyRecordRow(Base):
     __tablename__ = "idempotency_records"
 

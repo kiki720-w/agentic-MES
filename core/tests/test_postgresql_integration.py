@@ -16,12 +16,17 @@ from autonomous_mes.application.genealogy import (
 from autonomous_mes.application.outbox import OutboxMessage
 from autonomous_mes.application.work_orders import (
     CreateWorkOrderCommand,
+    OperationSpec,
     ReleaseWorkOrderCommand,
     WorkOrderApplicationService,
 )
 from autonomous_mes.domain.errors import IdempotencyConflict
 from autonomous_mes.infrastructure.database import build_session_factory
-from autonomous_mes.infrastructure.models import EventOutboxRow, WorkOrderRow
+from autonomous_mes.infrastructure.models import (
+    EventOutboxRow,
+    WorkOrderOperationRow,
+    WorkOrderRow,
+)
 from autonomous_mes.infrastructure.outbox_worker import SqlAlchemyOutboxWorker
 from autonomous_mes.infrastructure.sqlalchemy_store import SqlAlchemyWorkOrderStore
 
@@ -67,7 +72,39 @@ class PostgreSqlIntegrationTests(unittest.TestCase):
             routing_revision_id="RT-SHAFT-A",
             bom_revision_id="BOM-SHAFT-A",
             drawing_revision_ids=["DWG-SHAFT-A"],
+            operations=[OperationSpec(10, "TURN", "数控车削", "WC-LATHE-01")],
         )
+
+    def test_normalized_operation_rows_follow_aggregate_updates(self) -> None:
+        store = SqlAlchemyWorkOrderStore(self.sessions)
+        service = WorkOrderApplicationService(store)
+        suffix = uuid4().hex
+        created = service.create(self._command(suffix))
+
+        with self.sessions() as session:
+            operation = session.get(
+                WorkOrderOperationRow,
+                (str(created["workOrderId"]), 10),
+            )
+            self.assertIsNotNone(operation)
+            assert operation is not None
+            self.assertEqual("PENDING", operation.status)
+
+        service.release(
+            ReleaseWorkOrderCommand(
+                f"pg-release-operation-{suffix}",
+                f"pg-rel-op-{suffix}",
+                str(created["workOrderId"]),
+                int(created["version"]),
+                "planner-1",
+            )
+        )
+        with self.sessions() as session:
+            operation = session.get(
+                WorkOrderOperationRow,
+                (str(created["workOrderId"]), 10),
+            )
+            self.assertIsNotNone(operation)
 
     def test_unique_constraint_rolls_back_order_event_and_idempotency(self) -> None:
         store = SqlAlchemyWorkOrderStore(self.sessions)

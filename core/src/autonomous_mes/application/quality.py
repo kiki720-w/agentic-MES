@@ -135,6 +135,30 @@ class QualityApplicationService:
             "statusCounts": statuses,
         }
 
+    def list_eligible_page(
+        self,
+        limit: int = 30,
+        offset: int = 0,
+        query: str | None = None,
+    ) -> dict[str, Any]:
+        if not 1 <= limit <= 100:
+            raise ValidationError("limit must be between 1 and 100")
+        if not 0 <= offset <= 1_000_000:
+            raise ValidationError("offset must be between 0 and 1000000")
+        normalized_query = query.strip() if query else None
+        items = self._store.list_eligible_quality_operations(
+            limit,
+            offset,
+            normalized_query,
+        )
+        return {
+            "items": items,
+            "count": len(items),
+            "total": self._store.count_eligible_quality_operations(normalized_query),
+            "limit": limit,
+            "offset": offset,
+        }
+
     def _require(self, inspection_id: str) -> QualityInspection:
         item = self._store.get_inspection(inspection_id)
         if item is None:

@@ -53,6 +53,7 @@
 - `docs/step-24-scalable-console-and-rbac-acceptance.md`：全写操作RBAC、浏览器PKCE登录与大样本控制台验收记录
 - `docs/step-25-million-event-scale-benchmark.md`：10万工单/100万事件实测与事件游标分页验收记录
 - `docs/step-26-operational-read-models-acceptance.md`：设备、资源与质量任务大样本读模型和分页验收记录
+- `docs/step-27-normalized-work-order-operations-acceptance.md`：工单工序关系化、兼容回填和全库待检池验收记录
 
 ## 当前决策门
 

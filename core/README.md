@@ -32,6 +32,7 @@ uvicorn autonomous_mes.api:app --app-dir src --reload
 - `GET /api/v1/work-orders-summary`：全量工单状态聚合
 - `POST /api/v1/equipment`
 - `GET /api/v1/equipment`
+- `GET /api/v1/quality/eligible-operations`：全库已完工未检工序分页队列
 - `POST /api/v1/equipment/{equipmentId}/telemetry`
 - `POST /api/v1/genealogy/product-units`
 - `GET /api/v1/genealogy/product-units/{productSerial}`
@@ -106,7 +107,9 @@ Agent可通过`POST /api/v1/agent-tools/get-product-genealogy`读取序列号谱
 
 事件追溯API只读取有界窗口，并支持基于`occurred_at + event_id`的游标翻页；页面通过“加载更早”逐批追加，不使用百万级深offset。迁移`0015`增加事件时间线复合索引。`scripts/scale-benchmark.py`只能在`agentic_mes_scale*`隔离schema内运行，已用于10万工单、100万事件实测。
 
-设备、制造资源和质量任务列表支持数据库分页、搜索与状态/类型筛选，并分别提供全量汇总端点。控制台每页仅保留24条记录，迁移`0016`增加运营读模型复合索引。当前“待检工序”候选池仍明确限定为最近100个工单；全量候选池需要先将工单内嵌JSON工序迁移为独立关系表。
+设备、制造资源和质量任务列表支持数据库分页、搜索与状态/类型筛选，并分别提供全量汇总端点。控制台每页仅保留24条记录，迁移`0016`增加运营读模型复合索引。
+
+迁移`0017`已建立`work_order_operations`独立工序表并回填原JSON。工单聚合写入会在同一事务内同步更新JSON兼容字段、关系工序、Outbox和幂等记录；质量页面的待检池改为全库数据库查询，不再受最近100个工单窗口限制。旧JSON仍作为兼容读路径保留，待一致性观测稳定后再决定是否移除。
 
 启用 DeepSeek 时只需在本机 `.env` 设置 `AUTONOMOUS_MES_DEEPSEEK_API_KEY` 并重启 API。默认使用 `deepseek-v4-flash`、JSON 输出、关闭思考模式和 12 秒超时。每条提案记录 `narrativeSource` 与 `modelName`；不要把真实密钥写入仓库。
 

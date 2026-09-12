@@ -337,6 +337,56 @@ class InMemoryWorkOrderStore:
                 result[item.status.value] = result.get(item.status.value, 0) + 1
             return result
 
+    def list_eligible_quality_operations(
+        self,
+        limit: int = 30,
+        offset: int = 0,
+        query: str | None = None,
+    ) -> list[dict[str, Any]]:
+        with self._lock:
+            return deepcopy(self._eligible_quality_operations(query)[offset : offset + limit])
+
+    def count_eligible_quality_operations(self, query: str | None = None) -> int:
+        with self._lock:
+            return len(self._eligible_quality_operations(query))
+
+    def _eligible_quality_operations(self, query: str | None) -> list[dict[str, Any]]:
+        inspected = {
+            (item.work_order_id, item.operation_sequence) for item in self._inspections.values()
+        }
+        needle = query.casefold() if query else None
+        results: list[dict[str, Any]] = []
+        for order in sorted(
+            self._orders.values(),
+            key=lambda item: (item.updated_at, item.work_order_id),
+            reverse=True,
+        ):
+            for operation in sorted(order.operations, key=lambda item: item.sequence):
+                if operation.status.value != "COMPLETED":
+                    continue
+                if (order.work_order_id, operation.sequence) in inspected:
+                    continue
+                searchable = (
+                    f"{order.human_code} {order.production_order_id} "
+                    f"{operation.operation_code} {operation.operation_name} "
+                    f"{operation.work_center_id}"
+                ).casefold()
+                if needle and needle not in searchable:
+                    continue
+                results.append(
+                    {
+                        "workOrderId": order.work_order_id,
+                        "humanCode": order.human_code,
+                        "workOrderVersion": order.version,
+                        "operationSequence": operation.sequence,
+                        "operationCode": operation.operation_code,
+                        "operationName": operation.operation_name,
+                        "workCenterId": operation.work_center_id,
+                        "plannedQuantity": operation.planned_quantity,
+                    }
+                )
+        return results
+
     def add_inspection_atomically(self, inspection: QualityInspection, event: DomainEvent) -> None:
         with self._lock:
             self._inspections[inspection.inspection_id] = deepcopy(inspection)
