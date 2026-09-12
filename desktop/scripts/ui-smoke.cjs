@@ -38,6 +38,7 @@ async function main() {
     return new Promise((resolve, reject) => pending.set(id, { resolve, reject }));
   }
   await call("Runtime.enable");
+  await call("Page.enable");
   const results = [];
   for (let index = 0; index < pages.length; index += 1) {
     await call("Runtime.evaluate", {
@@ -45,16 +46,29 @@ async function main() {
     });
     await wait(1600);
     const state = await call("Runtime.evaluate", {
-      expression: `({title:document.querySelector(".page-header h1")?.textContent||document.querySelector(".conversation h1")?.textContent||"",textLength:document.body.innerText.length,fatal:Boolean(document.querySelector(".fatal-error")),loadError:Boolean(document.querySelector(".error-state"))})`,
+      expression: `(()=>{const page=document.querySelector(".native-page");const content=document.querySelector(".content-area");const rect=page?.getBoundingClientRect();return {title:document.querySelector(".page-header h1")?.textContent||document.querySelector(".conversation h1")?.textContent||"",textLength:document.body.innerText.length,fatal:Boolean(document.querySelector(".fatal-error")),loadError:Boolean(document.querySelector(".error-state")),viewportHeight:document.documentElement.clientHeight,contentHeight:content?.clientHeight||0,pageClientHeight:page?.clientHeight||0,pageScrollHeight:page?.scrollHeight||0,scrollable:Boolean(page&&page.scrollHeight>page.clientHeight+1),scrollPoint:rect?{x:Math.round(rect.left+rect.width/2),y:Math.round(rect.top+Math.min(rect.height/2,240))}:null}})()`,
       returnByValue: true,
     });
+    const value = state.result.value;
+    let scrollWorked = null;
+    if (value.scrollable && value.scrollPoint) {
+      await call("Runtime.evaluate", { expression: `document.querySelector(".native-page").scrollTop=0` });
+      await call("Input.dispatchMouseEvent", { type: "mouseMoved", x: value.scrollPoint.x, y: value.scrollPoint.y });
+      await call("Input.dispatchMouseEvent", { type: "mouseWheel", x: value.scrollPoint.x, y: value.scrollPoint.y, deltaX: 0, deltaY: 460 });
+      await wait(180);
+      const scrolled = await call("Runtime.evaluate", {
+        expression: `document.querySelector(".native-page")?.scrollTop||0`,
+        returnByValue: true,
+      });
+      scrollWorked = scrolled.result.value > 0;
+    }
     const screenshot = await call("Page.captureScreenshot", { format: "png" });
     fs.writeFileSync(path.join(outputRoot, `${index + 1}-${pages[index]}.png`), Buffer.from(screenshot.data, "base64"));
-    results.push({ page: pages[index], ...state.result.value });
+    results.push({ page: pages[index], ...value, scrollWorked });
   }
   socket.close();
   process.stdout.write(`${JSON.stringify({ results, exceptions }, null, 2)}\n`);
-  if (exceptions.length || results.some((result) => result.fatal || result.loadError || result.textLength < 100)) process.exitCode = 1;
+  if (exceptions.length || results.some((result) => result.fatal || result.loadError || result.textLength < 100 || result.contentHeight >= result.viewportHeight || (result.scrollable && result.scrollWorked !== true))) process.exitCode = 1;
 }
 
 main().catch((error) => {
