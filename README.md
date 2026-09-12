@@ -30,6 +30,8 @@
 - `docs/step-2-adr-acceptance.md`：第二步技术ADR验收记录
 - `core/`：自主MES第一条可运行核心垂直切片
 - `docs/step-3-core-slice-acceptance.md`：最小核心代码验收记录
+- `docs/step-4-persistence-progress.md`：PostgreSQL持久化切片实施进度
+- `docs/step-5-outbox-worker-acceptance.md`：Outbox Worker验收记录
 
 ## 当前决策门
 
