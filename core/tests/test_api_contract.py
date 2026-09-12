@@ -40,7 +40,7 @@ class ApiContractTests(unittest.TestCase):
         self.assertEqual(
             {
                 "status": "READY",
-                "modelGateway": "NOT_REQUIRED",
+                "modelGateway": "DISABLED",
                 "agentRuntime": "RULES_ONLY",
                 "storageBackend": "memory",
             },

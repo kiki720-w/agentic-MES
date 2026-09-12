@@ -29,6 +29,8 @@ class AgentProposal:
     equipment_version: int
     diagnosis: str
     rationale: str
+    narrative_source: str
+    model_name: str | None
     approved_by: str | None
     approval_reason: str | None
     created_at: datetime
@@ -48,6 +50,8 @@ class AgentProposal:
         equipment_version: int,
         diagnosis: str,
         rationale: str,
+        narrative_source: str = "RULES",
+        model_name: str | None = None,
     ) -> tuple["AgentProposal", DomainEvent]:
         now = utc_now()
         proposal = cls(
@@ -64,6 +68,8 @@ class AgentProposal:
             equipment_version=equipment_version,
             diagnosis=diagnosis,
             rationale=rationale,
+            narrative_source=narrative_source,
+            model_name=model_name,
             approved_by=None,
             approval_reason=None,
             created_at=now,
@@ -80,6 +86,8 @@ class AgentProposal:
                 "status": status.value,
                 "workOrderId": work_order_id,
                 "equipmentId": equipment_id,
+                "narrativeSource": narrative_source,
+                "modelName": model_name,
             },
             proposal.proposal_id,
         )

@@ -150,6 +150,8 @@ class AgentProposalRow(Base):
     equipment_version: Mapped[int] = mapped_column(Integer, nullable=False)
     diagnosis: Mapped[str] = mapped_column(Text, nullable=False)
     rationale: Mapped[str] = mapped_column(Text, nullable=False)
+    narrative_source: Mapped[str] = mapped_column(String(32), nullable=False, default="RULES")
+    model_name: Mapped[str | None] = mapped_column(String(96))
     approved_by: Mapped[str | None] = mapped_column(String(64))
     approval_reason: Mapped[str | None] = mapped_column(String(512))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)

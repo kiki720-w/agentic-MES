@@ -1,5 +1,5 @@
 from hashlib import sha256
-from typing import Any, Protocol
+from typing import Any
 
 from autonomous_mes.application.equipment import EquipmentApplicationService
 from autonomous_mes.application.ports import MesStore
@@ -7,26 +7,43 @@ from autonomous_mes.application.work_orders import OperationCommand, WorkOrderAp
 from autonomous_mes.domain.agent import AgentProposal, ProposalStatus
 from autonomous_mes.domain.errors import InvalidTransition, NotFound, ValidationError
 
-
-class AgentNarrator(Protocol):
-    def explain(self, equipment_state: str, healthy: bool) -> tuple[str, str]: ...
+from .model_gateway import (
+    DiagnosticFacts,
+    DiagnosticModel,
+    DiagnosticNarrative,
+    ModelGatewayError,
+)
 
 
 class RuleBasedNarrator:
-    def explain(self, equipment_state: str, healthy: bool) -> tuple[str, str]:
-        if healthy:
-            return (
+    def explain(self, facts: DiagnosticFacts) -> DiagnosticNarrative:
+        if facts.healthy:
+            return DiagnosticNarrative(
                 "设备已恢复健康，但工序仍因历史联锁保持暂停",
                 "建议主管核对现场安全条件后批准复工",
+                "RULES",
             )
-        return (
-            f"设备仍处于{equipment_state}，禁止恢复生产",
+        return DiagnosticNarrative(
+            f"设备仍处于{facts.equipment_state}，禁止恢复生产",
             "保持工序暂停，等待维修或操作人员处理设备异常",
+            "RULES",
         )
 
 
+class FallbackNarrator:
+    def __init__(self, primary: DiagnosticModel, fallback: DiagnosticModel | None = None) -> None:
+        self._primary = primary
+        self._fallback = fallback or RuleBasedNarrator()
+
+    def explain(self, facts: DiagnosticFacts) -> DiagnosticNarrative:
+        try:
+            return self._primary.explain(facts)
+        except ModelGatewayError:
+            return self._fallback.explain(facts)
+
+
 class IncidentResponseAgent:
-    def __init__(self, store: MesStore, narrator: AgentNarrator | None = None) -> None:
+    def __init__(self, store: MesStore, narrator: DiagnosticModel | None = None) -> None:
         self._store = store
         self._work_orders = WorkOrderApplicationService(store)
         self._equipment = EquipmentApplicationService(store)
@@ -48,7 +65,20 @@ class IncidentResponseAgent:
             action = "RESUME_OPERATION" if healthy else "HOLD_AND_INSPECT"
             risk = "R2" if healthy else "R0"
             status = ProposalStatus.PENDING_APPROVAL if healthy else ProposalStatus.OBSERVED
-            diagnosis, rationale = self._narrator.explain(str(equipment["state"]), healthy)
+            narrative = self._narrator.explain(
+                DiagnosticFacts(
+                    work_order_code=str(work_order["humanCode"]),
+                    work_order_status=str(work_order["status"]),
+                    operation_sequence=int(operation["sequence"]),
+                    operation_name=str(operation["operationName"]),
+                    equipment_code=str(equipment["code"]),
+                    equipment_state=str(equipment["state"]),
+                    alarm_code=equipment["alarmCode"],
+                    downtime_reason=equipment["downtimeReason"],
+                    healthy=healthy,
+                    observed_at=equipment["lastSeenAt"],
+                )
+            )
             fingerprint = sha256(
                 (
                     f"{work_order['workOrderId']}:{work_order['version']}:"
@@ -67,8 +97,10 @@ class IncidentResponseAgent:
                     int(operation["sequence"]),
                     str(equipment["equipmentId"]),
                     int(equipment["version"]),
-                    diagnosis,
-                    rationale,
+                    narrative.diagnosis,
+                    narrative.recommendation,
+                    narrative.source,
+                    narrative.model,
                 )
                 self._store.add_agent_proposal_atomically(proposal, event)
             proposals.append(_serialize(proposal))
@@ -120,6 +152,8 @@ def _serialize(item: AgentProposal) -> dict[str, Any]:
         "equipmentVersion": item.equipment_version,
         "diagnosis": item.diagnosis,
         "rationale": item.rationale,
+        "narrativeSource": item.narrative_source,
+        "modelName": item.model_name,
         "approvedBy": item.approved_by,
         "approvalReason": item.approval_reason,
         "createdAt": item.created_at.isoformat(),

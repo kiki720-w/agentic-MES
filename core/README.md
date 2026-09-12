@@ -40,7 +40,7 @@ uvicorn autonomous_mes.api:app --app-dir src --reload
 - `GET /health/ready`
 - `GET /`：可视化生产控制台HTML
 
-API支持内存适配器和PostgreSQL持久化适配器。模型网关尚未连接，当前Agent工具是可审计、可授权的确定性工具调用，不是让大模型直接修改数据库。
+API支持内存适配器和PostgreSQL持久化适配器。DeepSeek 可通过供应商中立模型网关提供诊断解释；模型只接收最小化的结构化设备/工单事实，不获得数据库连接和 MES 工具。未配置密钥或调用失败时自动回退到规则解释。
 
 ## 数据库开发
 
@@ -66,6 +66,8 @@ Worker通过数据库租约领取事件；失败会指数退避，超过上限�
 派工必须选择同一工作中心内状态为`IDLE`或`RUNNING`的已注册设备。绑定设备上报`DOWN`或`ALARM`后，正在执行的工序和工单会自动进入`SUSPENDED`并产生联锁事件。设备未恢复时禁止复工；恢复为健康状态后仍需由人员或受控Agent明确调用`resume`，系统不会因一次正常心跳自行恢复生产。
 
 第一代异常处置Agent采用“规则决策内核 + 可替换模型解释层”的设计。没有模型API时仍可自动观察暂停工单、设备版本和健康状态，生成去重且持久化的诊断提案。`HOLD_AND_INSPECT`只记录观察结论；`RESUME_OPERATION`属于`R2`动作，必须由主管填写原因并批准，执行前会再次验证设备健康、工单版本和幂等键。模型只能增强诊断说明，不能绕过这些确定性安全规则。
+
+启用 DeepSeek 时只需在本机 `.env` 设置 `AUTONOMOUS_MES_DEEPSEEK_API_KEY` 并重启 API。默认使用 `deepseek-v4-flash`、JSON 输出、关闭思考模式和 12 秒超时。每条提案记录 `narrativeSource` 与 `modelName`；不要把真实密钥写入仓库。
 
 ### 本机D盘免安装环境
 

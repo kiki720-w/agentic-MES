@@ -6,7 +6,7 @@ from fastapi import FastAPI, Header, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 from pydantic import BaseModel, ConfigDict, Field
 
-from autonomous_mes.application.agent_runtime import IncidentResponseAgent
+from autonomous_mes.application.agent_runtime import FallbackNarrator, IncidentResponseAgent
 from autonomous_mes.application.agent_tools import GetWorkOrderTool, ToolContext
 from autonomous_mes.application.equipment import (
     EquipmentApplicationService,
@@ -25,6 +25,7 @@ from autonomous_mes.application.work_orders import (
 from autonomous_mes.config import Settings
 from autonomous_mes.domain.errors import DomainError, Forbidden, NotFound, ValidationError
 from autonomous_mes.infrastructure.database import build_engine, build_session_factory
+from autonomous_mes.infrastructure.deepseek_gateway import DeepSeekDiagnosticModel
 from autonomous_mes.infrastructure.memory import InMemoryWorkOrderStore, ScopedReadPolicy
 from autonomous_mes.infrastructure.sqlalchemy_store import SqlAlchemyWorkOrderStore
 
@@ -147,7 +148,19 @@ def build_store() -> MesStore:
 store = build_store()
 service = WorkOrderApplicationService(store)
 equipment_service = EquipmentApplicationService(store)
-incident_agent = IncidentResponseAgent(store)
+deepseek_narrator = (
+    FallbackNarrator(
+        DeepSeekDiagnosticModel(
+            settings.deepseek_api_key,
+            settings.deepseek_model,
+            settings.deepseek_base_url,
+            settings.deepseek_timeout_seconds,
+        )
+    )
+    if settings.deepseek_api_key
+    else None
+)
+incident_agent = IncidentResponseAgent(store, deepseek_narrator)
 quality_service = QualityApplicationService(store, store)
 policy = ScopedReadPolicy({"demo-planner": {"WS-MACH-01"}})
 get_work_order_tool = GetWorkOrderTool(store, policy, store)
@@ -179,8 +192,8 @@ def live() -> dict[str, str]:
 def ready() -> dict[str, str]:
     return {
         "status": "READY",
-        "modelGateway": "NOT_REQUIRED",
-        "agentRuntime": "RULES_ONLY",
+        "modelGateway": "DEEPSEEK_CONFIGURED" if settings.deepseek_api_key else "DISABLED",
+        "agentRuntime": "DEEPSEEK_WITH_RULES_FALLBACK" if settings.deepseek_api_key else "RULES_ONLY",
         "storageBackend": settings.storage_backend,
     }
 
