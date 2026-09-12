@@ -51,7 +51,7 @@ class ApiContractTests(unittest.TestCase):
         dashboard = self.client.get("/")
         self.assertEqual(200, dashboard.status_code)
         self.assertIn("AGENTIC", dashboard.text)
-        self.assertIn("生产控制台", dashboard.text)
+        self.assertIn("生产执行中心", dashboard.text)
 
         orders = self.client.get("/api/v1/work-orders")
         outbox = self.client.get("/api/v1/system/outbox")
