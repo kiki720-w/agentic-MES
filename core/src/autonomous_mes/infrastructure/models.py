@@ -154,3 +154,20 @@ class AgentProposalRow(Base):
     approval_reason: Mapped[str | None] = mapped_column(String(512))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class QualityInspectionRow(Base):
+    __tablename__ = "quality_inspections"
+
+    inspection_id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    work_order_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
+    operation_sequence: Mapped[int] = mapped_column(Integer, nullable=False)
+    sample_size: Mapped[int] = mapped_column(Integer, nullable=False)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    version: Mapped[int] = mapped_column(Integer, nullable=False)
+    result: Mapped[str | None] = mapped_column(String(16))
+    defect_code: Mapped[str | None] = mapped_column(String(64))
+    notes: Mapped[str | None] = mapped_column(String(512))
+    rework_route: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)

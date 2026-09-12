@@ -211,9 +211,7 @@ class ApiContractTests(unittest.TestCase):
             },
         )
         self.assertEqual([work_order["workOrderId"]], alarmed.json()["affectedWorkOrderIds"])
-        suspended = self.client.get(
-            f"/api/v1/work-orders/{work_order['workOrderId']}"
-        ).json()
+        suspended = self.client.get(f"/api/v1/work-orders/{work_order['workOrderId']}").json()
         self.assertEqual("SUSPENDED", suspended["status"])
         blocked = self.client.post(
             f"/api/v1/work-orders/{work_order['workOrderId']}/operations/10/resume",

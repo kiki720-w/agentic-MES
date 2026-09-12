@@ -10,6 +10,7 @@ from autonomous_mes.domain.agent import AgentProposal, ProposalStatus
 from autonomous_mes.domain.equipment import Equipment, EquipmentState, TelemetrySample
 from autonomous_mes.domain.errors import IdempotencyConflict, InvalidTransition
 from autonomous_mes.domain.events import DomainEvent
+from autonomous_mes.domain.quality import InspectionStatus, QualityInspection
 from autonomous_mes.domain.work_order import (
     FrozenRevisions,
     OperationStatus,
@@ -25,6 +26,7 @@ from .models import (
     EquipmentTelemetryRow,
     EventOutboxRow,
     IdempotencyRecordRow,
+    QualityInspectionRow,
     WorkOrderRow,
 )
 
@@ -218,9 +220,7 @@ class SqlAlchemyWorkOrderStore:
             ).all()
             return [_proposal_to_domain(row) for row in rows]
 
-    def add_agent_proposal_atomically(
-        self, proposal: AgentProposal, event: DomainEvent
-    ) -> None:
+    def add_agent_proposal_atomically(self, proposal: AgentProposal, event: DomainEvent) -> None:
         try:
             with self._sessions.begin() as session:
                 session.add(AgentProposalRow(**_proposal_values(proposal)))
@@ -242,6 +242,41 @@ class SqlAlchemyWorkOrderStore:
             )
             if getattr(result, "rowcount", 0) != 1:
                 raise InvalidTransition("agent proposal status changed")
+            session.add_all(_event_rows([event]))
+
+    def get_inspection(self, inspection_id: str) -> QualityInspection | None:
+        with self._sessions() as session:
+            row = session.get(QualityInspectionRow, inspection_id)
+            return _inspection_to_domain(row) if row else None
+
+    def list_inspections(self, limit: int = 100) -> list[QualityInspection]:
+        with self._sessions() as session:
+            rows = session.scalars(
+                select(QualityInspectionRow)
+                .order_by(QualityInspectionRow.updated_at.desc())
+                .limit(limit)
+            ).all()
+            return [_inspection_to_domain(row) for row in rows]
+
+    def add_inspection_atomically(self, inspection: QualityInspection, event: DomainEvent) -> None:
+        with self._sessions.begin() as session:
+            session.add(QualityInspectionRow(**_inspection_values(inspection)))
+            session.add_all(_event_rows([event]))
+
+    def update_inspection_atomically(
+        self, inspection: QualityInspection, expected_version: int, event: DomainEvent
+    ) -> None:
+        with self._sessions.begin() as session:
+            result = session.execute(
+                update(QualityInspectionRow)
+                .where(
+                    QualityInspectionRow.inspection_id == inspection.inspection_id,
+                    QualityInspectionRow.version == expected_version,
+                )
+                .values(**_inspection_values(inspection, include_id=False))
+            )
+            if getattr(result, "rowcount", 0) != 1:
+                raise InvalidTransition("quality inspection version changed")
             session.add_all(_event_rows([event]))
 
 
@@ -424,4 +459,40 @@ def _proposal_to_domain(row: AgentProposalRow) -> AgentProposal:
         approval_reason=row.approval_reason,
         created_at=row.created_at,
         updated_at=row.updated_at,
+    )
+
+
+def _inspection_values(item: QualityInspection, *, include_id: bool = True) -> dict[str, Any]:
+    values = {
+        "work_order_id": item.work_order_id,
+        "operation_sequence": item.operation_sequence,
+        "sample_size": item.sample_size,
+        "status": item.status.value,
+        "version": item.version,
+        "result": item.result,
+        "defect_code": item.defect_code,
+        "notes": item.notes,
+        "rework_route": list(item.rework_route),
+        "created_at": item.created_at,
+        "updated_at": item.updated_at,
+    }
+    if include_id:
+        values["inspection_id"] = item.inspection_id
+    return values
+
+
+def _inspection_to_domain(row: QualityInspectionRow) -> QualityInspection:
+    return QualityInspection(
+        row.inspection_id,
+        row.work_order_id,
+        row.operation_sequence,
+        row.sample_size,
+        InspectionStatus(row.status),
+        row.version,
+        row.result,
+        row.defect_code,
+        row.notes,
+        list(row.rework_route),
+        row.created_at,
+        row.updated_at,
     )

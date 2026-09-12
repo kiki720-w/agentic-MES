@@ -240,7 +240,10 @@ class WorkOrder:
             raise InvalidTransition("only an IN_PROGRESS operation accepts production reports")
         if good_quantity < 0 or scrap_quantity < 0 or good_quantity + scrap_quantity <= 0:
             raise ValidationError("reported quantity must be positive and cannot be negative")
-        if operation.good_quantity + operation.scrap_quantity + good_quantity + scrap_quantity > operation.planned_quantity:
+        if (
+            operation.good_quantity + operation.scrap_quantity + good_quantity + scrap_quantity
+            > operation.planned_quantity
+        ):
             raise ValidationError("reported quantity exceeds operation planned quantity")
         changed = replace(
             operation,
@@ -262,7 +265,9 @@ class WorkOrder:
         if operation.status is not OperationStatus.IN_PROGRESS:
             raise InvalidTransition("only an IN_PROGRESS operation can be completed")
         if operation.good_quantity + operation.scrap_quantity != operation.planned_quantity:
-            raise InvalidTransition("reported quantity must equal planned quantity before completion")
+            raise InvalidTransition(
+                "reported quantity must equal planned quantity before completion"
+            )
         changed = replace(operation, status=OperationStatus.COMPLETED)
         all_completed = all(
             item.sequence == sequence or item.status is OperationStatus.COMPLETED
@@ -274,7 +279,9 @@ class WorkOrder:
             actor_id,
             correlation_id,
             {},
-            work_order_status=WorkOrderStatus.COMPLETED if all_completed else WorkOrderStatus.RELEASED,
+            work_order_status=WorkOrderStatus.COMPLETED
+            if all_completed
+            else WorkOrderStatus.RELEASED,
         )
 
     def suspend_for_equipment_incident(
@@ -369,6 +376,8 @@ class WorkOrder:
             status=work_order_status or self.status,
             version=self.version + 1,
             updated_at=utc_now(),
-            operations=[changed if item.sequence == changed.sequence else item for item in self.operations],
+            operations=[
+                changed if item.sequence == changed.sequence else item for item in self.operations
+            ],
             pending_events=[event],
         )

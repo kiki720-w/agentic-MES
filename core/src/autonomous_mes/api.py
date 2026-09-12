@@ -14,6 +14,7 @@ from autonomous_mes.application.equipment import (
     RegisterEquipmentCommand,
 )
 from autonomous_mes.application.ports import MesStore
+from autonomous_mes.application.quality import CreateInspectionCommand, QualityApplicationService
 from autonomous_mes.application.work_orders import (
     CreateWorkOrderCommand,
     OperationCommand,
@@ -107,6 +108,30 @@ class ApproveProposalBody(BaseModel):
     reason: str
 
 
+class CreateInspectionBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    workOrderId: str
+    operationSequence: int
+    sampleSize: int = 1
+    actorId: str
+
+
+class InspectionResultBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    expectedVersion: int
+    passed: bool
+    defectCode: str | None = None
+    notes: str | None = None
+    actorId: str
+
+
+class ReworkApprovalBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    expectedVersion: int
+    route: list[str]
+    actorId: str
+
+
 settings = Settings()
 
 
@@ -123,6 +148,7 @@ store = build_store()
 service = WorkOrderApplicationService(store)
 equipment_service = EquipmentApplicationService(store)
 incident_agent = IncidentResponseAgent(store)
+quality_service = QualityApplicationService(store, store)
 policy = ScopedReadPolicy({"demo-planner": {"WS-MACH-01"}})
 get_work_order_tool = GetWorkOrderTool(store, policy, store)
 app = FastAPI(title="Autonomous MES Core", version="0.1.0")
@@ -219,10 +245,43 @@ def list_agent_proposals(limit: int = 100) -> dict[str, object]:
     return {"items": items, "count": len(items)}
 
 
+@app.get("/api/v1/quality/inspections")
+def list_quality_inspections(limit: int = 100) -> dict[str, object]:
+    items = quality_service.list(limit)
+    return {"items": items, "count": len(items)}
+
+
+@app.post("/api/v1/quality/inspections", status_code=201)
+def create_quality_inspection(body: CreateInspectionBody) -> dict[str, object]:
+    return quality_service.create(
+        CreateInspectionCommand(
+            str(uuid4()), body.workOrderId, body.operationSequence, body.sampleSize, body.actorId
+        )
+    )
+
+
+@app.post("/api/v1/quality/inspections/{inspection_id}/result")
+def record_quality_result(inspection_id: str, body: InspectionResultBody) -> dict[str, object]:
+    return quality_service.record(
+        inspection_id,
+        body.passed,
+        body.defectCode,
+        body.notes,
+        body.expectedVersion,
+        body.actorId,
+        str(uuid4()),
+    )
+
+
+@app.post("/api/v1/quality/inspections/{inspection_id}/approve-rework")
+def approve_quality_rework(inspection_id: str, body: ReworkApprovalBody) -> dict[str, object]:
+    return quality_service.approve_rework(
+        inspection_id, body.route, body.expectedVersion, body.actorId, str(uuid4())
+    )
+
+
 @app.post("/api/v1/agent/proposals/{proposal_id}/approve")
-def approve_agent_proposal(
-    proposal_id: str, body: ApproveProposalBody
-) -> dict[str, object]:
+def approve_agent_proposal(proposal_id: str, body: ApproveProposalBody) -> dict[str, object]:
     return incident_agent.approve(proposal_id, body.actorId, body.reason)
 
 
@@ -247,9 +306,7 @@ def list_equipment(limit: int = 100) -> dict[str, object]:
 
 
 @app.post("/api/v1/equipment/{equipment_id}/telemetry")
-def record_equipment_telemetry(
-    equipment_id: str, body: TelemetryBody
-) -> dict[str, object]:
+def record_equipment_telemetry(equipment_id: str, body: TelemetryBody) -> dict[str, object]:
     equipment = equipment_service.record(
         RecordTelemetryCommand(
             correlation_id=str(uuid4()),
@@ -307,9 +364,7 @@ def execute_operation(
     idempotency_key: str = Header(...),
 ) -> dict[str, object]:
     current = service.get(work_order_id)
-    operation = next(
-        (item for item in current["operations"] if item["sequence"] == sequence), None
-    )
+    operation = next((item for item in current["operations"] if item["sequence"] == sequence), None)
     if operation is None:
         raise ValidationError("operation was not found in the frozen route")
     if action == "dispatch":

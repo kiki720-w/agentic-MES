@@ -37,6 +37,7 @@ class DatabaseMigrationTests(unittest.TestCase):
                     "equipment",
                     "equipment_telemetry",
                     "idempotency_records",
+                    "quality_inspections",
                     "work_orders",
                 },
                 set(schema.get_table_names()),

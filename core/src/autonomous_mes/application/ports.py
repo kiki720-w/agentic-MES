@@ -4,6 +4,7 @@ from typing import Any, Protocol
 from autonomous_mes.domain.agent import AgentProposal, ProposalStatus
 from autonomous_mes.domain.equipment import Equipment, TelemetrySample
 from autonomous_mes.domain.events import DomainEvent
+from autonomous_mes.domain.quality import QualityInspection
 from autonomous_mes.domain.work_order import WorkOrder
 
 
@@ -75,10 +76,23 @@ class AgentProposalStore(Protocol):
         self, proposal: AgentProposal, event: DomainEvent
     ) -> None: ...
 
+
+class QualityStore(Protocol):
+    def get_inspection(self, inspection_id: str) -> QualityInspection | None: ...
+    def list_inspections(self, limit: int = 100) -> list[QualityInspection]: ...
+    def add_inspection_atomically(
+        self, inspection: QualityInspection, event: DomainEvent
+    ) -> None: ...
+    def update_inspection_atomically(
+        self, inspection: QualityInspection, expected_version: int, event: DomainEvent
+    ) -> None: ...
+
     def update_agent_proposal_atomically(
         self, proposal: AgentProposal, expected_status: ProposalStatus, event: DomainEvent
     ) -> None: ...
 
 
-class MesStore(WorkOrderStore, EquipmentStore, AgentProposalStore, ToolAuditSink, Protocol):
+class MesStore(
+    WorkOrderStore, EquipmentStore, AgentProposalStore, QualityStore, ToolAuditSink, Protocol
+):
     """Combined persistence port used by the current vertical slice."""

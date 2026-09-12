@@ -17,6 +17,7 @@ class OperationSpec:
     operation_name: str
     work_center_id: str
 
+
 from .ports import IdempotentResult, WorkOrderStore
 
 

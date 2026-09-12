@@ -55,9 +55,7 @@ def upgrade() -> None:
             "received_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False
         ),
     )
-    op.create_index(
-        "ix_equipment_telemetry_equipment_id", "equipment_telemetry", ["equipment_id"]
-    )
+    op.create_index("ix_equipment_telemetry_equipment_id", "equipment_telemetry", ["equipment_id"])
     op.create_index(
         "ix_equipment_telemetry_observed",
         "equipment_telemetry",

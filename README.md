@@ -33,6 +33,7 @@
 - `docs/step-4-persistence-progress.md`：PostgreSQL持久化切片实施进度
 - `docs/step-5-outbox-worker-acceptance.md`：Outbox Worker验收记录
 - `docs/step-6-visual-console-acceptance.md`：可视化HTML生产控制台验收记录
+- `docs/step-7-quality-rework-acceptance.md`：质量检验、隔离和返工闭环验收记录
 
 ## 当前决策门
 

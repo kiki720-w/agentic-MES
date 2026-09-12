@@ -67,9 +67,7 @@ class Equipment:
         protocol: str,
         correlation_id: str,
     ) -> tuple["Equipment", DomainEvent]:
-        if any(
-            not value.strip() for value in (code, name, workshop_id, work_center_id, protocol)
-        ):
+        if any(not value.strip() for value in (code, name, workshop_id, work_center_id, protocol)):
             raise ValidationError("equipment code, name, location and protocol are required")
         now = utc_now()
         equipment = cls(
@@ -105,7 +103,9 @@ class Equipment:
         if expected_version != self.version:
             raise InvalidTransition("equipment version changed; reload before telemetry ingestion")
         if self.last_seen_at is not None and sample.observed_at < self.last_seen_at:
-            raise InvalidTransition("telemetry observed_at is older than the current equipment state")
+            raise InvalidTransition(
+                "telemetry observed_at is older than the current equipment state"
+            )
         changed = replace(
             self,
             state=sample.state,

@@ -100,7 +100,9 @@ class IncidentResponseAgent:
             )
         )
         executed, event = proposal.mark_executed(actor_id, reason)
-        self._store.update_agent_proposal_atomically(executed, ProposalStatus.PENDING_APPROVAL, event)
+        self._store.update_agent_proposal_atomically(
+            executed, ProposalStatus.PENDING_APPROVAL, event
+        )
         return _serialize(executed)
 
 

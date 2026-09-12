@@ -7,6 +7,7 @@ from autonomous_mes.domain.agent import AgentProposal, ProposalStatus
 from autonomous_mes.domain.equipment import Equipment, TelemetrySample
 from autonomous_mes.domain.errors import Forbidden, IdempotencyConflict, InvalidTransition
 from autonomous_mes.domain.events import DomainEvent
+from autonomous_mes.domain.quality import QualityInspection
 from autonomous_mes.domain.work_order import WorkOrder
 
 
@@ -24,6 +25,7 @@ class InMemoryWorkOrderStore:
         self._telemetry_samples: set[str] = set()
         self._agent_proposals: dict[str, AgentProposal] = {}
         self._proposal_fingerprints: dict[str, str] = {}
+        self._inspections: dict[str, QualityInspection] = {}
 
     def get(self, work_order_id: str) -> WorkOrder | None:
         with self._lock:
@@ -168,6 +170,30 @@ class InMemoryWorkOrderStore:
             }
         )
 
+    def get_inspection(self, inspection_id: str) -> QualityInspection | None:
+        with self._lock:
+            return deepcopy(self._inspections.get(inspection_id))
+
+    def list_inspections(self, limit: int = 100) -> list[QualityInspection]:
+        with self._lock:
+            items = sorted(self._inspections.values(), key=lambda x: x.updated_at, reverse=True)
+            return deepcopy(items[:limit])
+
+    def add_inspection_atomically(self, inspection: QualityInspection, event: DomainEvent) -> None:
+        with self._lock:
+            self._inspections[inspection.inspection_id] = deepcopy(inspection)
+            self._append_event(event)
+
+    def update_inspection_atomically(
+        self, inspection: QualityInspection, expected_version: int, event: DomainEvent
+    ) -> None:
+        with self._lock:
+            current = self._inspections.get(inspection.inspection_id)
+            if current is None or current.version != expected_version:
+                raise InvalidTransition("quality inspection version changed")
+            self._inspections[inspection.inspection_id] = deepcopy(inspection)
+            self._append_event(event)
+
     def get_agent_proposal(self, proposal_id: str) -> AgentProposal | None:
         with self._lock:
             item = self._agent_proposals.get(proposal_id)
@@ -185,9 +211,7 @@ class InMemoryWorkOrderStore:
             )
             return deepcopy(items[:limit])
 
-    def add_agent_proposal_atomically(
-        self, proposal: AgentProposal, event: DomainEvent
-    ) -> None:
+    def add_agent_proposal_atomically(self, proposal: AgentProposal, event: DomainEvent) -> None:
         with self._lock:
             if proposal.fingerprint in self._proposal_fingerprints:
                 return
