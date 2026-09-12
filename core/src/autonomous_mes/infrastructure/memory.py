@@ -294,6 +294,21 @@ class InMemoryWorkOrderStore:
         with self._lock:
             return deepcopy(self._inspections.get(inspection_id))
 
+    def get_inspection_for_operation(
+        self, work_order_id: str, operation_sequence: int
+    ) -> QualityInspection | None:
+        with self._lock:
+            item = next(
+                (
+                    inspection
+                    for inspection in self._inspections.values()
+                    if inspection.work_order_id == work_order_id
+                    and inspection.operation_sequence == operation_sequence
+                ),
+                None,
+            )
+            return deepcopy(item) if item else None
+
     def list_inspections(
         self,
         limit: int = 100,
@@ -434,6 +449,22 @@ class InMemoryWorkOrderStore:
         with self._lock:
             proposal_id = self._proposal_fingerprints.get(fingerprint)
             return self.get_agent_proposal(proposal_id) if proposal_id else None
+
+    def get_quality_recommendation(
+        self, work_order_id: str, operation_sequence: int
+    ) -> AgentProposal | None:
+        with self._lock:
+            item = next(
+                (
+                    proposal
+                    for proposal in self._agent_proposals.values()
+                    if proposal.action == "CREATE_QUALITY_INSPECTION"
+                    and proposal.work_order_id == work_order_id
+                    and proposal.operation_sequence == operation_sequence
+                ),
+                None,
+            )
+            return deepcopy(item) if item else None
 
     def list_agent_proposals(self, limit: int = 100) -> list[AgentProposal]:
         with self._lock:

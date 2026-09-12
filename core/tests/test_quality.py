@@ -1,5 +1,6 @@
 from datetime import UTC, datetime, timedelta
 from unittest import TestCase
+from unittest.mock import Mock
 
 from autonomous_mes.application.agent_runtime import IncidentResponseAgent
 from autonomous_mes.application.agent_tools import ListQualityCandidatesTool, ToolContext
@@ -7,10 +8,12 @@ from autonomous_mes.application.equipment import (
     EquipmentApplicationService,
     RegisterEquipmentCommand,
 )
+from autonomous_mes.application.event_consumers import QualityRecommendationEventPublisher
 from autonomous_mes.application.master_data import (
     ManufacturingResourceApplicationService,
     RegisterManufacturingResourceCommand,
 )
+from autonomous_mes.application.outbox import OutboxMessage
 from autonomous_mes.application.quality import CreateInspectionCommand, QualityApplicationService
 from autonomous_mes.application.work_orders import (
     CreateWorkOrderCommand,
@@ -98,6 +101,25 @@ class QualityWorkflowTests(TestCase):
             )
         return order
 
+    def completed_event(self) -> OutboxMessage:
+        item = next(
+            event
+            for event in self.store.list_outbox()
+            if event["eventType"] == "OperationCompleted"
+        )
+        return OutboxMessage(
+            event_id=str(item["eventId"]),
+            event_type=str(item["eventType"]),
+            schema_version=str(item["schemaVersion"]),
+            aggregate_type=str(item["aggregateType"]),
+            aggregate_id=str(item["aggregateId"]),
+            occurred_at=datetime.fromisoformat(str(item["occurredAt"])),
+            correlation_id=item["correlationId"],
+            causation_id=item["causationId"],
+            payload=item["payload"],
+            attempts=0,
+        )
+
     def test_agent_creates_idempotent_quality_recommendation_draft(self) -> None:
         order = self.completed_order()
         agent = IncidentResponseAgent(self.store)
@@ -110,6 +132,47 @@ class QualityWorkflowTests(TestCase):
         self.assertEqual("OBSERVED", first["status"])
         self.assertEqual("quality-recommendation-agent-v1", first["agentId"])
         self.assertEqual("COMPLETED", self.orders.get(str(order["workOrderId"]))["status"])
+
+    def test_completed_event_creates_one_causally_traced_draft_on_replay(self) -> None:
+        self.completed_order()
+        message = self.completed_event()
+        downstream = Mock()
+        publisher = QualityRecommendationEventPublisher(self.store, downstream)
+
+        publisher.publish(message)
+        publisher.publish(message)
+
+        proposals = IncidentResponseAgent(self.store).list()
+        self.assertEqual(1, len(proposals))
+        self.assertEqual("CREATE_QUALITY_INSPECTION", proposals[0]["action"])
+        created_events = [
+            event
+            for event in self.store.list_outbox()
+            if event["eventType"] == "AgentProposalCreated"
+        ]
+        self.assertEqual(1, len(created_events))
+        self.assertEqual(message.event_id, created_events[0]["causationId"])
+        self.assertEqual(message.event_id, created_events[0]["payload"]["triggerEventId"])
+        self.assertEqual(2, downstream.publish.call_count)
+
+    def test_completed_event_skips_draft_when_inspection_already_exists(self) -> None:
+        order = self.completed_order()
+        message = self.completed_event()
+        self.quality.create(
+            CreateInspectionCommand(
+                "q-before-event",
+                str(order["workOrderId"]),
+                10,
+                1,
+                "inspector",
+            )
+        )
+        downstream = Mock()
+
+        QualityRecommendationEventPublisher(self.store, downstream).publish(message)
+
+        self.assertEqual([], IncidentResponseAgent(self.store).list())
+        downstream.publish.assert_called_once_with(message)
 
     def test_failed_inspection_is_quarantined_and_rework_requires_approval(self) -> None:
         order = self.completed_order()

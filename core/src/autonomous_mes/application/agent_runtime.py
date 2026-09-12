@@ -150,7 +150,12 @@ class IncidentResponseAgent:
         return _serialize(executed)
 
     def recommend_quality_inspection(
-        self, work_order_id: str, operation_sequence: int
+        self,
+        work_order_id: str,
+        operation_sequence: int,
+        *,
+        source_event_id: str | None = None,
+        source_correlation_id: str | None = None,
     ) -> dict[str, Any]:
         work_order = self._work_orders.get(work_order_id)
         operation = next(
@@ -165,17 +170,15 @@ class IncidentResponseAgent:
             raise ValidationError("quality recommendation requires a completed operation")
         if not operation["assignedResourceId"]:
             raise ValidationError("completed operation has no traceable equipment")
-        if any(
-            item.work_order_id == work_order_id
-            and item.operation_sequence == operation_sequence
-            for item in self._store.list_inspections(500)
-        ):
+        if self._store.get_inspection_for_operation(work_order_id, operation_sequence):
             raise InvalidTransition("quality inspection already exists for this operation")
         equipment = self._equipment.get(str(operation["assignedResourceId"]))
-        fingerprint = sha256(
-            f"quality:{work_order_id}:{work_order['version']}:{operation_sequence}".encode()
-        ).hexdigest()
-        proposal = self._store.get_agent_proposal_by_fingerprint(fingerprint)
+        proposal = self._store.get_quality_recommendation(work_order_id, operation_sequence)
+        if proposal is None:
+            fingerprint = sha256(
+                f"quality:{work_order_id}:{operation_sequence}".encode()
+            ).hexdigest()
+            proposal = self._store.get_agent_proposal_by_fingerprint(fingerprint)
         if proposal is None:
             proposal, event = AgentProposal.create(
                 fingerprint,
@@ -190,8 +193,11 @@ class IncidentResponseAgent:
                 "工序已完工且尚无检验任务，建议由检验员创建质量检验。",
                 "该记录仅为建议草稿，不会创建检验、隔离产品或批准返工。",
                 agent_id="quality-recommendation-agent-v1",
+                correlation_id=source_correlation_id,
+                causation_id=source_event_id,
             )
             self._store.add_agent_proposal_atomically(proposal, event)
+            proposal = self._store.get_agent_proposal_by_fingerprint(fingerprint) or proposal
         return _serialize(proposal)
 
 

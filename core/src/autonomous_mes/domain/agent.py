@@ -53,6 +53,8 @@ class AgentProposal:
         narrative_source: str = "RULES",
         model_name: str | None = None,
         agent_id: str = "incident-response-agent-v1",
+        correlation_id: str | None = None,
+        causation_id: str | None = None,
     ) -> tuple["AgentProposal", DomainEvent]:
         now = utc_now()
         proposal = cls(
@@ -89,8 +91,10 @@ class AgentProposal:
                 "equipmentId": equipment_id,
                 "narrativeSource": narrative_source,
                 "modelName": model_name,
+                **({"triggerEventId": causation_id} if causation_id else {}),
             },
-            proposal.proposal_id,
+            correlation_id or proposal.proposal_id,
+            causation_id,
         )
         return proposal, event
 

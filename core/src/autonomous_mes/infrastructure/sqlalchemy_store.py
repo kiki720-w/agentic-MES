@@ -182,8 +182,12 @@ class SqlAlchemyWorkOrderStore:
                 {
                     "eventId": row.event_id,
                     "eventType": row.event_type,
+                    "aggregateType": row.aggregate_type,
                     "aggregateId": row.aggregate_id,
                     "occurredAt": row.occurred_at.isoformat(),
+                    "correlationId": row.correlation_id,
+                    "causationId": row.causation_id,
+                    "schemaVersion": row.schema_version,
                     "payload": row.payload,
                     "publishStatus": row.publish_status,
                 }
@@ -220,8 +224,12 @@ class SqlAlchemyWorkOrderStore:
                 {
                     "eventId": row.event_id,
                     "eventType": row.event_type,
+                    "aggregateType": row.aggregate_type,
                     "aggregateId": row.aggregate_id,
                     "occurredAt": row.occurred_at.isoformat(),
+                    "correlationId": row.correlation_id,
+                    "causationId": row.causation_id,
+                    "schemaVersion": row.schema_version,
                     "payload": row.payload,
                     "publishStatus": row.publish_status,
                 }
@@ -364,6 +372,22 @@ class SqlAlchemyWorkOrderStore:
             )
             return _proposal_to_domain(row) if row else None
 
+    def get_quality_recommendation(
+        self, work_order_id: str, operation_sequence: int
+    ) -> AgentProposal | None:
+        with self._sessions() as session:
+            row = session.scalar(
+                select(AgentProposalRow)
+                .where(
+                    AgentProposalRow.action == "CREATE_QUALITY_INSPECTION",
+                    AgentProposalRow.work_order_id == work_order_id,
+                    AgentProposalRow.operation_sequence == operation_sequence,
+                )
+                .order_by(AgentProposalRow.created_at)
+                .limit(1)
+            )
+            return _proposal_to_domain(row) if row else None
+
     def list_agent_proposals(self, limit: int = 100) -> list[AgentProposal]:
         with self._sessions() as session:
             rows = session.scalars(
@@ -398,6 +422,21 @@ class SqlAlchemyWorkOrderStore:
     def get_inspection(self, inspection_id: str) -> QualityInspection | None:
         with self._sessions() as session:
             row = session.get(QualityInspectionRow, inspection_id)
+            return _inspection_to_domain(row) if row else None
+
+    def get_inspection_for_operation(
+        self, work_order_id: str, operation_sequence: int
+    ) -> QualityInspection | None:
+        with self._sessions() as session:
+            row = session.scalar(
+                select(QualityInspectionRow)
+                .where(
+                    QualityInspectionRow.work_order_id == work_order_id,
+                    QualityInspectionRow.operation_sequence == operation_sequence,
+                )
+                .order_by(QualityInspectionRow.created_at)
+                .limit(1)
+            )
             return _inspection_to_domain(row) if row else None
 
     def list_inspections(

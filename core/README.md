@@ -75,6 +75,14 @@ docker compose up -d postgres
 
 Worker通过数据库租约领取事件；失败会指数退避，超过上限进入`QUARANTINED`，支持陈旧租约恢复和带操作者/原因的人工重放。
 
+显式启用事件驱动质量Agent并持续消费：
+
+```powershell
+.\.venv\Scripts\python.exe -m autonomous_mes.worker --quality-agent-auto-draft --watch --poll-seconds 1
+```
+
+它只在`OperationCompleted`后生成去重、可追溯的R2质检建议草稿。已有检验时跳过；重复投递不会重复建草稿。该Worker不创建检验、不隔离产品，也不批准返工。未提供`--quality-agent-auto-draft`时保持普通事件发布行为。
+
 启动服务后访问`http://127.0.0.1:8000/`，可以查看工单指标、制造事件流、设备状态，创建演示工单并模拟机床采集。遥测样本使用`sampleId`去重，旧时间戳不能覆盖当前状态；`DOWN`和`ALARM`必须携带停机原因或报警码。该页面使用原生HTML/CSS/JavaScript，无需Node构建环境。
 
 派工必须选择同一工作中心内状态为`IDLE`或`RUNNING`的已注册设备。绑定设备上报`DOWN`或`ALARM`后，正在执行的工序和工单会自动进入`SUSPENDED`并产生联锁事件。设备未恢复时禁止复工；恢复为健康状态后仍需由人员或受控Agent明确调用`resume`，系统不会因一次正常心跳自行恢复生产。
@@ -114,6 +122,8 @@ Agent可通过`POST /api/v1/agent-tools/get-product-genealogy`读取序列号谱
 迁移`0017`已建立`work_order_operations`独立工序表并回填原JSON。工单聚合写入会在同一事务内同步更新JSON兼容字段、关系工序、Outbox和幂等记录；质量页面的待检池改为全库数据库查询，不再受最近100个工单窗口限制。旧JSON仍作为兼容读路径保留，待一致性观测稳定后再决定是否移除。
 
 工序兼容期已增加在线投影巡检：PostgreSQL在数据库内比较JSON与`work_order_operations`的数量和业务字段，返回`CONSISTENT`或`DRIFT_DETECTED`供监控告警。质量Agent只能通过`list_quality_candidates`按获授权车间分页读取待检候选；该R1工具的允许与拒绝都会审计，且没有创建检验或修改数据库的能力。
+
+质量Agent可由独立Outbox Worker消费`OperationCompleted`事件，按当前权威状态自动生成`CREATE_QUALITY_INSPECTION`的R2/`OBSERVED`草稿。去重目标固定为工单与工序，事件重放或工单后续版本变化不会重复生成；提案事件保存源事件因果ID。自动化没有检验写接口，建议转检验仍需质量角色明确确认。
 
 启用 DeepSeek 时只需在本机 `.env` 设置 `AUTONOMOUS_MES_DEEPSEEK_API_KEY` 并重启 API。默认使用 `deepseek-v4-flash`、JSON 输出、关闭思考模式和 12 秒超时。每条提案记录 `narrativeSource` 与 `modelName`；不要把真实密钥写入仓库。
 

@@ -117,6 +117,10 @@ class AgentProposalStore(Protocol):
 
     def get_agent_proposal_by_fingerprint(self, fingerprint: str) -> AgentProposal | None: ...
 
+    def get_quality_recommendation(
+        self, work_order_id: str, operation_sequence: int
+    ) -> AgentProposal | None: ...
+
     def list_agent_proposals(self, limit: int = 100) -> list[AgentProposal]: ...
 
     def add_agent_proposal_atomically(
@@ -126,6 +130,9 @@ class AgentProposalStore(Protocol):
 
 class QualityStore(Protocol):
     def get_inspection(self, inspection_id: str) -> QualityInspection | None: ...
+    def get_inspection_for_operation(
+        self, work_order_id: str, operation_sequence: int
+    ) -> QualityInspection | None: ...
     def list_inspections(
         self,
         limit: int = 100,
