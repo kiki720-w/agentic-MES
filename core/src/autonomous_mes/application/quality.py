@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Any
 
 from autonomous_mes.domain.errors import NotFound, ValidationError
@@ -46,9 +47,20 @@ class QualityApplicationService:
         expected_version: int,
         actor_id: str,
         correlation_id: str,
+        gauge_id: str,
+        calibration_due_at: datetime,
+        measurement_recorded_at: datetime,
     ) -> dict[str, Any]:
         current = self._require(inspection_id)
-        changed = current.record(passed, defect_code, notes, expected_version)
+        changed = current.record(
+            passed,
+            defect_code,
+            notes,
+            expected_version,
+            gauge_id,
+            calibration_due_at,
+            measurement_recorded_at,
+        )
         self._store.update_inspection_atomically(
             changed,
             current.version,
@@ -99,6 +111,11 @@ def _serialize(x: QualityInspection) -> dict[str, Any]:
         "defectCode": x.defect_code,
         "notes": x.notes,
         "reworkRoute": x.rework_route,
+        "gaugeId": x.gauge_id,
+        "calibrationDueAt": x.calibration_due_at.isoformat() if x.calibration_due_at else None,
+        "measurementRecordedAt": (
+            x.measurement_recorded_at.isoformat() if x.measurement_recorded_at else None
+        ),
         "createdAt": x.created_at.isoformat(),
         "updatedAt": x.updated_at.isoformat(),
     }

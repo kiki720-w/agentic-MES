@@ -7,6 +7,7 @@ from autonomous_mes.domain.genealogy import (
     ExecutionSession,
     GenealogyLink,
     MaterialConsumption,
+    ProcessResourceEvidence,
     ProductUnit,
 )
 
@@ -29,6 +30,15 @@ class MaterialLotInput:
 
 
 @dataclass(frozen=True)
+class ProcessResourceInput:
+    resource_type: str
+    resource_id: str
+    revision: str | None
+    status: str
+    life_remaining_percent: float | None = None
+
+
+@dataclass(frozen=True)
 class RecordExecutionSessionCommand:
     correlation_id: str
     session_id: str
@@ -39,6 +49,7 @@ class RecordExecutionSessionCommand:
     started_at: datetime
     ended_at: datetime
     materials: list[MaterialLotInput]
+    resources: list[ProcessResourceInput] | None = None
 
 
 class GenealogyApplicationService:
@@ -104,6 +115,16 @@ class GenealogyApplicationService:
             raise InvalidTransition("execution evidence requires a completed operation")
         if operation.assigned_resource_id != command.equipment_id:
             raise InvalidTransition("equipment does not match the dispatched operation")
+        resources = [
+            ProcessResourceEvidence.create(
+                item.resource_type,
+                item.resource_id,
+                item.revision,
+                item.status,
+                item.life_remaining_percent,
+            )
+            for item in (command.resources or [])
+        ]
         session = ExecutionSession.create(
             command.session_id,
             serial,
@@ -113,6 +134,7 @@ class GenealogyApplicationService:
             command.equipment_id,
             command.started_at,
             command.ended_at,
+            resources,
         )
         materials = [
             session.consume(item.material_lot, item.quantity, item.unit)
@@ -129,6 +151,16 @@ class GenealogyApplicationService:
                 unit, "CONSUMED_MATERIAL", "MaterialLot", item.material_lot, command.operation_sequence
             )
             for item in materials
+        )
+        links.extend(
+            ProductUnit.link(
+                unit,
+                "USED_RESOURCE",
+                item.resource_type.title().replace("_", ""),
+                f"{item.resource_id}@{item.revision}" if item.revision else item.resource_id,
+                command.operation_sequence,
+            )
+            for item in resources
         )
         self._store.add_execution_session_atomically(
             session, materials, links, session.event(materials, command.correlation_id)
@@ -161,6 +193,10 @@ class GenealogyApplicationService:
                     "status": item.status.value,
                     "result": item.result,
                     "defectCode": item.defect_code,
+                    "gaugeId": item.gauge_id,
+                    "calibrationDueAt": (
+                        item.calibration_due_at.isoformat() if item.calibration_due_at else None
+                    ),
                     "updatedAt": item.updated_at.isoformat(),
                 }
                 for item in inspections
@@ -202,5 +238,15 @@ def _serialize_session(
                 "recordedAt": material.recorded_at.isoformat(),
             }
             for material in materials
+        ],
+        "resources": [
+            {
+                "resourceType": resource.resource_type,
+                "resourceId": resource.resource_id,
+                "revision": resource.revision,
+                "status": resource.status,
+                "lifeRemainingPercent": resource.life_remaining_percent,
+            }
+            for resource in item.resources
         ],
     }

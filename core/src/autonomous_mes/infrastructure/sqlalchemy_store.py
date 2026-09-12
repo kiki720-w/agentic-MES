@@ -372,6 +372,16 @@ class SqlAlchemyWorkOrderStore:
                         started_at=execution.started_at,
                         ended_at=execution.ended_at,
                         created_at=execution.created_at,
+                        resource_context=[
+                            {
+                                "resource_type": item.resource_type,
+                                "resource_id": item.resource_id,
+                                "revision": item.revision,
+                                "status": item.status,
+                                "life_remaining_percent": item.life_remaining_percent,
+                            }
+                            for item in execution.resources
+                        ],
                     )
                 )
                 session.flush()
@@ -602,6 +612,9 @@ def _inspection_values(item: QualityInspection, *, include_id: bool = True) -> d
         "rework_route": list(item.rework_route),
         "created_at": item.created_at,
         "updated_at": item.updated_at,
+        "gauge_id": item.gauge_id,
+        "calibration_due_at": item.calibration_due_at,
+        "measurement_recorded_at": item.measurement_recorded_at,
     }
     if include_id:
         values["inspection_id"] = item.inspection_id
@@ -622,6 +635,9 @@ def _inspection_to_domain(row: QualityInspectionRow) -> QualityInspection:
         list(row.rework_route),
         row.created_at,
         row.updated_at,
+        row.gauge_id,
+        row.calibration_due_at,
+        row.measurement_recorded_at,
     )
 
 
@@ -648,6 +664,8 @@ def _genealogy_link_to_domain(row: GenealogyLinkRow) -> GenealogyLink:
 
 
 def _execution_session_to_domain(row: ExecutionSessionRow) -> ExecutionSession:
+    from autonomous_mes.domain.genealogy import ProcessResourceEvidence
+
     return ExecutionSession(
         row.session_id,
         row.product_serial,
@@ -658,6 +676,7 @@ def _execution_session_to_domain(row: ExecutionSessionRow) -> ExecutionSession:
         row.started_at,
         row.ended_at,
         row.created_at,
+        tuple(ProcessResourceEvidence(**item) for item in row.resource_context),
     )
 
 

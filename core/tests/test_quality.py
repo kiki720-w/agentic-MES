@@ -1,4 +1,4 @@
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from unittest import TestCase
 
 from autonomous_mes.application.agent_runtime import IncidentResponseAgent
@@ -91,7 +91,16 @@ class QualityWorkflowTests(TestCase):
             CreateInspectionCommand("q", str(order["workOrderId"]), 10, 1, "inspector")
         )
         inspection = self.quality.record(
-            str(inspection["inspectionId"]), False, "DIM-001", "轴径超差", 1, "inspector", "q2"
+            str(inspection["inspectionId"]),
+            False,
+            "DIM-001",
+            "轴径超差",
+            1,
+            "inspector",
+            "q2",
+            "GAUGE-01",
+            datetime.now(UTC) + timedelta(days=30),
+            datetime.now(UTC),
         )
         assert inspection["status"] == "QUARANTINED"
         inspection = self.quality.approve_rework(
@@ -106,3 +115,23 @@ class QualityWorkflowTests(TestCase):
             "ProductQuarantined",
             "ReworkRouteApproved",
         ]
+
+    def test_expired_gauge_cannot_record_result(self) -> None:
+        order = self.completed_order()
+        inspection = self.quality.create(
+            CreateInspectionCommand("q-exp", str(order["workOrderId"]), 10, 1, "inspector")
+        )
+        now = datetime.now(UTC)
+        with self.assertRaisesRegex(Exception, "calibration expired"):
+            self.quality.record(
+                str(inspection["inspectionId"]),
+                True,
+                None,
+                None,
+                1,
+                "inspector",
+                "q-exp-result",
+                "GAUGE-EXPIRED",
+                now - timedelta(days=1),
+                now,
+            )

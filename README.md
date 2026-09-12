@@ -41,6 +41,9 @@
 - `docs/step-12-goal-alignment-and-quality-draft.md`：初始目标对齐审计、L2/L3隔离与质量建议草稿验收记录
 - `docs/step-13-product-genealogy-acceptance.md`：产品序列号制造谱系第一条垂直切片验收记录
 - `docs/step-14-execution-material-trace-acceptance.md`：加工会话、人员与物料批次谱系验收记录
+- `docs/step-15-process-resource-trace-acceptance.md`：刀具、夹具与NC程序实绩校验和追溯验收记录
+- `docs/step-16-gauge-calibration-trace-acceptance.md`：量具校准有效性和检验实绩追溯验收记录
+- `docs/step-17-agent-genealogy-tool-acceptance.md`：Agent完整制造谱系只读工具与范围审计验收记录
 
 ## 当前决策门
 

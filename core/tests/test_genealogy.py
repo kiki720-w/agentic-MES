@@ -1,6 +1,7 @@
 import unittest
 from datetime import UTC, datetime, timedelta
 
+from autonomous_mes.application.agent_tools import GetProductGenealogyTool, ToolContext
 from autonomous_mes.application.equipment import (
     EquipmentApplicationService,
     RegisterEquipmentCommand,
@@ -8,6 +9,7 @@ from autonomous_mes.application.equipment import (
 from autonomous_mes.application.genealogy import (
     GenealogyApplicationService,
     MaterialLotInput,
+    ProcessResourceInput,
     RecordExecutionSessionCommand,
     RegisterProductUnitCommand,
 )
@@ -19,7 +21,7 @@ from autonomous_mes.application.work_orders import (
     WorkOrderApplicationService,
 )
 from autonomous_mes.domain.errors import IdempotencyConflict, InvalidTransition
-from autonomous_mes.infrastructure.memory import InMemoryWorkOrderStore
+from autonomous_mes.infrastructure.memory import InMemoryWorkOrderStore, ScopedReadPolicy
 
 
 class GenealogyTests(unittest.TestCase):
@@ -88,6 +90,11 @@ class GenealogyTests(unittest.TestCase):
                 started,
                 started + timedelta(minutes=6),
                 [MaterialLotInput("steel-lot-9", 1.25, "kg")],
+                [
+                    ProcessResourceInput("TOOL", "tool-7", None, "AVAILABLE", 62.5),
+                    ProcessResourceInput("FIXTURE", "fixture-3", None, "AVAILABLE"),
+                    ProcessResourceInput("NC_PROGRAM", "shaft-turn", "r12", "RELEASED"),
+                ],
             )
         )
         trace = self.genealogy.get("SN-TRACE-1")
@@ -97,6 +104,8 @@ class GenealogyTests(unittest.TestCase):
         self.assertEqual(1, len(trace["executionSessions"]))
         self.assertIn("Person", {item["objectType"] for item in trace["links"]})
         self.assertIn("MaterialLot", {item["objectType"] for item in trace["links"]})
+        self.assertIn("Tool", {item["objectType"] for item in trace["links"]})
+        self.assertEqual("R12", result["resources"][2]["revision"])
         self.assertEqual("ExecutionSessionRecorded", self.store.list_outbox()[-1]["eventType"])
 
     def test_execution_rejects_wrong_equipment_and_duplicate_session(self) -> None:
@@ -128,6 +137,55 @@ class GenealogyTests(unittest.TestCase):
                     datetime.now(UTC),
                     [MaterialLotInput("steel-lot-11", 1, "piece")],
                 )
+            )
+
+    def test_execution_rejects_expired_tool_or_unreleased_program(self) -> None:
+        started = datetime.now(UTC) - timedelta(minutes=4)
+        base = {
+            "correlation_id": "unsafe",
+            "session_id": "SESSION-UNSAFE",
+            "product_serial": "SN-TRACE-1",
+            "operation_sequence": 10,
+            "operator_id": "operator-7",
+            "equipment_id": self.equipment_id,
+            "started_at": started,
+            "ended_at": datetime.now(UTC),
+            "materials": [MaterialLotInput("steel-lot-12", 1, "piece")],
+        }
+        with self.assertRaisesRegex(Exception, "tool life"):
+            self.genealogy.record_execution(
+                RecordExecutionSessionCommand(
+                    **base,
+                    resources=[ProcessResourceInput("TOOL", "T-1", None, "AVAILABLE", 0)],
+                )
+            )
+        with self.assertRaisesRegex(Exception, "released revision"):
+            self.genealogy.record_execution(
+                RecordExecutionSessionCommand(
+                    **base,
+                    resources=[ProcessResourceInput("NC_PROGRAM", "P-1", "R1", "DRAFT")],
+                )
+            )
+
+    def test_agent_genealogy_tool_enforces_scope_and_audits(self) -> None:
+        tool = GetProductGenealogyTool(
+            self.store, ScopedReadPolicy({"planner": {"WS-MACH-01"}})
+        )
+        result = tool.execute(
+            ToolContext("trace-request", "trace-agent", "planner", "explain trace"),
+            "SN-TRACE-1",
+        )
+        self.assertEqual("R1", result["risk"])
+        self.assertEqual("ALLOW", result["policyDecision"])
+        self.assertEqual("AgentToolCallRecorded", self.store.list_outbox()[-1]["eventType"])
+
+        denied = GetProductGenealogyTool(
+            self.store, ScopedReadPolicy({"outsider": {"WS-OTHER"}})
+        )
+        with self.assertRaisesRegex(Exception, "not authorized"):
+            denied.execute(
+                ToolContext("trace-denied", "trace-agent", "outsider", "read trace"),
+                "SN-TRACE-1",
             )
 
 

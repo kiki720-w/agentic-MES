@@ -18,6 +18,7 @@
 | get_machine_status | equipmentId、asOf | 当前状态、报警、数据新鲜度 | R0 | 授权设备只读 | 无 |
 | get_product_genealogy | productSerial | 人机料法测关联及版本 | R1 | 产品/客户数据范围 | 无 |
 | get_quality_results | productSerial | 计划版本、结果、不合格和处置 | R1 | 质量数据范围 | 无 |
+| get_product_genealogy | productSerial | 人、机、料、法、测完整谱系与证据时间 | R1 | 关联工单车间范围 | 无 |
 | list_active_exceptions | workshopId、severity、limit | 活动异常和关联对象 | R0 | 授权车间只读 | 无 |
 | search_work_instruction | query、productId、operationCode | 有效作业指导书片段和版本 | R1 | 文档密级范围 | 无 |
 | create_recommendation_draft | type、objectRefs、summary、evidence、risk | recommendationId、状态 | R2 | Agent可创建；人类查看 | 仅新增建议草稿 |
@@ -63,4 +64,3 @@ R0=普通只读；R1=敏感只读；R2=非生产写入；R3=生产事务写入�
 - 禁用安全联锁或绕过审批
 
 未来进入 L3 时，只能新增业务含义明确、参数收敛、可幂等、可审计、可回滚且通过风险评审的专用工具。
-

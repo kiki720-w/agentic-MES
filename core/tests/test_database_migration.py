@@ -48,6 +48,12 @@ class DatabaseMigrationTests(unittest.TestCase):
             )
             outbox_indexes = {item["name"] for item in schema.get_indexes("event_outbox")}
             self.assertIn("ix_event_outbox_pending", outbox_indexes)
+            execution_columns = {
+                item["name"] for item in schema.get_columns("execution_sessions")
+            }
+            self.assertIn("resource_context", execution_columns)
+            quality_columns = {item["name"] for item in schema.get_columns("quality_inspections")}
+            self.assertIn("gauge_id", quality_columns)
             engine.dispose()
 
 

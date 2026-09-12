@@ -77,6 +77,46 @@ class MaterialConsumption:
 
 
 @dataclass(frozen=True)
+class ProcessResourceEvidence:
+    resource_type: str
+    resource_id: str
+    revision: str | None
+    status: str
+    life_remaining_percent: float | None = None
+
+    @classmethod
+    def create(
+        cls,
+        resource_type: str,
+        resource_id: str,
+        revision: str | None,
+        status: str,
+        life_remaining_percent: float | None = None,
+    ) -> "ProcessResourceEvidence":
+        kind = resource_type.strip().upper()
+        state = status.strip().upper()
+        if kind not in {"TOOL", "FIXTURE", "NC_PROGRAM"}:
+            raise ValidationError("resource type must be TOOL, FIXTURE or NC_PROGRAM")
+        if not resource_id.strip():
+            raise ValidationError("process resource id is required")
+        if kind == "NC_PROGRAM" and (not revision or state != "RELEASED"):
+            raise ValidationError("NC program requires a released revision")
+        if kind in {"TOOL", "FIXTURE"} and state != "AVAILABLE":
+            raise ValidationError(f"{kind.lower()} is not available")
+        if kind == "TOOL" and (
+            life_remaining_percent is None or not 0 < life_remaining_percent <= 100
+        ):
+            raise ValidationError("tool life remaining must be greater than 0 and at most 100")
+        return cls(
+            kind,
+            resource_id.strip().upper(),
+            revision.strip().upper() if revision else None,
+            state,
+            life_remaining_percent,
+        )
+
+
+@dataclass(frozen=True)
 class ExecutionSession:
     session_id: str
     product_serial: str
@@ -87,6 +127,7 @@ class ExecutionSession:
     started_at: datetime
     ended_at: datetime
     created_at: datetime
+    resources: tuple[ProcessResourceEvidence, ...] = ()
 
     @classmethod
     def create(
@@ -99,6 +140,7 @@ class ExecutionSession:
         equipment_id: str,
         started_at: datetime,
         ended_at: datetime,
+        resources: list[ProcessResourceEvidence] | None = None,
     ) -> "ExecutionSession":
         if not operator_id.strip():
             raise ValidationError("operator id is required")
@@ -116,6 +158,7 @@ class ExecutionSession:
             started_at,
             ended_at,
             utc_now(),
+            tuple(resources or []),
         )
 
     def consume(self, material_lot: str, quantity: float, unit: str) -> MaterialConsumption:
@@ -146,6 +189,10 @@ class ExecutionSession:
                 "operatorId": self.operator_id,
                 "equipmentId": self.equipment_id,
                 "materialLots": [item.material_lot for item in materials],
+                "processResources": [
+                    {"type": item.resource_type, "id": item.resource_id, "revision": item.revision}
+                    for item in self.resources
+                ],
             },
             correlation_id,
         )

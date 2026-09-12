@@ -173,6 +173,9 @@ class QualityInspectionRow(Base):
     rework_route: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    gauge_id: Mapped[str | None] = mapped_column(String(64), index=True)
+    calibration_due_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    measurement_recorded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 class ProductUnitRow(Base):
@@ -223,6 +226,7 @@ class ExecutionSessionRow(Base):
     started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     ended_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    resource_context: Mapped[list[dict[str, Any]]] = mapped_column(JSON, nullable=False, default=list)
 
 
 class MaterialConsumptionRow(Base):

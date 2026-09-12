@@ -28,6 +28,9 @@ class QualityInspection:
     rework_route: list[str]
     created_at: datetime
     updated_at: datetime
+    gauge_id: str | None = None
+    calibration_due_at: datetime | None = None
+    measurement_recorded_at: datetime | None = None
 
     @classmethod
     def create(
@@ -52,12 +55,23 @@ class QualityInspection:
         )
 
     def record(
-        self, passed: bool, defect_code: str | None, notes: str | None, expected_version: int
+        self,
+        passed: bool,
+        defect_code: str | None,
+        notes: str | None,
+        expected_version: int,
+        gauge_id: str,
+        calibration_due_at: datetime,
+        measurement_recorded_at: datetime,
     ) -> "QualityInspection":
         if expected_version != self.version or self.status is not InspectionStatus.OPEN:
             raise InvalidTransition("inspection is no longer open or version changed")
         if not passed and not (defect_code or "").strip():
             raise ValidationError("defect code is required for a failed inspection")
+        if not gauge_id.strip():
+            raise ValidationError("gauge id is required")
+        if calibration_due_at < measurement_recorded_at:
+            raise ValidationError("gauge calibration expired before measurement")
         return replace(
             self,
             status=InspectionStatus.PASSED if passed else InspectionStatus.QUARANTINED,
@@ -65,6 +79,9 @@ class QualityInspection:
             result="PASS" if passed else "FAIL",
             defect_code=defect_code,
             notes=notes,
+            gauge_id=gauge_id.strip().upper(),
+            calibration_due_at=calibration_due_at,
+            measurement_recorded_at=measurement_recorded_at,
             updated_at=utc_now(),
         )
 
@@ -94,6 +111,10 @@ class QualityInspection:
                 "result": self.result,
                 "defectCode": self.defect_code,
                 "reworkRoute": self.rework_route,
+                "gaugeId": self.gauge_id,
+                "calibrationDueAt": (
+                    self.calibration_due_at.isoformat() if self.calibration_due_at else None
+                ),
                 "actorId": actor_id,
             },
         )

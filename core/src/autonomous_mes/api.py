@@ -7,7 +7,11 @@ from fastapi.responses import HTMLResponse, JSONResponse
 from pydantic import BaseModel, ConfigDict, Field
 
 from autonomous_mes.application.agent_runtime import FallbackNarrator, IncidentResponseAgent
-from autonomous_mes.application.agent_tools import GetWorkOrderTool, ToolContext
+from autonomous_mes.application.agent_tools import (
+    GetProductGenealogyTool,
+    GetWorkOrderTool,
+    ToolContext,
+)
 from autonomous_mes.application.equipment import (
     EquipmentApplicationService,
     RecordTelemetryCommand,
@@ -16,6 +20,7 @@ from autonomous_mes.application.equipment import (
 from autonomous_mes.application.genealogy import (
     GenealogyApplicationService,
     MaterialLotInput,
+    ProcessResourceInput,
     RecordExecutionSessionCommand,
     RegisterProductUnitCommand,
 )
@@ -89,6 +94,15 @@ class AgentToolBody(BaseModel):
     workOrderId: str
 
 
+class ProductGenealogyToolBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    requestId: str
+    agentId: str
+    subjectId: str
+    purpose: str
+    productSerial: str
+
+
 class RegisterEquipmentBody(BaseModel):
     model_config = ConfigDict(extra="forbid")
     code: str
@@ -131,6 +145,9 @@ class InspectionResultBody(BaseModel):
     defectCode: str | None = None
     notes: str | None = None
     actorId: str
+    gaugeId: str
+    calibrationDueAt: datetime
+    measurementRecordedAt: datetime
 
 
 class ReworkApprovalBody(BaseModel):
@@ -159,6 +176,15 @@ class MaterialConsumptionBody(BaseModel):
     unit: str
 
 
+class ProcessResourceBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    resourceType: str
+    resourceId: str
+    revision: str | None = None
+    status: str
+    lifeRemainingPercent: float | None = None
+
+
 class RecordExecutionSessionBody(BaseModel):
     model_config = ConfigDict(extra="forbid")
     sessionId: str = Field(min_length=1, max_length=96)
@@ -168,6 +194,7 @@ class RecordExecutionSessionBody(BaseModel):
     startedAt: datetime
     endedAt: datetime
     materials: list[MaterialConsumptionBody] = Field(min_length=1)
+    resources: list[ProcessResourceBody] = Field(default_factory=list)
 
 
 settings = Settings()
@@ -212,6 +239,7 @@ quality_service = QualityApplicationService(store, store)
 genealogy_service = GenealogyApplicationService(store)
 policy = ScopedReadPolicy({"demo-planner": {"WS-MACH-01"}})
 get_work_order_tool = GetWorkOrderTool(store, policy, store)
+get_product_genealogy_tool = GetProductGenealogyTool(store, policy)
 app = FastAPI(title="Autonomous MES Core", version="0.1.0")
 dashboard_path = Path(__file__).parent / "static" / "dashboard.html"
 
@@ -363,6 +391,16 @@ def record_execution_session(
                 MaterialLotInput(item.materialLot, item.quantity, item.unit)
                 for item in body.materials
             ],
+            [
+                ProcessResourceInput(
+                    item.resourceType,
+                    item.resourceId,
+                    item.revision,
+                    item.status,
+                    item.lifeRemainingPercent,
+                )
+                for item in body.resources
+            ],
         )
     )
 
@@ -386,6 +424,9 @@ def record_quality_result(inspection_id: str, body: InspectionResultBody) -> dic
         body.expectedVersion,
         body.actorId,
         str(uuid4()),
+        body.gaugeId,
+        body.calibrationDueAt,
+        body.measurementRecordedAt,
     )
 
 
@@ -524,4 +565,12 @@ def agent_get_work_order(body: AgentToolBody) -> dict[str, object]:
             purpose=body.purpose,
         ),
         body.workOrderId,
+    )
+
+
+@app.post("/api/v1/agent-tools/get-product-genealogy")
+def agent_get_product_genealogy(body: ProductGenealogyToolBody) -> dict[str, object]:
+    return get_product_genealogy_tool.execute(
+        ToolContext(body.requestId, body.agentId, body.subjectId, body.purpose),
+        body.productSerial,
     )
