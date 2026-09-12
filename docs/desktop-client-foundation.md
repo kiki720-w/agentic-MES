@@ -38,4 +38,4 @@
 - electron-builder Windows portable：通过。
 - 本机启动：窗口标题 `CAPAXION`，Core `/health/ready` 返回 `READY`。
 - 1280×720 界面渲染检查：侧栏、主会话、输入框和右侧状态区无重叠或截断。
-
+- Windows 打包运行回归：修正 Electron 44 中 `scrollIntoView()` 返回对象被 React 误识别为 effect 清理函数导致的黑屏。

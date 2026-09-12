@@ -147,7 +147,9 @@ function AgentWorkspace({ health }) {
   const [spreadsheetPreview, setSpreadsheetPreview] = useState(null);
   const endRef = useRef(null);
 
-  useEffect(() => endRef.current?.scrollIntoView({ behavior: "smooth" }), [messages, sending]);
+  useEffect(() => {
+    endRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages, sending]);
 
   async function pickFiles() {
     const picked = await desktop.files.pick();
