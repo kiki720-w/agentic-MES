@@ -249,6 +249,8 @@ class ApiContractTests(unittest.TestCase):
             page = self.client.get(path)
             self.assertEqual(200, page.status_code)
             self.assertIn("Agent 工作台", page.text)
+            if path == "/planning/results":
+                self.assertIn("planWorkdays(p.horizonStart,6)", page.text)
 
     def test_dashboard_and_read_models_are_available(self):
         dashboard = self.client.get("/")
