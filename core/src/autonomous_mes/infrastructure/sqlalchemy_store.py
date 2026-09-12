@@ -5,6 +5,7 @@ from sqlalchemy import select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 
+from autonomous_mes.application.connector_security import ConnectorReceipt
 from autonomous_mes.application.ports import IdempotentResult
 from autonomous_mes.domain.agent import AgentProposal, ProposalStatus
 from autonomous_mes.domain.equipment import Equipment, EquipmentState, TelemetrySample
@@ -29,6 +30,7 @@ from autonomous_mes.domain.work_order import (
 from .models import (
     AgentProposalRow,
     AgentToolAuditRow,
+    ConnectorReceiptRow,
     EquipmentRow,
     EquipmentTelemetryRow,
     EventOutboxRow,
@@ -510,6 +512,20 @@ class SqlAlchemyWorkOrderStore:
             raise IdempotencyConflict(
                 "manufacturing resource batch contains duplicate key"
             ) from exc
+
+    def record_connector_receipt(self, receipt: ConnectorReceipt) -> None:
+        try:
+            with self._sessions.begin() as session:
+                session.add(
+                    ConnectorReceiptRow(
+                        nonce=receipt.nonce,
+                        key_id=receipt.key_id,
+                        request_digest=receipt.request_digest,
+                        received_at=receipt.received_at,
+                    )
+                )
+        except IntegrityError as exc:
+            raise IdempotencyConflict("connector nonce was already used") from exc
 
 
 def _row_values(item: WorkOrder) -> dict[str, Any]:

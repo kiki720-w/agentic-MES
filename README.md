@@ -47,6 +47,7 @@
 - `docs/step-18-resource-master-data-center-acceptance.md`：内置制造资源权威台账与外部来源适配边界验收记录
 - `docs/step-19-resource-console-acceptance.md`：制造资源可视化台账与通用登记表单验收记录
 - `docs/step-20-resource-csv-import-acceptance.md`：通用CSV模板、预检指纹与原子批量导入验收记录
+- `docs/step-21-signed-inbound-connector-acceptance.md`：HMAC签名入站连接器与防重放验收记录
 
 ## 当前决策门
 

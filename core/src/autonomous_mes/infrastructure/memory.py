@@ -2,6 +2,7 @@ from copy import deepcopy
 from threading import RLock
 from typing import Any
 
+from autonomous_mes.application.connector_security import ConnectorReceipt
 from autonomous_mes.application.ports import IdempotentResult
 from autonomous_mes.domain.agent import AgentProposal, ProposalStatus
 from autonomous_mes.domain.equipment import Equipment, TelemetrySample
@@ -38,6 +39,7 @@ class InMemoryWorkOrderStore:
         self._execution_sessions: dict[str, ExecutionSession] = {}
         self._material_consumptions: dict[str, list[MaterialConsumption]] = {}
         self._manufacturing_resources: dict[str, ManufacturingResource] = {}
+        self._connector_nonces: set[str] = set()
 
     def get(self, work_order_id: str) -> WorkOrder | None:
         with self._lock:
@@ -335,6 +337,12 @@ class InMemoryWorkOrderStore:
             )
             for event in events:
                 self._append_event(event)
+
+    def record_connector_receipt(self, receipt: ConnectorReceipt) -> None:
+        with self._lock:
+            if receipt.nonce in self._connector_nonces:
+                raise IdempotencyConflict("connector nonce was already used")
+            self._connector_nonces.add(receipt.nonce)
 
 
 class ScopedReadPolicy:

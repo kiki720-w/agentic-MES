@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from typing import Any, Protocol
+from typing import TYPE_CHECKING, Any, Protocol
 
 from autonomous_mes.domain.agent import AgentProposal, ProposalStatus
 from autonomous_mes.domain.equipment import Equipment, TelemetrySample
@@ -13,6 +13,9 @@ from autonomous_mes.domain.genealogy import (
 from autonomous_mes.domain.master_data import ManufacturingResource
 from autonomous_mes.domain.quality import QualityInspection
 from autonomous_mes.domain.work_order import WorkOrder
+
+if TYPE_CHECKING:
+    from .connector_security import ConnectorReceipt
 
 
 @dataclass(frozen=True)
@@ -132,6 +135,10 @@ class ManufacturingResourceStore(Protocol):
     ) -> None: ...
 
 
+class ConnectorSecurityStore(Protocol):
+    def record_connector_receipt(self, receipt: "ConnectorReceipt") -> None: ...
+
+
 class MesStore(
     WorkOrderStore,
     EquipmentStore,
@@ -139,6 +146,7 @@ class MesStore(
     QualityStore,
     GenealogyStore,
     ManufacturingResourceStore,
+    ConnectorSecurityStore,
     ToolAuditSink,
     Protocol,
 ):

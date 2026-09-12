@@ -94,6 +94,8 @@ Agent可通过`POST /api/v1/agent-tools/get-product-genealogy`读取序列号谱
 
 通用CSV接入提供模板、预检和确认导入三个端点。预检限制1 MB/500行、执行逐行领域校验和重复检查并返回内容指纹；确认导入必须提交同一指纹，整批资源与事件在单一事务中完成，避免文件预检后被替换或只导入部分行。
 
+通用入站连接器`POST /api/v1/connectors/v1/manufacturing-resources`只接收标准模型，不访问客户URL或数据库。请求必须携带Key ID、Unix时间戳、唯一Nonce和HMAC-SHA256签名；签名覆盖原始请求体，时间窗口默认5分钟，Nonce持久化后不可重放。凭据仅通过环境变量配置，不进入页面、Agent上下文或仓库。
+
 启用 DeepSeek 时只需在本机 `.env` 设置 `AUTONOMOUS_MES_DEEPSEEK_API_KEY` 并重启 API。默认使用 `deepseek-v4-flash`、JSON 输出、关闭思考模式和 12 秒超时。每条提案记录 `narrativeSource` 与 `modelName`；不要把真实密钥写入仓库。
 
 ### 本机D盘免安装环境

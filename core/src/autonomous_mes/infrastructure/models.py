@@ -264,3 +264,12 @@ class ManufacturingResourceRow(Base):
     version: Mapped[int] = mapped_column(Integer, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class ConnectorReceiptRow(Base):
+    __tablename__ = "connector_receipts"
+
+    nonce: Mapped[str] = mapped_column(String(128), primary_key=True)
+    key_id: Mapped[str] = mapped_column(String(96), nullable=False, index=True)
+    request_digest: Mapped[str] = mapped_column(String(64), nullable=False)
+    received_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)

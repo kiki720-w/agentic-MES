@@ -43,6 +43,7 @@ class DatabaseMigrationTests(unittest.TestCase):
                     "execution_sessions",
                     "material_consumptions",
                     "manufacturing_resources",
+                    "connector_receipts",
                     "work_orders",
                 },
                 set(schema.get_table_names()),

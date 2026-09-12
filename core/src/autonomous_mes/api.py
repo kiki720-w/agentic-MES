@@ -1,3 +1,5 @@
+import csv
+import io
 from datetime import datetime
 from pathlib import Path
 from uuid import uuid4
@@ -12,6 +14,7 @@ from autonomous_mes.application.agent_tools import (
     GetWorkOrderTool,
     ToolContext,
 )
+from autonomous_mes.application.connector_security import HmacConnectorAuthenticator
 from autonomous_mes.application.equipment import (
     EquipmentApplicationService,
     RecordTelemetryCommand,
@@ -193,6 +196,25 @@ class ImportResourceCsvBody(PreviewResourceCsvBody):
     actorId: str
 
 
+class ConnectorResourceItem(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    resourceType: str
+    resourceId: str
+    revision: str | None = None
+    name: str
+    status: str
+    lifeRemainingPercent: float | None = None
+    calibrationDueAt: datetime | None = None
+    externalReference: str | None = None
+    sourceUpdatedAt: datetime
+
+
+class ConnectorResourcePush(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    sourceSystem: str
+    resources: list[ConnectorResourceItem] = Field(min_length=1, max_length=500)
+
+
 class ReworkApprovalBody(BaseModel):
     model_config = ConfigDict(extra="forbid")
     expectedVersion: int
@@ -279,6 +301,14 @@ natural_language_service = NaturalLanguageQueryService(
 quality_service = QualityApplicationService(store, store, store)
 genealogy_service = GenealogyApplicationService(store)
 master_data_service = ManufacturingResourceApplicationService(store)
+connector_credentials = (
+    {settings.connector_key_id: settings.connector_hmac_secret}
+    if settings.connector_key_id and settings.connector_hmac_secret
+    else {}
+)
+connector_authenticator = HmacConnectorAuthenticator(
+    store, connector_credentials, settings.connector_max_clock_skew_seconds
+)
 policy = ScopedReadPolicy({"demo-planner": {"WS-MACH-01"}})
 get_work_order_tool = GetWorkOrderTool(store, policy, store)
 get_product_genealogy_tool = GetProductGenealogyTool(store, policy)
@@ -570,6 +600,60 @@ def import_manufacturing_resource_csv(body: ImportResourceCsvBody) -> dict[str, 
         body.actorId,
         str(uuid4()),
     )
+
+
+@app.post("/api/v1/connectors/v1/manufacturing-resources")
+async def connector_push_manufacturing_resources(
+    request: Request,
+    x_connector_key: str = Header(alias="X-Connector-Key"),
+    x_connector_timestamp: str = Header(alias="X-Connector-Timestamp"),
+    x_connector_nonce: str = Header(alias="X-Connector-Nonce"),
+    x_connector_signature: str = Header(alias="X-Connector-Signature"),
+) -> dict[str, object]:
+    body = await request.body()
+    receipt = connector_authenticator.authenticate(
+        x_connector_key,
+        x_connector_timestamp,
+        x_connector_nonce,
+        x_connector_signature,
+        body,
+    )
+    try:
+        payload = ConnectorResourcePush.model_validate_json(body)
+    except ValueError as exc:
+        raise ValidationError("connector payload is invalid") from exc
+    columns = [
+        "resourceType",
+        "resourceId",
+        "revision",
+        "name",
+        "status",
+        "lifeRemainingPercent",
+        "calibrationDueAt",
+        "externalReference",
+        "sourceUpdatedAt",
+    ]
+    stream = io.StringIO()
+    writer = csv.DictWriter(stream, fieldnames=columns, lineterminator="\n")
+    writer.writeheader()
+    for item in payload.resources:
+        values = item.model_dump(mode="json")
+        writer.writerow({key: values.get(key) or "" for key in columns})
+    csv_text = stream.getvalue()
+    preview = master_data_service.preview_csv(csv_text, payload.sourceSystem)
+    result = master_data_service.import_csv(
+        csv_text,
+        payload.sourceSystem,
+        str(preview["previewId"]),
+        f"connector:{receipt.key_id}",
+        receipt.nonce,
+    )
+    return {
+        **result,
+        "keyId": receipt.key_id,
+        "nonce": receipt.nonce,
+        "requestDigest": receipt.request_digest,
+    }
 
 
 @app.post("/api/v1/equipment/{equipment_id}/telemetry")
