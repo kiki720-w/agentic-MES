@@ -18,6 +18,10 @@ class Identity:
         if role not in self.roles:
             raise Forbidden(f"identity requires role {role}")
 
+    def require_any_role(self, *roles: str) -> None:
+        if not self.roles.intersection(roles):
+            raise Forbidden(f"identity requires one of roles: {', '.join(roles)}")
+
     def require_factory(self, factory_id: str) -> None:
         if factory_id not in self.factory_ids and "*" not in self.factory_ids:
             raise Forbidden("identity is not authorized for this factory")

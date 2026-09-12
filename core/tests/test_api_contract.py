@@ -88,11 +88,47 @@ class ApiContractTests(unittest.TestCase):
         self.assertEqual(201, second.status_code)
         self.assertEqual(first["workOrderId"], second.json()["workOrderId"])
 
+    def test_work_order_list_is_server_paginated_and_filterable(self):
+        prefix = f"WO-PAGE-{uuid4().hex[:8]}"
+        for index in range(3):
+            body = {
+                "humanCode": f"{prefix}-{index}",
+                "productionOrderId": f"PO-{prefix}-{index}",
+                "workshopId": "WS-MACH-01",
+                "quantity": 5,
+                "dueAt": (datetime.now(UTC) + timedelta(days=2)).isoformat(),
+                "revisions": {
+                    "productRevisionId": "PR-PAGE",
+                    "routingRevisionId": "RT-PAGE",
+                    "bomRevisionId": "BOM-PAGE",
+                },
+            }
+            response = self.client.post(
+                "/api/v1/work-orders",
+                json=body,
+                headers={"Idempotency-Key": f"page-{prefix}-{index}"},
+            )
+            self.assertEqual(201, response.status_code, response.text)
+
+        first = self.client.get(
+            "/api/v1/work-orders",
+            params={"query": prefix, "status": "DRAFT", "limit": 2, "offset": 0},
+        ).json()
+        second = self.client.get(
+            "/api/v1/work-orders",
+            params={"query": prefix, "status": "DRAFT", "limit": 2, "offset": 2},
+        ).json()
+
+        self.assertEqual(3, first["total"])
+        self.assertEqual(2, first["count"])
+        self.assertEqual(1, second["count"])
+        self.assertEqual(2, second["offset"])
+
     def test_product_serial_genealogy_api(self):
         _, _, created = self._create()
         released = self.client.post(
             f"/api/v1/work-orders/{created['workOrderId']}/release",
-            json={"expectedVersion": created["version"], "actorId": "planner-1"},
+            json={"expectedVersion": created["version"]},
             headers={"Idempotency-Key": f"release-{uuid4().hex}"},
         ).json()
         serial = f"SN-API-{uuid4().hex[:8]}"
@@ -101,7 +137,6 @@ class ApiContractTests(unittest.TestCase):
             json={
                 "productSerial": serial,
                 "workOrderId": released["workOrderId"],
-                "actorId": "operator-1",
             },
         )
         self.assertEqual(201, registered.status_code, registered.text)
@@ -115,7 +150,7 @@ class ApiContractTests(unittest.TestCase):
         work_order_id = created["workOrderId"]
         released = self.client.post(
             f"/api/v1/work-orders/{work_order_id}/release",
-            json={"expectedVersion": 1, "actorId": "planner-1"},
+            json={"expectedVersion": 1},
             headers={"Idempotency-Key": f"release-{uuid4().hex}"},
         )
         self.assertEqual(200, released.status_code, released.text)
@@ -225,16 +260,15 @@ class ApiContractTests(unittest.TestCase):
             headers={"Idempotency-Key": f"lock-create-{suffix}"},
         ).json()
         for action, payload in [
-            ("release", {"expectedVersion": 1, "actorId": "planner"}),
+            ("release", {"expectedVersion": 1}),
             (
                 "operations/10/dispatch",
                 {
                     "expectedVersion": 2,
-                    "actorId": "operator",
                     "resourceId": equipment["equipmentId"],
                 },
             ),
-            ("operations/10/start", {"expectedVersion": 3, "actorId": "operator"}),
+            ("operations/10/start", {"expectedVersion": 3}),
         ]:
             work_order = self.client.post(
                 f"/api/v1/work-orders/{work_order['workOrderId']}/{action}",
@@ -257,7 +291,7 @@ class ApiContractTests(unittest.TestCase):
         self.assertEqual("SUSPENDED", suspended["status"])
         blocked = self.client.post(
             f"/api/v1/work-orders/{work_order['workOrderId']}/operations/10/resume",
-            json={"expectedVersion": suspended["version"], "actorId": "supervisor"},
+            json={"expectedVersion": suspended["version"]},
             headers={"Idempotency-Key": f"blocked-resume-{suffix}"},
         )
         self.assertEqual(409, blocked.status_code)

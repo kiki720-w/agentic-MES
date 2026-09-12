@@ -89,13 +89,11 @@ class CreateWorkOrderBody(BaseModel):
 class ReleaseWorkOrderBody(BaseModel):
     model_config = ConfigDict(extra="forbid")
     expectedVersion: int
-    actorId: str
 
 
 class OperationActionBody(BaseModel):
     model_config = ConfigDict(extra="forbid")
     expectedVersion: int
-    actorId: str
     resourceId: str | None = None
     goodQuantity: int = 0
     scrapQuantity: int = 0
@@ -150,7 +148,6 @@ class CreateInspectionBody(BaseModel):
     workOrderId: str
     operationSequence: int
     sampleSize: int = 1
-    actorId: str
 
 
 class InspectionResultBody(BaseModel):
@@ -159,7 +156,6 @@ class InspectionResultBody(BaseModel):
     passed: bool
     defectCode: str | None = None
     notes: str | None = None
-    actorId: str
     gaugeId: str
     measurementRecordedAt: datetime
 
@@ -176,7 +172,6 @@ class RegisterManufacturingResourceBody(BaseModel):
     sourceSystem: str = "MES"
     externalReference: str | None = None
     sourceUpdatedAt: datetime
-    actorId: str
 
 
 class UpdateManufacturingResourceBody(BaseModel):
@@ -189,7 +184,6 @@ class UpdateManufacturingResourceBody(BaseModel):
     lifeRemainingPercent: float | None = None
     calibrationDueAt: datetime | None = None
     sourceUpdatedAt: datetime
-    actorId: str
 
 
 class PreviewResourceCsvBody(BaseModel):
@@ -200,7 +194,6 @@ class PreviewResourceCsvBody(BaseModel):
 
 class ImportResourceCsvBody(PreviewResourceCsvBody):
     expectedPreviewId: str
-    actorId: str
 
 
 class ConnectorResourceItem(BaseModel):
@@ -226,7 +219,6 @@ class ReworkApprovalBody(BaseModel):
     model_config = ConfigDict(extra="forbid")
     expectedVersion: int
     route: list[str]
-    actorId: str
 
 
 class NaturalLanguageBody(BaseModel):
@@ -238,7 +230,6 @@ class RegisterProductUnitBody(BaseModel):
     model_config = ConfigDict(extra="forbid")
     productSerial: str = Field(min_length=1, max_length=96)
     workOrderId: str
-    actorId: str
 
 
 class MaterialConsumptionBody(BaseModel):
@@ -259,7 +250,6 @@ class RecordExecutionSessionBody(BaseModel):
     model_config = ConfigDict(extra="forbid")
     sessionId: str = Field(min_length=1, max_length=96)
     operationSequence: int = Field(gt=0)
-    operatorId: str
     equipmentId: str
     startedAt: datetime
     endedAt: datetime
@@ -307,6 +297,11 @@ def current_identity(
 ) -> Identity:
     token = credentials.credentials if credentials else None
     return identity_provider.authenticate(token)
+
+
+def authorize_human(identity: Identity, *roles: str) -> None:
+    identity.require_factory(settings.factory_id)
+    identity.require_any_role(*roles)
 
 
 def build_store() -> MesStore:
@@ -411,6 +406,15 @@ def deployment_context() -> dict[str, str]:
     }
 
 
+@app.get("/api/v1/system/auth-config")
+def auth_config() -> dict[str, str | None]:
+    return {
+        "mode": settings.auth_mode.upper(),
+        "issuer": settings.oidc_issuer,
+        "clientId": settings.oidc_web_client_id if settings.auth_mode.upper() == "OIDC" else None,
+    }
+
+
 @app.get("/api/v1/identity/me")
 def identity_me(identity: Annotated[Identity, Depends(current_identity)]) -> dict[str, object]:
     return identity.as_dict()
@@ -430,7 +434,11 @@ def agent_model_status() -> dict[str, str | None]:
 
 
 @app.post("/api/v1/agent/chat")
-def agent_chat(body: NaturalLanguageBody) -> dict[str, object]:
+def agent_chat(
+    body: NaturalLanguageBody,
+    identity: Annotated[Identity, Depends(current_identity)],
+) -> dict[str, object]:
+    authorize_human(identity, "OPERATOR", "SUPERVISOR", "QUALITY", "PLANNER")
     return natural_language_service.ask(body.question)
 
 
@@ -441,8 +449,11 @@ def dashboard() -> HTMLResponse:
 
 @app.post("/api/v1/work-orders", status_code=201)
 def create_work_order(
-    body: CreateWorkOrderBody, idempotency_key: str = Header(...)
+    body: CreateWorkOrderBody,
+    identity: Annotated[Identity, Depends(current_identity)],
+    idempotency_key: str = Header(...),
 ) -> dict[str, object]:
+    authorize_human(identity, "PLANNER")
     return service.create(
         CreateWorkOrderCommand(
             idempotency_key=idempotency_key,
@@ -471,9 +482,19 @@ def create_work_order(
 
 
 @app.get("/api/v1/work-orders")
-def list_work_orders(limit: int = 100) -> dict[str, object]:
-    items = service.list(limit)
-    return {"items": items, "count": len(items)}
+def list_work_orders(
+    limit: int = 30,
+    offset: int = 0,
+    query: str | None = None,
+    status: str | None = None,
+    includeTest: bool = False,
+) -> dict[str, object]:
+    return service.list_page(limit, offset, query, status, includeTest)
+
+
+@app.get("/api/v1/work-orders-summary")
+def work_order_summary(includeTest: bool = False) -> dict[str, object]:
+    return service.summary(includeTest)
 
 
 @app.get("/api/v1/system/outbox")
@@ -483,7 +504,10 @@ def list_outbox() -> dict[str, object]:
 
 
 @app.post("/api/v1/agent/incidents/analyze")
-def analyze_incidents() -> dict[str, object]:
+def analyze_incidents(
+    identity: Annotated[Identity, Depends(current_identity)],
+) -> dict[str, object]:
+    authorize_human(identity, "OPERATOR", "SUPERVISOR")
     items = incident_agent.analyze()
     return {"items": items, "count": len(items)}
 
@@ -501,10 +525,14 @@ def list_quality_inspections(limit: int = 100) -> dict[str, object]:
 
 
 @app.post("/api/v1/genealogy/product-units", status_code=201)
-def register_product_unit(body: RegisterProductUnitBody) -> dict[str, object]:
+def register_product_unit(
+    body: RegisterProductUnitBody,
+    identity: Annotated[Identity, Depends(current_identity)],
+) -> dict[str, object]:
+    authorize_human(identity, "OPERATOR")
     return genealogy_service.register(
         RegisterProductUnitCommand(
-            str(uuid4()), body.productSerial, body.workOrderId, body.actorId
+            str(uuid4()), body.productSerial, body.workOrderId, identity.subject_id
         )
     )
 
@@ -516,15 +544,18 @@ def get_product_genealogy(product_serial: str) -> dict[str, object]:
 
 @app.post("/api/v1/genealogy/product-units/{product_serial}/execution-sessions", status_code=201)
 def record_execution_session(
-    product_serial: str, body: RecordExecutionSessionBody
+    product_serial: str,
+    body: RecordExecutionSessionBody,
+    identity: Annotated[Identity, Depends(current_identity)],
 ) -> dict[str, object]:
+    authorize_human(identity, "OPERATOR")
     return genealogy_service.record_execution(
         RecordExecutionSessionCommand(
             str(uuid4()),
             body.sessionId,
             product_serial,
             body.operationSequence,
-            body.operatorId,
+            identity.subject_id,
             body.equipmentId,
             body.startedAt,
             body.endedAt,
@@ -545,23 +576,36 @@ def record_execution_session(
 
 
 @app.post("/api/v1/quality/inspections", status_code=201)
-def create_quality_inspection(body: CreateInspectionBody) -> dict[str, object]:
+def create_quality_inspection(
+    body: CreateInspectionBody,
+    identity: Annotated[Identity, Depends(current_identity)],
+) -> dict[str, object]:
+    authorize_human(identity, "QUALITY")
     return quality_service.create(
         CreateInspectionCommand(
-            str(uuid4()), body.workOrderId, body.operationSequence, body.sampleSize, body.actorId
+            str(uuid4()),
+            body.workOrderId,
+            body.operationSequence,
+            body.sampleSize,
+            identity.subject_id,
         )
     )
 
 
 @app.post("/api/v1/quality/inspections/{inspection_id}/result")
-def record_quality_result(inspection_id: str, body: InspectionResultBody) -> dict[str, object]:
+def record_quality_result(
+    inspection_id: str,
+    body: InspectionResultBody,
+    identity: Annotated[Identity, Depends(current_identity)],
+) -> dict[str, object]:
+    authorize_human(identity, "QUALITY")
     return quality_service.record(
         inspection_id,
         body.passed,
         body.defectCode,
         body.notes,
         body.expectedVersion,
-        body.actorId,
+        identity.subject_id,
         str(uuid4()),
         body.gaugeId,
         body.measurementRecordedAt,
@@ -569,9 +613,14 @@ def record_quality_result(inspection_id: str, body: InspectionResultBody) -> dic
 
 
 @app.post("/api/v1/quality/inspections/{inspection_id}/approve-rework")
-def approve_quality_rework(inspection_id: str, body: ReworkApprovalBody) -> dict[str, object]:
+def approve_quality_rework(
+    inspection_id: str,
+    body: ReworkApprovalBody,
+    identity: Annotated[Identity, Depends(current_identity)],
+) -> dict[str, object]:
+    authorize_human(identity, "QUALITY", "SUPERVISOR")
     return quality_service.approve_rework(
-        inspection_id, body.route, body.expectedVersion, body.actorId, str(uuid4())
+        inspection_id, body.route, body.expectedVersion, identity.subject_id, str(uuid4())
     )
 
 
@@ -581,13 +630,16 @@ def approve_agent_proposal(
     body: ApproveProposalBody,
     identity: Annotated[Identity, Depends(current_identity)],
 ) -> dict[str, object]:
-    identity.require_role("SUPERVISOR")
-    identity.require_factory(settings.factory_id)
+    authorize_human(identity, "SUPERVISOR")
     return incident_agent.approve(proposal_id, identity.subject_id, body.reason)
 
 
 @app.post("/api/v1/equipment", status_code=201)
-def register_equipment(body: RegisterEquipmentBody) -> dict[str, object]:
+def register_equipment(
+    body: RegisterEquipmentBody,
+    identity: Annotated[Identity, Depends(current_identity)],
+) -> dict[str, object]:
+    authorize_human(identity, "MASTER_DATA_ADMIN")
     return equipment_service.register(
         RegisterEquipmentCommand(
             correlation_id=str(uuid4()),
@@ -609,11 +661,13 @@ def list_equipment(limit: int = 100) -> dict[str, object]:
 @app.post("/api/v1/master-data/manufacturing-resources", status_code=201)
 def register_manufacturing_resource(
     body: RegisterManufacturingResourceBody,
+    identity: Annotated[Identity, Depends(current_identity)],
 ) -> dict[str, object]:
+    authorize_human(identity, "MASTER_DATA_ADMIN")
     return master_data_service.register(
         RegisterManufacturingResourceCommand(
             str(uuid4()),
-            body.actorId,
+            identity.subject_id,
             body.resourceType,
             body.resourceId,
             body.revision,
@@ -635,11 +689,15 @@ def list_manufacturing_resources(limit: int = 100) -> dict[str, object]:
 
 
 @app.put("/api/v1/master-data/manufacturing-resources/state")
-def update_manufacturing_resource(body: UpdateManufacturingResourceBody) -> dict[str, object]:
+def update_manufacturing_resource(
+    body: UpdateManufacturingResourceBody,
+    identity: Annotated[Identity, Depends(current_identity)],
+) -> dict[str, object]:
+    authorize_human(identity, "MASTER_DATA_ADMIN")
     return master_data_service.update(
         UpdateManufacturingResourceCommand(
             str(uuid4()),
-            body.actorId,
+            identity.subject_id,
             body.resourceType,
             body.resourceId,
             body.revision,
@@ -662,17 +720,25 @@ def manufacturing_resource_import_template() -> PlainTextResponse:
 
 
 @app.post("/api/v1/master-data/manufacturing-resources/import-preview")
-def preview_manufacturing_resource_csv(body: PreviewResourceCsvBody) -> dict[str, object]:
+def preview_manufacturing_resource_csv(
+    body: PreviewResourceCsvBody,
+    identity: Annotated[Identity, Depends(current_identity)],
+) -> dict[str, object]:
+    authorize_human(identity, "MASTER_DATA_ADMIN")
     return master_data_service.preview_csv(body.csvText, body.sourceSystem)
 
 
 @app.post("/api/v1/master-data/manufacturing-resources/import")
-def import_manufacturing_resource_csv(body: ImportResourceCsvBody) -> dict[str, object]:
+def import_manufacturing_resource_csv(
+    body: ImportResourceCsvBody,
+    identity: Annotated[Identity, Depends(current_identity)],
+) -> dict[str, object]:
+    authorize_human(identity, "MASTER_DATA_ADMIN")
     return master_data_service.import_csv(
         body.csvText,
         body.sourceSystem,
         body.expectedPreviewId,
-        body.actorId,
+        identity.subject_id,
         str(uuid4()),
     )
 
@@ -732,7 +798,12 @@ async def connector_push_manufacturing_resources(
 
 
 @app.post("/api/v1/equipment/{equipment_id}/telemetry")
-def record_equipment_telemetry(equipment_id: str, body: TelemetryBody) -> dict[str, object]:
+def record_equipment_telemetry(
+    equipment_id: str,
+    body: TelemetryBody,
+    identity: Annotated[Identity, Depends(current_identity)],
+) -> dict[str, object]:
+    authorize_human(identity, "OPERATOR")
     equipment = equipment_service.record(
         RecordTelemetryCommand(
             correlation_id=str(uuid4()),
@@ -763,15 +834,17 @@ def record_equipment_telemetry(equipment_id: str, body: TelemetryBody) -> dict[s
 def release_work_order(
     work_order_id: str,
     body: ReleaseWorkOrderBody,
+    identity: Annotated[Identity, Depends(current_identity)],
     idempotency_key: str = Header(...),
 ) -> dict[str, object]:
+    authorize_human(identity, "PLANNER")
     return service.release(
         ReleaseWorkOrderCommand(
             idempotency_key=idempotency_key,
             correlation_id=str(uuid4()),
             work_order_id=work_order_id,
             expected_version=body.expectedVersion,
-            actor_id=body.actorId,
+            actor_id=identity.subject_id,
         )
     )
 
@@ -787,8 +860,10 @@ def execute_operation(
     sequence: int,
     action: str,
     body: OperationActionBody,
+    identity: Annotated[Identity, Depends(current_identity)],
     idempotency_key: str = Header(...),
 ) -> dict[str, object]:
+    authorize_human(identity, "SUPERVISOR" if action == "resume" else "OPERATOR")
     current = service.get(work_order_id)
     operation = next((item for item in current["operations"] if item["sequence"] == sequence), None)
     if operation is None:
@@ -815,7 +890,7 @@ def execute_operation(
             work_order_id=work_order_id,
             sequence=sequence,
             expected_version=body.expectedVersion,
-            actor_id=body.actorId,
+            actor_id=identity.subject_id,
             action=action,
             resource_id=body.resourceId,
             good_quantity=body.goodQuantity,

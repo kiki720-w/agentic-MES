@@ -31,7 +31,23 @@ class WorkOrderStore(Protocol):
 
     def get_by_human_code(self, human_code: str) -> WorkOrder | None: ...
 
-    def list_work_orders(self, limit: int = 100) -> list[WorkOrder]: ...
+    def list_work_orders(
+        self,
+        limit: int = 100,
+        offset: int = 0,
+        query: str | None = None,
+        status: str | None = None,
+        include_test: bool = False,
+    ) -> list[WorkOrder]: ...
+
+    def count_work_orders(
+        self,
+        query: str | None = None,
+        status: str | None = None,
+        include_test: bool = False,
+    ) -> int: ...
+
+    def summarize_work_orders(self, include_test: bool = False) -> dict[str, int]: ...
 
     def save_atomically(
         self,

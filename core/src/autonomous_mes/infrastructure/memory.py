@@ -51,10 +51,55 @@ class InMemoryWorkOrderStore:
             work_order_id = self._human_codes.get(human_code)
             return self.get(work_order_id) if work_order_id else None
 
-    def list_work_orders(self, limit: int = 100) -> list[WorkOrder]:
+    def list_work_orders(
+        self,
+        limit: int = 100,
+        offset: int = 0,
+        query: str | None = None,
+        status: str | None = None,
+        include_test: bool = False,
+    ) -> list[WorkOrder]:
         with self._lock:
             items = sorted(self._orders.values(), key=lambda item: item.updated_at, reverse=True)
-            return deepcopy(items[:limit])
+            items = self._filter_orders(items, query, status, include_test)
+            return deepcopy(items[offset : offset + limit])
+
+    def count_work_orders(
+        self,
+        query: str | None = None,
+        status: str | None = None,
+        include_test: bool = False,
+    ) -> int:
+        with self._lock:
+            return len(
+                self._filter_orders(list(self._orders.values()), query, status, include_test)
+            )
+
+    def summarize_work_orders(self, include_test: bool = False) -> dict[str, int]:
+        with self._lock:
+            summary: dict[str, int] = {}
+            for item in self._orders.values():
+                if not include_test and self._is_test_code(item.human_code):
+                    continue
+                summary[item.status.value] = summary.get(item.status.value, 0) + 1
+            return summary
+
+    @staticmethod
+    def _filter_orders(
+        items: list[WorkOrder], query: str | None, status: str | None, include_test: bool
+    ) -> list[WorkOrder]:
+        if not include_test:
+            items = [item for item in items if not InMemoryWorkOrderStore._is_test_code(item.human_code)]
+        if query:
+            normalized = query.casefold()
+            items = [item for item in items if normalized in item.human_code.casefold()]
+        if status:
+            items = [item for item in items if item.status.value == status]
+        return items
+
+    @staticmethod
+    def _is_test_code(human_code: str) -> bool:
+        return human_code.startswith(("WO-PG-TEST", "WO-PG-ROLLBACK"))
 
     def get_idempotent_result(self, idempotency_key: str) -> IdempotentResult | None:
         with self._lock:

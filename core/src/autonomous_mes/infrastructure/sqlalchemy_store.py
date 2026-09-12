@@ -1,7 +1,7 @@
 from typing import Any
 from uuid import uuid4
 
-from sqlalchemy import select, update
+from sqlalchemy import func, or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 
@@ -59,12 +59,62 @@ class SqlAlchemyWorkOrderStore:
             row = session.scalar(select(WorkOrderRow).where(WorkOrderRow.human_code == human_code))
             return _to_domain(row) if row else None
 
-    def list_work_orders(self, limit: int = 100) -> list[WorkOrder]:
+    def list_work_orders(
+        self,
+        limit: int = 100,
+        offset: int = 0,
+        query: str | None = None,
+        status: str | None = None,
+        include_test: bool = False,
+    ) -> list[WorkOrder]:
         with self._sessions() as session:
+            statement = select(WorkOrderRow)
+            statement = self._filter_work_orders(statement, query, status, include_test)
             rows = session.scalars(
-                select(WorkOrderRow).order_by(WorkOrderRow.updated_at.desc()).limit(limit)
+                statement
+                .order_by(WorkOrderRow.updated_at.desc(), WorkOrderRow.work_order_id.desc())
+                .offset(offset)
+                .limit(limit)
             ).all()
             return [_to_domain(row) for row in rows]
+
+    def count_work_orders(
+        self,
+        query: str | None = None,
+        status: str | None = None,
+        include_test: bool = False,
+    ) -> int:
+        with self._sessions() as session:
+            statement = select(func.count()).select_from(WorkOrderRow)
+            statement = self._filter_work_orders(statement, query, status, include_test)
+            return int(session.scalar(statement) or 0)
+
+    def summarize_work_orders(self, include_test: bool = False) -> dict[str, int]:
+        with self._sessions() as session:
+            statement = select(WorkOrderRow.status, func.count())
+            statement = self._filter_work_orders(statement, None, None, include_test)
+            rows = session.execute(statement.group_by(WorkOrderRow.status)).all()
+            return {str(status): int(count) for status, count in rows}
+
+    @staticmethod
+    def _filter_work_orders(
+        statement: Any,
+        query: str | None,
+        status: str | None,
+        include_test: bool,
+    ) -> Any:
+        if not include_test:
+            statement = statement.where(
+                ~or_(
+                    WorkOrderRow.human_code.startswith("WO-PG-TEST"),
+                    WorkOrderRow.human_code.startswith("WO-PG-ROLLBACK"),
+                )
+            )
+        if query:
+            statement = statement.where(WorkOrderRow.human_code.icontains(query, autoescape=True))
+        if status:
+            statement = statement.where(WorkOrderRow.status == status)
+        return statement
 
     def get_idempotent_result(self, idempotency_key: str) -> IdempotentResult | None:
         with self._sessions() as session:

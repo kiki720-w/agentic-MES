@@ -24,6 +24,7 @@ class Settings(BaseSettings):
     oidc_issuer: str | None = None
     oidc_audience: str | None = None
     oidc_jwks_url: str | None = None
+    oidc_web_client_id: str = "agentic-mes-web"
     oidc_roles_claim: str = "realm_access.roles"
     oidc_factory_ids_claim: str = "factory_ids"
     dev_subject_id: str = "demo-supervisor"

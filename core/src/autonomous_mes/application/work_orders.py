@@ -153,6 +153,42 @@ class WorkOrderApplicationService:
             raise ValidationError("limit must be between 1 and 500")
         return [_serialize(item) for item in self._store.list_work_orders(limit)]
 
+    def list_page(
+        self,
+        limit: int = 30,
+        offset: int = 0,
+        query: str | None = None,
+        status: str | None = None,
+        include_test: bool = False,
+    ) -> dict[str, Any]:
+        if limit < 1 or limit > 100:
+            raise ValidationError("limit must be between 1 and 100")
+        if offset < 0 or offset > 1_000_000:
+            raise ValidationError("offset must be between 0 and 1000000")
+        normalized_query = query.strip() if query else None
+        normalized_status = status.strip().upper() if status else None
+        items = self._store.list_work_orders(
+            limit, offset, normalized_query, normalized_status, include_test
+        )
+        return {
+            "items": [_serialize(item) for item in items],
+            "count": len(items),
+            "total": self._store.count_work_orders(
+                normalized_query, normalized_status, include_test
+            ),
+            "limit": limit,
+            "offset": offset,
+        }
+
+    def summary(self, include_test: bool = False) -> dict[str, Any]:
+        statuses = self._store.summarize_work_orders(include_test)
+        return {
+            "total": sum(statuses.values()),
+            "workInProgress": statuses.get("RELEASED", 0) + statuses.get("IN_PROGRESS", 0),
+            "suspended": statuses.get("SUSPENDED", 0),
+            "statusCounts": statuses,
+        }
+
     def execute_operation(self, command: OperationCommand) -> dict[str, Any]:
         request_hash = _command_hash(command)
         operation_name = f"{command.action}_operation"
