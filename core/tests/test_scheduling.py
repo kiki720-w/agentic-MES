@@ -7,6 +7,7 @@ from autonomous_mes.application.scheduling import (
     IngestSchedulingSnapshotCommand,
     RegisterPlanningResourceCommand,
     SchedulingApplicationService,
+    UpdatePlanningResourceCommand,
 )
 from autonomous_mes.application.work_orders import (
     CreateWorkOrderCommand,
@@ -177,6 +178,30 @@ class SchedulingTests(unittest.TestCase):
         self.assertEqual(1, plan["metrics"]["shortageCount"])
         self.assertIn("没有可用", plan["shortages"][0]["reason"])
 
+    def test_planning_capacity_can_be_versioned_and_edited(self) -> None:
+        self.register_person()
+        resource = self.scheduling.list_resources("WS-1")[0]
+
+        updated = self.scheduling.update_resource(
+            UpdatePlanningResourceCommand(
+                str(resource["resourceId"]),
+                int(resource["version"]),
+                "Operator 01 (night shift)",
+                "WC-TURN",
+                420,
+                540,
+                ["TURN", "DEBURR"],
+                False,
+                "demo-planner",
+                str(uuid4()),
+            )
+        )
+
+        self.assertEqual(2, updated["version"])
+        self.assertEqual(420, updated["dailyCapacityMinutes"])
+        self.assertFalse(updated["active"])
+        self.assertEqual("PlanningResourceUpdated", self.store.list_outbox()[-1]["eventType"])
+
     def test_order_without_route_is_not_silently_dropped(self) -> None:
         self.orders.create(
             CreateWorkOrderCommand(
@@ -304,6 +329,64 @@ class SchedulingTests(unittest.TestCase):
             "EXTERNAL_SCHEDULING_SNAPSHOT",
             plan["generationParameters"]["inputSource"]["type"],
         )
+
+    def test_snapshot_process_standard_drives_work_demand(self) -> None:
+        observed = datetime.now(UTC)
+        self.scheduling.ingest_snapshot(
+            IngestSchedulingSnapshotCommand(
+                "spreadsheet",
+                "WS-1",
+                "rev-process-standard",
+                observed,
+                {
+                    "workOrders": [{
+                        "externalId": "order-standard",
+                        "code": "WO-STANDARD",
+                        "productionOrderId": "PO-STANDARD",
+                        "quantity": 10,
+                        "dueAt": (observed + timedelta(days=5)).isoformat(),
+                        "priority": 80,
+                        "productRevisionId": "PART-A",
+                        "routingRevisionId": "RT-A",
+                        "bomRevisionId": "BOM-A",
+                        "status": "RELEASED",
+                        "operations": [{
+                            "sequence": 10,
+                            "operationCode": "TURN",
+                            "operationName": "Turning",
+                            "workCenterId": "WC-TURN",
+                            "plannedQuantity": 10,
+                            "status": "PENDING",
+                            "minutesPerUnit": 12,
+                            "setupMinutes": 30,
+                        }],
+                    }],
+                    "resources": [{
+                        "externalId": "cell-standard",
+                        "code": "CELL-STANDARD",
+                        "name": "Turning cell",
+                        "resourceType": "CELL",
+                        "workCenterId": "WC-TURN",
+                        "dailyCapacityMinutes": 480,
+                        "overtimeCapacityMinutes": 600,
+                        "capabilityCodes": ["TURN"],
+                        "active": True,
+                        "state": "RUNNING",
+                    }],
+                },
+                "demo-planner",
+                str(uuid4()),
+            )
+        )
+
+        plan = self.generate(date(2026, 9, 14))
+
+        assignment = plan["assignments"][0]
+        self.assertEqual(150, assignment["plannedWorkMinutes"])
+        self.assertEqual(10, assignment["plannedQuantity"])
+        self.assertEqual(12, assignment["minutesPerUnit"])
+        self.assertEqual(30, assignment["setupMinutes"])
+        self.assertEqual("SNAPSHOT_PROCESS_STANDARD", assignment["demandSource"])
 
 
 if __name__ == "__main__":

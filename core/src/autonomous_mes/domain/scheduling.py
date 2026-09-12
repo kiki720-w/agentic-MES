@@ -164,6 +164,59 @@ class PlanningResource:
         )
         return resource, event
 
+    def update(
+        self,
+        expected_version: int,
+        name: str,
+        work_center_id: str,
+        daily_capacity_minutes: float,
+        overtime_capacity_minutes: float,
+        capability_codes: list[str],
+        active: bool,
+        actor_id: str,
+        correlation_id: str,
+    ) -> tuple["PlanningResource", DomainEvent]:
+        if expected_version != self.version:
+            raise InvalidTransition("planning resource version changed")
+        if any(not value.strip() for value in (name, work_center_id, actor_id)):
+            raise ValidationError("planning resource name, work center and actor are required")
+        if daily_capacity_minutes <= 0:
+            raise ValidationError("daily capacity must be greater than zero")
+        if overtime_capacity_minutes < daily_capacity_minutes:
+            raise ValidationError("overtime capacity cannot be below normal capacity")
+        capabilities = tuple(
+            sorted({item.strip().upper() for item in capability_codes if item.strip()})
+        )
+        changed = replace(
+            self,
+            name=name.strip(),
+            work_center_id=work_center_id.strip(),
+            daily_capacity_minutes=float(daily_capacity_minutes),
+            overtime_capacity_minutes=float(overtime_capacity_minutes),
+            capability_codes=capabilities,
+            active=active,
+            version=self.version + 1,
+            updated_at=utc_now(),
+        )
+        event = DomainEvent.create(
+            "PlanningResourceUpdated",
+            "PlanningResource",
+            changed.resource_id,
+            {
+                "code": changed.code,
+                "workshopId": changed.workshop_id,
+                "workCenterId": changed.work_center_id,
+                "dailyCapacityMinutes": changed.daily_capacity_minutes,
+                "overtimeCapacityMinutes": changed.overtime_capacity_minutes,
+                "capabilityCodes": list(changed.capability_codes),
+                "active": changed.active,
+                "version": changed.version,
+                "actorId": actor_id,
+            },
+            correlation_id,
+        )
+        return changed, event
+
 
 @dataclass(frozen=True)
 class SchedulePlan:

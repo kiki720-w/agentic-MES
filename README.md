@@ -16,6 +16,9 @@
 - Agent：L3 排产智能体可自动感知变化、生成并提交方案，但不能自批、自发或直接控制设备
 - 推理：DeepSeek API，经可替换模型网关调用
 - 部署：本地 MES/边缘采集 + 云端模型
+- 人工输入：Agent 工作台支持文字与附件入口；XLSX 经预检、指纹确认后生成标准快照
+- 工时模型：工序需求 = 准备工时 + 剩余数量 × 单件工时，缺失时才使用排产回退值
+- 大样本界面：输入、产能、计算与全宽结果分离，长表按搜索和分页查看
 
 ## 当前交付物
 
@@ -67,7 +70,11 @@
 - `docs/step-34-unified-aps-acceptance.md`：Agentic MES 与 paichan 思路统一、有限产能排产及计划治理验收记录
 - `docs/step-35-control-plane-and-scheduling-agent-acceptance.md`：控制层产品重构、外部排产快照和L3智能体迁移验收记录
 - `docs/step-36-connector-developer-kit-acceptance.md`：供应商中立排产快照Schema、样例和HMAC推送客户端验收记录
+- `docs/step-37-agent-workspace-and-capacity-input-acceptance.md`：统一附件工作台、工艺工时、可编辑产能与全宽结果页验收记录
+- `GET /workspace`：自然语言、XLSX/CSV预检与L3排产协作工作台
+- `GET /capacity`：版本化人员与工作单元产能维护
+- `GET /planning/results`：标明人工/虚拟员工身份的全宽排产结果
 
 ## 当前决策门
 
-软件底座已经具备。下一项必须依赖企业输入的工作，是选择第一个真实系统适配器，并取得脱敏的 API 文档、字段样例、认证方式和回写边界。在此之前不连接公司生产系统，也不假设客户字段含义。
+软件底座已经具备。当前无需连接公司生产系统，可先通过可下载的三表XLSX模板验证完整排产链。下一项必须人工选择的是首个真实系统适配器；视觉附件要进入语义诊断链时，还需选择具备图像能力的模型提供方和数据出厂策略。

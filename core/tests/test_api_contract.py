@@ -6,6 +6,7 @@ from uuid import uuid4
 from fastapi.testclient import TestClient
 
 from autonomous_mes.api import app, settings
+from autonomous_mes.application.spreadsheet_import import build_spreadsheet_template
 
 
 class ApiContractTests(unittest.TestCase):
@@ -54,6 +55,35 @@ class ApiContractTests(unittest.TestCase):
             },
             self.client.get("/health/ready").json(),
         )
+
+    def test_spreadsheet_preview_and_confirm_is_two_step(self):
+        preview_response = self.client.post(
+            "/api/v1/planning/imports/spreadsheet/preview?workshopId=WS-IMPORT-TEST",
+            headers={
+                "X-Dev-Actor": "demo-planner",
+                "X-File-Name": "agentic-aps-template.xlsx",
+            },
+            content=build_spreadsheet_template(),
+        )
+        self.assertEqual(200, preview_response.status_code, preview_response.text)
+        preview = preview_response.json()
+        self.assertTrue(preview["valid"], preview["issues"])
+
+        confirmed = self.client.post(
+            "/api/v1/planning/imports/spreadsheet/confirm",
+            headers={"X-Dev-Actor": "demo-planner"},
+            json={
+                "previewFingerprint": preview["previewFingerprint"],
+                "snapshot": preview["snapshot"],
+                "runAgent": False,
+                "horizonStart": datetime.now(UTC).date().isoformat(),
+                "horizonDays": 10,
+                "useOvertime": False,
+                "defaultMinutesPerUnit": 30,
+            },
+        )
+        self.assertEqual(201, confirmed.status_code, confirmed.text)
+        self.assertIsNone(confirmed.json()["agent"])
 
         identity = self.client.get("/api/v1/identity/me")
         self.assertEqual(200, identity.status_code)
@@ -205,8 +235,11 @@ class ApiContractTests(unittest.TestCase):
         planning_page = self.client.get("/planning")
         self.assertEqual(200, planning_page.status_code)
         self.assertIn("有限产能排产", planning_page.text)
-        self.assertIn("产能日历", planning_page.text)
-        self.assertIn("调整排产条目", planning_page.text)
+        self.assertIn("人员与工作单元产能", planning_page.text)
+        self.assertIn("全宽排产结果", planning_page.text)
+        self.assertEqual(200, self.client.get("/planning/results").status_code)
+        self.assertEqual(200, self.client.get("/capacity").status_code)
+        self.assertEqual(200, self.client.get("/workspace").status_code)
 
     def test_dashboard_and_read_models_are_available(self):
         dashboard = self.client.get("/")
@@ -216,7 +249,8 @@ class ApiContractTests(unittest.TestCase):
         self.assertIn("企业系统连接面", dashboard.text)
         self.assertIn("排产智能体", dashboard.text)
         self.assertIn("L3 BOUNDED", dashboard.text)
-        self.assertIn("运行 L3 排产分析", dashboard.text)
+        self.assertIn("运行排产分析", dashboard.text)
+        self.assertIn("Agent 工作台", dashboard.text)
         self.assertIn("mes_dev_actor", dashboard.text)
 
         default_policy = self.client.get("/api/v1/quality/risk-policies/default-configuration")

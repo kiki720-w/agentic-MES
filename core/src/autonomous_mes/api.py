@@ -6,10 +6,11 @@ import json
 from datetime import date, datetime
 from pathlib import Path
 from typing import Annotated, Literal
+from urllib.parse import unquote
 from uuid import uuid4
 
 from fastapi import Depends, FastAPI, Header, Request
-from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse
+from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse, Response
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -61,10 +62,17 @@ from autonomous_mes.application.scheduling import (
     IngestSchedulingSnapshotCommand,
     RegisterPlanningResourceCommand,
     SchedulingApplicationService,
+    UpdatePlanningResourceCommand,
 )
 from autonomous_mes.application.scheduling_agent import (
     SchedulingAgent,
     SchedulingAgentCommand,
+)
+from autonomous_mes.application.spreadsheet_import import (
+    MAX_FILE_BYTES,
+    build_spreadsheet_template,
+    preview_spreadsheet,
+    snapshot_fingerprint,
 )
 from autonomous_mes.application.work_orders import (
     CreateWorkOrderCommand,
@@ -337,6 +345,17 @@ class RegisterPlanningResourceBody(BaseModel):
     capabilityCodes: list[str] = Field(default_factory=list)
 
 
+class UpdatePlanningResourceBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    expectedVersion: int = Field(ge=1)
+    name: str = Field(min_length=1, max_length=160)
+    workCenterId: str = Field(min_length=1, max_length=64)
+    dailyCapacityMinutes: float = Field(gt=0)
+    overtimeCapacityMinutes: float = Field(gt=0)
+    capabilityCodes: list[str] = Field(default_factory=list)
+    active: bool = True
+
+
 class GenerateScheduleBody(BaseModel):
     model_config = ConfigDict(extra="forbid")
     workshopId: str
@@ -362,6 +381,8 @@ class SnapshotOperationBody(BaseModel):
     assignedResourceId: str | None = None
     goodQuantity: int = Field(default=0, ge=0)
     scrapQuantity: int = Field(default=0, ge=0)
+    minutesPerUnit: float | None = Field(default=None, gt=0)
+    setupMinutes: float = Field(default=0, ge=0)
 
     @model_validator(mode="after")
     def validate_reported_quantity(self) -> "SnapshotOperationBody":
@@ -421,6 +442,17 @@ class SchedulingSnapshotPush(BaseModel):
     observedAt: datetime
     workOrders: list[SnapshotWorkOrderBody]
     resources: list[SnapshotResourceBody]
+
+
+class ConfirmSpreadsheetImportBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    previewFingerprint: str = Field(min_length=64, max_length=64)
+    snapshot: SchedulingSnapshotPush
+    runAgent: bool = True
+    horizonStart: date
+    horizonDays: int = Field(default=6, ge=1, le=31)
+    useOvertime: bool = False
+    defaultMinutesPerUnit: float = Field(default=30, gt=0)
 
 
 class ScheduleTransitionBody(BaseModel):
@@ -581,6 +613,9 @@ app = FastAPI(title="Autonomous MES Core", version="0.1.0")
 control_tower_path = Path(__file__).parent / "static" / "control_tower.html"
 simulator_path = Path(__file__).parent / "static" / "dashboard.html"
 planning_path = Path(__file__).parent / "static" / "planning.html"
+workspace_path = Path(__file__).parent / "static" / "agent_workspace.html"
+capacity_path = Path(__file__).parent / "static" / "capacity.html"
+planning_results_path = Path(__file__).parent / "static" / "planning_results.html"
 
 
 @app.exception_handler(DomainError)
@@ -700,6 +735,33 @@ def planning_console() -> HTMLResponse:
     return HTMLResponse(planning_path.read_text(encoding="utf-8"))
 
 
+@app.get("/workspace", response_class=HTMLResponse, include_in_schema=False)
+def agent_workspace() -> HTMLResponse:
+    return HTMLResponse(workspace_path.read_text(encoding="utf-8"))
+
+
+@app.get("/capacity", response_class=HTMLResponse, include_in_schema=False)
+def capacity_console() -> HTMLResponse:
+    return HTMLResponse(capacity_path.read_text(encoding="utf-8"))
+
+
+@app.get("/planning/results", response_class=HTMLResponse, include_in_schema=False)
+def planning_results_console() -> HTMLResponse:
+    return HTMLResponse(planning_results_path.read_text(encoding="utf-8"))
+
+
+@app.get("/api/v1/planning/imports/spreadsheet/template")
+def download_scheduling_spreadsheet_template(
+    identity: Annotated[Identity, Depends(current_identity)],
+) -> Response:
+    authorize_human(identity, "PLANNER", "SUPERVISOR", "OPERATOR", "QUALITY")
+    return Response(
+        content=build_spreadsheet_template(),
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": 'attachment; filename="agentic-aps-template.xlsx"'},
+    )
+
+
 @app.post("/api/v1/planning/resources", status_code=201)
 def register_planning_resource(
     body: RegisterPlanningResourceBody,
@@ -731,13 +793,107 @@ def list_planning_resources(
     return scheduling_service.list_resources(workshopId)
 
 
+@app.put("/api/v1/planning/resources/{resource_id}")
+def update_planning_resource(
+    resource_id: str,
+    body: UpdatePlanningResourceBody,
+    identity: Annotated[Identity, Depends(current_identity)],
+) -> dict[str, object]:
+    authorize_human(identity, "PLANNER")
+    return scheduling_service.update_resource(
+        UpdatePlanningResourceCommand(
+            resource_id,
+            body.expectedVersion,
+            body.name,
+            body.workCenterId,
+            body.dailyCapacityMinutes,
+            body.overtimeCapacityMinutes,
+            body.capabilityCodes,
+            body.active,
+            identity.subject_id,
+            str(uuid4()),
+        )
+    )
+
+
 @app.get("/api/v1/planning/snapshots/latest")
 def latest_scheduling_snapshot(
     workshopId: str,
     identity: Annotated[Identity, Depends(current_identity)],
+    includePayload: bool = True,
 ) -> dict[str, object] | None:
     authorize_human(identity, "PLANNER", "SUPERVISOR", "OPERATOR", "QUALITY")
-    return scheduling_service.latest_snapshot(workshopId)
+    return scheduling_service.latest_snapshot(workshopId, include_payload=includePayload)
+
+
+@app.post("/api/v1/planning/imports/spreadsheet/preview")
+async def preview_scheduling_spreadsheet(
+    request: Request,
+    workshopId: str,
+    identity: Annotated[Identity, Depends(current_identity)],
+    x_file_name: str = Header(default="schedule.xlsx", alias="X-File-Name"),
+) -> dict[str, object]:
+    authorize_human(identity, "PLANNER", "SUPERVISOR")
+    content = await request.body()
+    if len(content) > MAX_FILE_BYTES:
+        raise ValidationError("spreadsheet exceeds 5 MB limit")
+    result = preview_spreadsheet(content, unquote(x_file_name), workshopId)
+    if result.get("valid") and result.get("snapshot"):
+        try:
+            canonical = SchedulingSnapshotPush.model_validate(result["snapshot"]).model_dump(
+                mode="json"
+            )
+        except ValueError as exc:
+            result["valid"] = False
+            result["stats"]["errorCount"] += 1
+            result["issues"].append(
+                {
+                    "severity": "ERROR",
+                    "sheet": "业务校验",
+                    "row": None,
+                    "field": None,
+                    "message": str(exc),
+                }
+            )
+        else:
+            result["snapshot"] = canonical
+            result["previewFingerprint"] = snapshot_fingerprint(canonical)
+    return result
+
+
+@app.post("/api/v1/planning/imports/spreadsheet/confirm", status_code=201)
+def confirm_scheduling_spreadsheet(
+    body: ConfirmSpreadsheetImportBody,
+    identity: Annotated[Identity, Depends(current_identity)],
+) -> dict[str, object]:
+    authorize_human(identity, "PLANNER")
+    values = body.snapshot.model_dump(mode="json")
+    if snapshot_fingerprint(values) != body.previewFingerprint:
+        raise ValidationError("preview fingerprint changed; preview the file again")
+    ingested = scheduling_service.ingest_snapshot(
+        IngestSchedulingSnapshotCommand(
+            body.snapshot.sourceSystem,
+            body.snapshot.workshopId,
+            body.snapshot.sourceRevision,
+            body.snapshot.observedAt,
+            {"workOrders": values["workOrders"], "resources": values["resources"]},
+            identity.subject_id,
+            str(uuid4()),
+        )
+    )
+    agent_result = None
+    if body.runAgent:
+        agent_result = scheduling_agent.analyze(
+            SchedulingAgentCommand(
+                body.snapshot.workshopId,
+                body.horizonStart,
+                body.horizonDays,
+                body.useOvertime,
+                body.defaultMinutesPerUnit,
+                {},
+            )
+        )
+    return {"snapshot": ingested, "agent": agent_result}
 
 
 @app.post("/api/v1/planning/plans/generate", status_code=201)

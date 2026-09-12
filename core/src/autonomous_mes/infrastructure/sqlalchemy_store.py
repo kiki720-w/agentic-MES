@@ -671,6 +671,22 @@ class SqlAlchemyWorkOrderStore:
         except IntegrityError as exc:
             raise InvalidTransition("planning resource code already exists in workshop") from exc
 
+    def update_planning_resource_atomically(
+        self, resource: PlanningResource, expected_version: int, event: DomainEvent
+    ) -> None:
+        with self._sessions.begin() as session:
+            result = session.execute(
+                update(PlanningResourceRow)
+                .where(
+                    PlanningResourceRow.resource_id == resource.resource_id,
+                    PlanningResourceRow.version == expected_version,
+                )
+                .values(**_planning_resource_values(resource, include_id=False))
+            )
+            if getattr(result, "rowcount", 0) != 1:
+                raise InvalidTransition("planning resource version changed")
+            session.add_all(_event_rows([event]))
+
     def get_schedule_plan(self, plan_id: str) -> SchedulePlan | None:
         with self._sessions() as session:
             row = session.get(SchedulePlanRow, plan_id)

@@ -39,6 +39,10 @@ uvicorn autonomous_mes.api:app --app-dir src --reload
 - `POST /api/v1/quality/risk-policies/{policyId}/approve`：质量角色批准并设置生效时间
 - `POST /api/v1/quality/risk-policies/{policyId}/rollback-draft`：从已批准版本创建回滚草稿
 - `POST/GET /api/v1/planning/resources`：维护人员与工作单元能力及正常/加班产能
+- `PUT /api/v1/planning/resources/{resourceId}`：带版本冲突保护地修改产能、能力代码和启停状态
+- `GET /api/v1/planning/imports/spreadsheet/template`：下载工单/工序/产能三表XLSX模板
+- `POST /api/v1/planning/imports/spreadsheet/preview`：上传原始XLSX/CSV并执行有界解析与业务预检
+- `POST /api/v1/planning/imports/spreadsheet/confirm`：提交同一预检指纹后写入快照，可同时触发L3排产
 - `POST /api/v1/planning/plans/generate`：从MES工单、工序和设备事实生成有限产能排产草稿
 - `POST /api/v1/planning/agent/analyze`：L3智能体生成或复用排产方案，并最多提交到人工审批
 - `GET /api/v1/planning/snapshots/latest`：读取排产使用的最新外部制造快照及校验和
@@ -63,9 +67,16 @@ uvicorn autonomous_mes.api:app --app-dir src --reload
 - `GET /health/live`
 - `GET /health/ready`
 - `GET /`：制造智能控制塔HTML
+- `GET /workspace`：文字、表格和附件统一入口的Agent工作台
+- `GET /capacity`：可编辑的人员与工作单元产能台账
+- `GET /planning/results`：全宽计划版本、身份链、负荷、缺口和计算依据
 - `GET /simulator`：仅在模拟器模式开放的旧MES流程界面
 
 API支持内存适配器和PostgreSQL持久化适配器。DeepSeek 可通过供应商中立模型网关提供诊断解释；模型只接收最小化的结构化事实，不获得数据库、审批、发布或设备控制权限。未配置密钥或调用失败时自动回退到规则解释。自然语言“重新排产”调用的是确定性APS外层的L3排产智能体，而不是让大模型直接编写计划或更新生产数据。
+
+工序可携带`minutesPerUnit`与`setupMinutes`。APS优先使用来源快照中的工艺标准，按“准备工时 + 剩余数量 × 单件工时”计算需求；只有缺失标准时才使用工序覆盖或默认分钟数。排产明细保存采用的标准、准备时间和需求来源，便于解释与追责。
+
+XLSX导入不会保存原文件，也不会在上传时直接写库。预检先把“工单、工序、产能”三张表规范化为同一供应商中立快照并返回错误、统计和内容指纹；只有计划员确认同一指纹后才写入可追溯快照。图片和PDF当前提供统一附件入口与本地预览，但在配置视觉模型和数据出厂策略前不会伪装成已经完成多模态诊断。
 
 产品序列号谱系使用只追加的`product_units`和`genealogy_links`保存。登记序列号时，从工单冻结快照固化工单、产品版本、工艺路线、BOM、图纸，以及已绑定的工序和设备关系；追溯查询同时聚合该工单的质量检验结果。页面“事件追溯”区支持按序列号查询。
 

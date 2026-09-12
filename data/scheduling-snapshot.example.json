@@ -27,6 +27,8 @@
           "workCenterId": "WC-LATHE-01",
           "plannedQuantity": 20,
           "status": "PENDING",
+          "minutesPerUnit": 12,
+          "setupMinutes": 30,
           "goodQuantity": 0,
           "scrapQuantity": 0
         },

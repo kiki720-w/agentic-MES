@@ -756,6 +756,16 @@ class InMemoryWorkOrderStore:
             self._planning_resource_codes[code_key] = resource.resource_id
             self._append_event(event)
 
+    def update_planning_resource_atomically(
+        self, resource: PlanningResource, expected_version: int, event: DomainEvent
+    ) -> None:
+        with self._lock:
+            current = self._planning_resources.get(resource.resource_id)
+            if current is None or current.version != expected_version:
+                raise InvalidTransition("planning resource version changed")
+            self._planning_resources[resource.resource_id] = deepcopy(resource)
+            self._append_event(event)
+
     def get_schedule_plan(self, plan_id: str) -> SchedulePlan | None:
         with self._lock:
             return deepcopy(self._schedule_plans.get(plan_id))

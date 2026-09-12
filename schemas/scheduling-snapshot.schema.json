@@ -49,7 +49,9 @@
                 "status": { "enum": ["PENDING", "DISPATCHED", "IN_PROGRESS", "SUSPENDED", "COMPLETED"] },
                 "assignedResourceId": { "type": ["string", "null"] },
                 "goodQuantity": { "type": "integer", "minimum": 0, "default": 0 },
-                "scrapQuantity": { "type": "integer", "minimum": 0, "default": 0 }
+                "scrapQuantity": { "type": "integer", "minimum": 0, "default": 0 },
+                "minutesPerUnit": { "type": ["number", "null"], "exclusiveMinimum": 0 },
+                "setupMinutes": { "type": "number", "minimum": 0, "default": 0 }
               }
             }
           }

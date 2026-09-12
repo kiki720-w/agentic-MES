@@ -36,6 +36,20 @@ class RegisterPlanningResourceCommand:
 
 
 @dataclass(frozen=True)
+class UpdatePlanningResourceCommand:
+    resource_id: str
+    expected_version: int
+    name: str
+    work_center_id: str
+    daily_capacity_minutes: float
+    overtime_capacity_minutes: float
+    capability_codes: list[str]
+    active: bool
+    actor_id: str
+    correlation_id: str
+
+
+@dataclass(frozen=True)
 class GenerateScheduleCommand:
     workshop_id: str
     horizon_start: date
@@ -100,6 +114,24 @@ class SchedulingApplicationService:
             for item in self._store.list_planning_resources(workshop_id)
         ]
 
+    def update_resource(self, command: UpdatePlanningResourceCommand) -> dict[str, Any]:
+        current = self._store.get_planning_resource(command.resource_id)
+        if current is None:
+            raise NotFound("planning resource not found")
+        changed, event = current.update(
+            command.expected_version,
+            command.name,
+            command.work_center_id,
+            command.daily_capacity_minutes,
+            command.overtime_capacity_minutes,
+            command.capability_codes,
+            command.active,
+            command.actor_id,
+            command.correlation_id,
+        )
+        self._store.update_planning_resource_atomically(changed, current.version, event)
+        return serialize_planning_resource(changed)
+
     def generate(self, command: GenerateScheduleCommand) -> dict[str, Any]:
         if command.default_minutes_per_unit <= 0:
             raise ValidationError("default minutes per unit must be greater than zero")
@@ -110,6 +142,7 @@ class SchedulingApplicationService:
 
         days = _working_days(command.horizon_start, command.horizon_days)
         snapshot = self._store.get_latest_scheduling_snapshot(command.workshop_id)
+        operation_demands = _snapshot_operation_demands(snapshot) if snapshot else {}
         resources = self._candidates(command.workshop_id, snapshot)
         orders, order_constraints = self._orders(command.workshop_id, snapshot)
         orders.sort(key=lambda item: (-item.priority, item.due_at, item.created_at))
@@ -146,8 +179,11 @@ class SchedulingApplicationService:
                     earliest_index = min(earliest_index + 1, len(days))
                     continue
 
-                rate = _rate_for(order, operation.operation_code, command)
-                required = remaining_quantity * rate
+                rate, setup_minutes, demand_source = operation_demands.get(
+                    (order.work_order_id, operation.sequence),
+                    (_rate_for(order, operation.operation_code, command), 0.0, "FALLBACK_RATE"),
+                )
+                required = remaining_quantity * rate + setup_minutes
                 candidates = _matching_candidates(
                     resources, operation.work_center_id, operation.operation_code
                 )
@@ -182,6 +218,8 @@ class SchedulingApplicationService:
                 remainder, finish_index, _, selected, allocation = min(
                     options, key=lambda item: (item[0], item[1], item[2], item[3].code)
                 )
+                setup_remaining = setup_minutes
+                productive_minutes_allocated = 0.0
                 for day_index, minutes in allocation:
                     production_day = days[day_index]
                     loads[(selected.resource_id, production_day)] = (
@@ -190,6 +228,10 @@ class SchedulingApplicationService:
                     is_late = production_day > order.due_at.date()
                     if is_late:
                         late_orders.add(order.work_order_id)
+                    setup_on_day = min(setup_remaining, minutes)
+                    setup_remaining -= setup_on_day
+                    productive_minutes = max(0.0, minutes - setup_on_day)
+                    productive_minutes_allocated += productive_minutes
                     assignments.append(
                         {
                             "assignmentId": str(uuid4()),
@@ -206,7 +248,10 @@ class SchedulingApplicationService:
                             "resourceType": selected.resource_type,
                             "productionDate": production_day.isoformat(),
                             "plannedWorkMinutes": round(minutes, 3),
-                            "plannedQuantity": round(minutes / rate, 3),
+                            "plannedQuantity": round(productive_minutes / rate, 3),
+                            "minutesPerUnit": round(rate, 3),
+                            "setupMinutes": round(setup_on_day, 3),
+                            "demandSource": demand_source,
                             "dueAt": order.due_at.isoformat(),
                             "deliveryStatus": "LATE" if is_late else "ON_TIME",
                             "rationale": "能力匹配；候选资源中优先完整排入并最早完成",
@@ -216,11 +261,14 @@ class SchedulingApplicationService:
                     scheduled_orders.add(order.work_order_id)
                     earliest_index = min(finish_index + 1, len(days))
                 if remainder > 0.001:
+                    remaining_after_allocation = max(
+                        0.0, remaining_quantity - productive_minutes_allocated / rate
+                    )
                     shortages.append(
                         _shortage(
                             order,
                             operation,
-                            round(remainder / rate, 3),
+                            round(remaining_after_allocation, 3),
                             remainder,
                             "滚动计划窗口内剩余产能不足",
                         )
@@ -249,6 +297,7 @@ class SchedulingApplicationService:
             "defaultMinutesPerUnit": command.default_minutes_per_unit,
             "operationRates": command.operation_rates,
             "equipmentFallbackCapacityMinutes": 480,
+            "workDemandFormula": "setupMinutes + remainingQuantity × minutesPerUnit",
             "inputSource": (
                 {
                     "type": "EXTERNAL_SCHEDULING_SNAPSHOT",
@@ -301,9 +350,16 @@ class SchedulingApplicationService:
         self._store.add_scheduling_snapshot_atomically(snapshot, event)
         return {**serialize_scheduling_snapshot(snapshot), "reused": False}
 
-    def latest_snapshot(self, workshop_id: str) -> dict[str, Any] | None:
+    def latest_snapshot(
+        self, workshop_id: str, *, include_payload: bool = False
+    ) -> dict[str, Any] | None:
         snapshot = self._store.get_latest_scheduling_snapshot(workshop_id)
-        return serialize_scheduling_snapshot(snapshot) if snapshot else None
+        if snapshot is None:
+            return None
+        result = serialize_scheduling_snapshot(snapshot)
+        if include_payload:
+            result["payload"] = snapshot.payload
+        return result
 
     def list_plans(self, workshop_id: str, limit: int = 30) -> list[dict[str, Any]]:
         return [
@@ -576,6 +632,23 @@ def _snapshot_resources(snapshot: SchedulingSnapshot) -> list[_Candidate]:
             )
         )
     return resources
+
+
+def _snapshot_operation_demands(
+    snapshot: SchedulingSnapshot,
+) -> dict[tuple[str, int], tuple[float, float, str]]:
+    demands: dict[tuple[str, int], tuple[float, float, str]] = {}
+    for order in snapshot.payload["workOrders"]:
+        for operation in order.get("operations", []):
+            minutes_per_unit = operation.get("minutesPerUnit")
+            if minutes_per_unit is None:
+                continue
+            demands[(str(order["externalId"]), int(operation["sequence"]))] = (
+                float(minutes_per_unit),
+                float(operation.get("setupMinutes", 0)),
+                "SNAPSHOT_PROCESS_STANDARD",
+            )
+    return demands
 
 
 def _working_days(start: date, count: int) -> list[date]:
