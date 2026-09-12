@@ -1,7 +1,7 @@
 from dataclasses import dataclass
 from typing import Any
 
-from autonomous_mes.domain.errors import Forbidden, NotFound
+from autonomous_mes.domain.errors import Forbidden, NotFound, ValidationError
 from autonomous_mes.domain.events import DomainEvent
 
 from .genealogy import GenealogyApplicationService
@@ -131,6 +131,68 @@ class GetProductGenealogyTool:
                     "policyDecision": decision,
                     "objectType": "ProductUnit",
                     "objectId": serial,
+                },
+            )
+        )
+
+
+class ListQualityCandidatesTool:
+    name = "list_quality_candidates"
+    version = "1.0"
+    risk = "R1"
+
+    def __init__(self, store: MesStore, policy: AuthorizationPolicy) -> None:
+        self._store = store
+        self._policy = policy
+
+    def execute(
+        self,
+        context: ToolContext,
+        workshop_id: str,
+        limit: int = 30,
+    ) -> dict[str, Any]:
+        if not workshop_id.strip() or not 1 <= limit <= 100:
+            raise ValidationError("workshop and limit between 1 and 100 are required")
+        try:
+            self._policy.require_workshop_read(context.subject_id, workshop_id)
+        except Forbidden:
+            self._audit(context, workshop_id, "DENY")
+            raise
+        items = self._store.list_eligible_quality_operations(
+            limit,
+            0,
+            None,
+            workshop_id,
+        )
+        total = self._store.count_eligible_quality_operations(None, workshop_id)
+        self._audit(context, workshop_id, "ALLOW")
+        return {
+            "requestId": context.request_id,
+            "tool": self.name,
+            "toolVersion": self.version,
+            "risk": self.risk,
+            "policyDecision": "ALLOW",
+            "purpose": context.purpose,
+            "data": {"items": items, "count": len(items), "total": total, "limit": limit},
+        }
+
+    def _audit(self, context: ToolContext, workshop_id: str, decision: str) -> None:
+        self._store.record_tool_event(
+            DomainEvent.create(
+                event_type="AgentToolCallRecorded",
+                aggregate_type="AgentAction",
+                aggregate_id=context.request_id,
+                correlation_id=context.request_id,
+                payload={
+                    "agentId": context.agent_id,
+                    "subjectId": context.subject_id,
+                    "purpose": context.purpose,
+                    "tool": self.name,
+                    "toolVersion": self.version,
+                    "risk": self.risk,
+                    "policyDecision": decision,
+                    "objectType": "QualityCandidateQueue",
+                    "objectId": workshop_id,
                 },
             )
         )

@@ -2,6 +2,7 @@ from datetime import UTC, datetime, timedelta
 from unittest import TestCase
 
 from autonomous_mes.application.agent_runtime import IncidentResponseAgent
+from autonomous_mes.application.agent_tools import ListQualityCandidatesTool, ToolContext
 from autonomous_mes.application.equipment import (
     EquipmentApplicationService,
     RegisterEquipmentCommand,
@@ -18,7 +19,7 @@ from autonomous_mes.application.work_orders import (
     ReleaseWorkOrderCommand,
     WorkOrderApplicationService,
 )
-from autonomous_mes.infrastructure.memory import InMemoryWorkOrderStore
+from autonomous_mes.infrastructure.memory import InMemoryWorkOrderStore, ScopedReadPolicy
 
 
 class QualityWorkflowTests(TestCase):
@@ -152,6 +153,36 @@ class QualityWorkflowTests(TestCase):
         )
         after = self.quality.list_eligible_page(query="WO-Q-1")
         self.assertEqual(0, after["total"])
+
+    def test_agent_quality_queue_tool_is_scoped_and_audited(self) -> None:
+        self.completed_order()
+        tool = ListQualityCandidatesTool(
+            self.store,
+            ScopedReadPolicy({"quality-agent": {"WS-MACH-01"}}),
+        )
+
+        result = tool.execute(
+            ToolContext("quality-queue-request", "quality-agent-v1", "quality-agent", "triage"),
+            "WS-MACH-01",
+            10,
+        )
+
+        self.assertEqual("ALLOW", result["policyDecision"])
+        self.assertEqual(1, result["data"]["total"])
+        self.assertEqual("AgentToolCallRecorded", self.store.list_outbox()[-1]["eventType"])
+
+        with self.assertRaisesRegex(Exception, "not authorized"):
+            tool.execute(
+                ToolContext(
+                    "quality-queue-denied",
+                    "quality-agent-v1",
+                    "outside-user",
+                    "out-of-scope triage",
+                ),
+                "WS-MACH-01",
+                10,
+            )
+        self.assertEqual("DENY", self.store.list_outbox()[-1]["payload"]["policyDecision"])
 
     def test_expired_gauge_cannot_record_result(self) -> None:
         order = self.completed_order()

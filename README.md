@@ -54,6 +54,7 @@
 - `docs/step-25-million-event-scale-benchmark.md`：10万工单/100万事件实测与事件游标分页验收记录
 - `docs/step-26-operational-read-models-acceptance.md`：设备、资源与质量任务大样本读模型和分页验收记录
 - `docs/step-27-normalized-work-order-operations-acceptance.md`：工单工序关系化、兼容回填和全库待检池验收记录
+- `docs/step-28-operation-projection-and-agent-quality-tool-acceptance.md`：工序双写一致性巡检与Agent质量候选只读工具验收记录
 
 ## 当前决策门
 

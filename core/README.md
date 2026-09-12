@@ -33,11 +33,13 @@ uvicorn autonomous_mes.api:app --app-dir src --reload
 - `POST /api/v1/equipment`
 - `GET /api/v1/equipment`
 - `GET /api/v1/quality/eligible-operations`：全库已完工未检工序分页队列
+- `GET /api/v1/system/operation-projection-health`：JSON与关系工序在线一致性巡检
 - `POST /api/v1/equipment/{equipmentId}/telemetry`
 - `POST /api/v1/genealogy/product-units`
 - `GET /api/v1/genealogy/product-units/{productSerial}`
 - `POST /api/v1/genealogy/product-units/{productSerial}/execution-sessions`
 - `POST /api/v1/agent-tools/get-work-order`
+- `POST /api/v1/agent-tools/list-quality-candidates`：按车间授权并审计的R1只读候选池
 - `POST /api/v1/agent/incidents/analyze`
 - `POST /api/v1/agent/chat`：基于 MES 实时快照的查询，以及受控自然语言动作提案
 - `GET /api/v1/agent/model-status`
@@ -110,6 +112,8 @@ Agent可通过`POST /api/v1/agent-tools/get-product-genealogy`读取序列号谱
 设备、制造资源和质量任务列表支持数据库分页、搜索与状态/类型筛选，并分别提供全量汇总端点。控制台每页仅保留24条记录，迁移`0016`增加运营读模型复合索引。
 
 迁移`0017`已建立`work_order_operations`独立工序表并回填原JSON。工单聚合写入会在同一事务内同步更新JSON兼容字段、关系工序、Outbox和幂等记录；质量页面的待检池改为全库数据库查询，不再受最近100个工单窗口限制。旧JSON仍作为兼容读路径保留，待一致性观测稳定后再决定是否移除。
+
+工序兼容期已增加在线投影巡检：PostgreSQL在数据库内比较JSON与`work_order_operations`的数量和业务字段，返回`CONSISTENT`或`DRIFT_DETECTED`供监控告警。质量Agent只能通过`list_quality_candidates`按获授权车间分页读取待检候选；该R1工具的允许与拒绝都会审计，且没有创建检验或修改数据库的能力。
 
 启用 DeepSeek 时只需在本机 `.env` 设置 `AUTONOMOUS_MES_DEEPSEEK_API_KEY` 并重启 API。默认使用 `deepseek-v4-flash`、JSON 输出、关闭思考模式和 12 秒超时。每条提案记录 `narrativeSource` 与 `modelName`；不要把真实密钥写入仓库。
 

@@ -140,8 +140,15 @@ class QualityStore(Protocol):
         limit: int = 30,
         offset: int = 0,
         query: str | None = None,
+        workshop_id: str | None = None,
     ) -> list[dict[str, Any]]: ...
-    def count_eligible_quality_operations(self, query: str | None = None) -> int: ...
+    def count_eligible_quality_operations(
+        self,
+        query: str | None = None,
+        workshop_id: str | None = None,
+    ) -> int: ...
+
+    def inspect_operation_projection(self) -> dict[str, int]: ...
     def add_inspection_atomically(
         self, inspection: QualityInspection, event: DomainEvent
     ) -> None: ...

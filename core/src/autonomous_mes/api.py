@@ -17,6 +17,7 @@ from autonomous_mes.application.agent_runtime import FallbackNarrator, IncidentR
 from autonomous_mes.application.agent_tools import (
     GetProductGenealogyTool,
     GetWorkOrderTool,
+    ListQualityCandidatesTool,
     ToolContext,
 )
 from autonomous_mes.application.connector_security import HmacConnectorAuthenticator
@@ -118,6 +119,16 @@ class ProductGenealogyToolBody(BaseModel):
     subjectId: str
     purpose: str
     productSerial: str
+
+
+class QualityCandidatesToolBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    requestId: str
+    agentId: str
+    subjectId: str
+    purpose: str
+    workshopId: str
+    limit: int = Field(default=30, ge=1, le=100)
 
 
 class RegisterEquipmentBody(BaseModel):
@@ -353,6 +364,7 @@ connector_authenticator = HmacConnectorAuthenticator(
 policy = ScopedReadPolicy({"demo-planner": {"WS-MACH-01"}})
 get_work_order_tool = GetWorkOrderTool(store, policy, store)
 get_product_genealogy_tool = GetProductGenealogyTool(store, policy)
+list_quality_candidates_tool = ListQualityCandidatesTool(store, policy)
 app = FastAPI(title="Autonomous MES Core", version="0.1.0")
 dashboard_path = Path(__file__).parent / "static" / "dashboard.html"
 
@@ -542,6 +554,17 @@ def list_outbox(
         "offset": offset,
         "nextCursor": next_cursor,
     }
+
+
+@app.get("/api/v1/system/operation-projection-health")
+def operation_projection_health() -> dict[str, object]:
+    counts = store.inspect_operation_projection()
+    consistent = (
+        counts["legacyCount"] == counts["normalizedCount"]
+        and counts["mismatchCount"] == 0
+        and counts["extraCount"] == 0
+    )
+    return {"status": "CONSISTENT" if consistent else "DRIFT_DETECTED", **counts}
 
 
 @app.post("/api/v1/agent/incidents/analyze")
@@ -995,4 +1018,13 @@ def agent_get_product_genealogy(body: ProductGenealogyToolBody) -> dict[str, obj
     return get_product_genealogy_tool.execute(
         ToolContext(body.requestId, body.agentId, body.subjectId, body.purpose),
         body.productSerial,
+    )
+
+
+@app.post("/api/v1/agent-tools/list-quality-candidates")
+def agent_list_quality_candidates(body: QualityCandidatesToolBody) -> dict[str, object]:
+    return list_quality_candidates_tool.execute(
+        ToolContext(body.requestId, body.agentId, body.subjectId, body.purpose),
+        body.workshopId,
+        body.limit,
     )

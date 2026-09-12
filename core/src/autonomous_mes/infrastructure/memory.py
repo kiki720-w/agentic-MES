@@ -342,15 +342,26 @@ class InMemoryWorkOrderStore:
         limit: int = 30,
         offset: int = 0,
         query: str | None = None,
+        workshop_id: str | None = None,
     ) -> list[dict[str, Any]]:
         with self._lock:
-            return deepcopy(self._eligible_quality_operations(query)[offset : offset + limit])
+            return deepcopy(
+                self._eligible_quality_operations(query, workshop_id)[offset : offset + limit]
+            )
 
-    def count_eligible_quality_operations(self, query: str | None = None) -> int:
+    def count_eligible_quality_operations(
+        self,
+        query: str | None = None,
+        workshop_id: str | None = None,
+    ) -> int:
         with self._lock:
-            return len(self._eligible_quality_operations(query))
+            return len(self._eligible_quality_operations(query, workshop_id))
 
-    def _eligible_quality_operations(self, query: str | None) -> list[dict[str, Any]]:
+    def _eligible_quality_operations(
+        self,
+        query: str | None,
+        workshop_id: str | None,
+    ) -> list[dict[str, Any]]:
         inspected = {
             (item.work_order_id, item.operation_sequence) for item in self._inspections.values()
         }
@@ -361,6 +372,8 @@ class InMemoryWorkOrderStore:
             key=lambda item: (item.updated_at, item.work_order_id),
             reverse=True,
         ):
+            if workshop_id and order.workshop_id != workshop_id:
+                continue
             for operation in sorted(order.operations, key=lambda item: item.sequence):
                 if operation.status.value != "COMPLETED":
                     continue
@@ -386,6 +399,16 @@ class InMemoryWorkOrderStore:
                     }
                 )
         return results
+
+    def inspect_operation_projection(self) -> dict[str, int]:
+        with self._lock:
+            count = sum(len(item.operations) for item in self._orders.values())
+            return {
+                "legacyCount": count,
+                "normalizedCount": count,
+                "mismatchCount": 0,
+                "extraCount": 0,
+            }
 
     def add_inspection_atomically(self, inspection: QualityInspection, event: DomainEvent) -> None:
         with self._lock:

@@ -2,7 +2,7 @@ from datetime import datetime
 from typing import Any
 from uuid import uuid4
 
-from sqlalchemy import delete, exists, func, or_, select, update
+from sqlalchemy import delete, exists, func, or_, select, text, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 
@@ -458,6 +458,7 @@ class SqlAlchemyWorkOrderStore:
         limit: int = 30,
         offset: int = 0,
         query: str | None = None,
+        workshop_id: str | None = None,
     ) -> list[dict[str, Any]]:
         with self._sessions() as session:
             statement = self._eligible_quality_operations_statement(
@@ -467,6 +468,7 @@ class SqlAlchemyWorkOrderStore:
                     WorkOrderRow.version,
                 ),
                 query,
+                workshop_id,
             )
             rows = session.execute(
                 statement.order_by(
@@ -491,16 +493,25 @@ class SqlAlchemyWorkOrderStore:
                 for operation, human_code, work_order_version in rows
             ]
 
-    def count_eligible_quality_operations(self, query: str | None = None) -> int:
+    def count_eligible_quality_operations(
+        self,
+        query: str | None = None,
+        workshop_id: str | None = None,
+    ) -> int:
         with self._sessions() as session:
             statement = self._eligible_quality_operations_statement(
                 select(func.count()).select_from(WorkOrderOperationRow),
                 query,
+                workshop_id,
             )
             return int(session.scalar(statement) or 0)
 
     @staticmethod
-    def _eligible_quality_operations_statement(statement: Any, query: str | None) -> Any:
+    def _eligible_quality_operations_statement(
+        statement: Any,
+        query: str | None,
+        workshop_id: str | None,
+    ) -> Any:
         inspection_exists = exists(
             select(QualityInspectionRow.inspection_id).where(
                 QualityInspectionRow.work_order_id == WorkOrderOperationRow.work_order_id,
@@ -525,7 +536,41 @@ class SqlAlchemyWorkOrderStore:
                     WorkOrderOperationRow.work_center_id.ilike(pattern),
                 )
             )
+        if workshop_id:
+            statement = statement.where(WorkOrderRow.workshop_id == workshop_id)
         return statement
+
+    def inspect_operation_projection(self) -> dict[str, int]:
+        with self._sessions() as session:
+            if session.bind is not None and session.bind.dialect.name == "postgresql":
+                row = session.execute(text(_POSTGRES_OPERATION_PROJECTION_AUDIT)).mappings().one()
+                return {
+                    "legacyCount": int(row["legacy_count"]),
+                    "normalizedCount": int(row["normalized_count"]),
+                    "mismatchCount": int(row["mismatch_count"]),
+                    "extraCount": int(row["extra_count"]),
+                }
+            legacy_rows = session.execute(
+                select(WorkOrderRow.work_order_id, WorkOrderRow.operations)
+            ).all()
+            normalized_rows = session.scalars(select(WorkOrderOperationRow)).all()
+            legacy = {
+                (work_order_id, int(operation["sequence"])): _operation_dict_signature(operation)
+                for work_order_id, operations in legacy_rows
+                for operation in operations
+            }
+            normalized = {
+                (operation.work_order_id, operation.sequence): _operation_row_signature(operation)
+                for operation in normalized_rows
+            }
+            return {
+                "legacyCount": len(legacy),
+                "normalizedCount": len(normalized),
+                "mismatchCount": sum(
+                    1 for key, value in legacy.items() if normalized.get(key) != value
+                ),
+                "extraCount": len(set(normalized) - set(legacy)),
+            }
 
     def add_inspection_atomically(self, inspection: QualityInspection, event: DomainEvent) -> None:
         with self._sessions.begin() as session:
@@ -853,6 +898,75 @@ class SqlAlchemyWorkOrderStore:
                 )
         except IntegrityError as exc:
             raise IdempotencyConflict("connector nonce was already used") from exc
+
+
+_POSTGRES_OPERATION_PROJECTION_AUDIT = """
+with legacy as (
+    select
+        work_order.work_order_id,
+        (item.value ->> 'sequence')::integer as sequence,
+        item.value ->> 'operationCode' as operation_code,
+        item.value ->> 'operationName' as operation_name,
+        item.value ->> 'workCenterId' as work_center_id,
+        (item.value ->> 'plannedQuantity')::integer as planned_quantity,
+        coalesce(item.value ->> 'status', 'PENDING') as status,
+        item.value ->> 'assignedResourceId' as assigned_resource_id,
+        coalesce((item.value ->> 'goodQuantity')::integer, 0) as good_quantity,
+        coalesce((item.value ->> 'scrapQuantity')::integer, 0) as scrap_quantity
+    from work_orders as work_order
+    cross join lateral jsonb_array_elements(work_order.operations::jsonb) as item(value)
+), compared as (
+    select
+        legacy.work_order_id as legacy_id,
+        operation.work_order_id as normalized_id,
+        legacy.operation_code is distinct from operation.operation_code
+            or legacy.operation_name is distinct from operation.operation_name
+            or legacy.work_center_id is distinct from operation.work_center_id
+            or legacy.planned_quantity is distinct from operation.planned_quantity
+            or legacy.status is distinct from operation.status
+            or legacy.assigned_resource_id is distinct from operation.assigned_resource_id
+            or legacy.good_quantity is distinct from operation.good_quantity
+            or legacy.scrap_quantity is distinct from operation.scrap_quantity as differs
+    from legacy
+    full outer join work_order_operations as operation
+        on operation.work_order_id = legacy.work_order_id
+        and operation.sequence = legacy.sequence
+)
+select
+    (select count(1) from legacy) as legacy_count,
+    (select count(1) from work_order_operations) as normalized_count,
+    count(1) filter (
+        where legacy_id is not null and normalized_id is not null and differs
+    ) as mismatch_count,
+    count(1) filter (where legacy_id is null and normalized_id is not null) as extra_count
+from compared
+"""
+
+
+def _operation_dict_signature(item: dict[str, Any]) -> tuple[object, ...]:
+    return (
+        str(item["operationCode"]),
+        str(item["operationName"]),
+        str(item["workCenterId"]),
+        int(item["plannedQuantity"]),
+        str(item.get("status", "PENDING")),
+        item.get("assignedResourceId"),
+        int(item.get("goodQuantity", 0)),
+        int(item.get("scrapQuantity", 0)),
+    )
+
+
+def _operation_row_signature(item: WorkOrderOperationRow) -> tuple[object, ...]:
+    return (
+        item.operation_code,
+        item.operation_name,
+        item.work_center_id,
+        item.planned_quantity,
+        item.status,
+        item.assigned_resource_id,
+        item.good_quantity,
+        item.scrap_quantity,
+    )
 
 
 def _row_values(item: WorkOrder) -> dict[str, Any]:

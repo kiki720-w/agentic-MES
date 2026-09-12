@@ -95,6 +95,8 @@ class ApiContractTests(unittest.TestCase):
             params={"cursor": "eyJvY2N1cnJlZEF0IjoiMjAyNi0wMS0wMVQwMDowMDowMCIsImV2ZW50SWQiOiJ4In0"},
         )
         self.assertEqual(409, invalid_cursor.status_code)
+        projection = self.client.get("/api/v1/system/operation-projection-health").json()
+        self.assertEqual("CONSISTENT", projection["status"])
 
     def test_operational_read_models_are_paginated_and_filterable(self):
         equipment_code = f"CNC-PAGE-{uuid4().hex[:8]}"
@@ -237,6 +239,21 @@ class ApiContractTests(unittest.TestCase):
         )
         self.assertEqual(200, allowed.status_code, allowed.text)
         self.assertEqual("ALLOW", allowed.json()["policyDecision"])
+
+        quality_queue = self.client.post(
+            "/api/v1/agent-tools/list-quality-candidates",
+            json={
+                "requestId": f"req-{uuid4().hex}",
+                "agentId": "quality-agent-readonly",
+                "subjectId": "demo-planner",
+                "purpose": "triage pending quality candidates",
+                "workshopId": "WS-MACH-01",
+                "limit": 10,
+            },
+        )
+        self.assertEqual(200, quality_queue.status_code, quality_queue.text)
+        self.assertEqual("R1", quality_queue.json()["risk"])
+        self.assertEqual("ALLOW", quality_queue.json()["policyDecision"])
 
         denied = self.client.post(
             "/api/v1/agent-tools/get-work-order",

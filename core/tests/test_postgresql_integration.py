@@ -105,6 +105,12 @@ class PostgreSqlIntegrationTests(unittest.TestCase):
                 (str(created["workOrderId"]), 10),
             )
             self.assertIsNotNone(operation)
+            assert operation is not None
+            self.assertEqual("PENDING", operation.status)
+
+        projection = store.inspect_operation_projection()
+        self.assertEqual(0, projection["mismatchCount"])
+        self.assertEqual(0, projection["extraCount"])
 
     def test_unique_constraint_rolls_back_order_event_and_idempotency(self) -> None:
         store = SqlAlchemyWorkOrderStore(self.sessions)
