@@ -5,7 +5,7 @@ from typing import Any
 from autonomous_mes.domain.errors import NotFound, ValidationError
 from autonomous_mes.domain.quality import QualityInspection
 
-from .ports import QualityStore, WorkOrderStore
+from .ports import ManufacturingResourceStore, QualityStore, WorkOrderStore
 
 
 @dataclass(frozen=True)
@@ -18,8 +18,14 @@ class CreateInspectionCommand:
 
 
 class QualityApplicationService:
-    def __init__(self, store: QualityStore, orders: WorkOrderStore) -> None:
+    def __init__(
+        self,
+        store: QualityStore,
+        orders: WorkOrderStore,
+        resources: ManufacturingResourceStore | None = None,
+    ) -> None:
         self._store, self._orders = store, orders
+        self._resources = resources
 
     def create(self, command: CreateInspectionCommand) -> dict[str, Any]:
         order = self._orders.get(command.work_order_id)
@@ -48,17 +54,23 @@ class QualityApplicationService:
         actor_id: str,
         correlation_id: str,
         gauge_id: str,
-        calibration_due_at: datetime,
         measurement_recorded_at: datetime,
     ) -> dict[str, Any]:
         current = self._require(inspection_id)
+        gauge = (
+            self._resources.get_manufacturing_resource("GAUGE", gauge_id)
+            if self._resources
+            else None
+        )
+        if gauge is None or gauge.calibration_due_at is None or gauge.status != "AVAILABLE":
+            raise ValidationError("available gauge master record is required")
         changed = current.record(
             passed,
             defect_code,
             notes,
             expected_version,
             gauge_id,
-            calibration_due_at,
+            gauge.calibration_due_at,
             measurement_recorded_at,
         )
         self._store.update_inspection_atomically(

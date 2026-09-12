@@ -10,6 +10,7 @@ from autonomous_mes.domain.genealogy import (
     MaterialConsumption,
     ProductUnit,
 )
+from autonomous_mes.domain.master_data import ManufacturingResource
 from autonomous_mes.domain.quality import QualityInspection
 from autonomous_mes.domain.work_order import WorkOrder
 
@@ -115,12 +116,26 @@ class GenealogyStore(Protocol):
     ) -> None: ...
 
 
+class ManufacturingResourceStore(Protocol):
+    def get_manufacturing_resource(
+        self, resource_type: str, resource_id: str, revision: str = ""
+    ) -> ManufacturingResource | None: ...
+    def list_manufacturing_resources(self, limit: int = 100) -> list[ManufacturingResource]: ...
+    def add_manufacturing_resource_atomically(
+        self, resource: ManufacturingResource, event: DomainEvent
+    ) -> None: ...
+    def update_manufacturing_resource_atomically(
+        self, resource: ManufacturingResource, expected_version: int, event: DomainEvent
+    ) -> None: ...
+
+
 class MesStore(
     WorkOrderStore,
     EquipmentStore,
     AgentProposalStore,
     QualityStore,
     GenealogyStore,
+    ManufacturingResourceStore,
     ToolAuditSink,
     Protocol,
 ):

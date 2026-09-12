@@ -13,6 +13,7 @@ from autonomous_mes.domain.genealogy import (
     MaterialConsumption,
     ProductUnit,
 )
+from autonomous_mes.domain.master_data import ManufacturingResource
 from autonomous_mes.domain.quality import QualityInspection
 from autonomous_mes.domain.work_order import WorkOrder
 
@@ -36,6 +37,7 @@ class InMemoryWorkOrderStore:
         self._genealogy_links: dict[str, list[GenealogyLink]] = {}
         self._execution_sessions: dict[str, ExecutionSession] = {}
         self._material_consumptions: dict[str, list[MaterialConsumption]] = {}
+        self._manufacturing_resources: dict[str, ManufacturingResource] = {}
 
     def get(self, work_order_id: str) -> WorkOrder | None:
         with self._lock:
@@ -284,6 +286,39 @@ class InMemoryWorkOrderStore:
             self._execution_sessions[session.session_id] = deepcopy(session)
             self._material_consumptions[session.session_id] = deepcopy(materials)
             self._genealogy_links.setdefault(session.product_serial, []).extend(deepcopy(links))
+            self._append_event(event)
+
+    def get_manufacturing_resource(
+        self, resource_type: str, resource_id: str, revision: str = ""
+    ) -> ManufacturingResource | None:
+        key = f"{resource_type.strip().upper()}:{resource_id.strip().upper()}:{revision.strip().upper()}"
+        with self._lock:
+            return deepcopy(self._manufacturing_resources.get(key))
+
+    def list_manufacturing_resources(self, limit: int = 100) -> list[ManufacturingResource]:
+        with self._lock:
+            items = sorted(
+                self._manufacturing_resources.values(), key=lambda item: item.updated_at, reverse=True
+            )
+            return deepcopy(items[:limit])
+
+    def add_manufacturing_resource_atomically(
+        self, resource: ManufacturingResource, event: DomainEvent
+    ) -> None:
+        with self._lock:
+            if resource.key in self._manufacturing_resources:
+                raise IdempotencyConflict("manufacturing resource already exists")
+            self._manufacturing_resources[resource.key] = deepcopy(resource)
+            self._append_event(event)
+
+    def update_manufacturing_resource_atomically(
+        self, resource: ManufacturingResource, expected_version: int, event: DomainEvent
+    ) -> None:
+        with self._lock:
+            current = self._manufacturing_resources.get(resource.key)
+            if current is None or current.version != expected_version:
+                raise InvalidTransition("manufacturing resource version changed")
+            self._manufacturing_resources[resource.key] = deepcopy(resource)
             self._append_event(event)
 
 

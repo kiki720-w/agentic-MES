@@ -24,6 +24,11 @@ from autonomous_mes.application.genealogy import (
     RecordExecutionSessionCommand,
     RegisterProductUnitCommand,
 )
+from autonomous_mes.application.master_data import (
+    ManufacturingResourceApplicationService,
+    RegisterManufacturingResourceCommand,
+    UpdateManufacturingResourceCommand,
+)
 from autonomous_mes.application.natural_language import NaturalLanguageQueryService
 from autonomous_mes.application.ports import MesStore
 from autonomous_mes.application.quality import CreateInspectionCommand, QualityApplicationService
@@ -146,8 +151,35 @@ class InspectionResultBody(BaseModel):
     notes: str | None = None
     actorId: str
     gaugeId: str
-    calibrationDueAt: datetime
     measurementRecordedAt: datetime
+
+
+class RegisterManufacturingResourceBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    resourceType: str
+    resourceId: str
+    revision: str | None = None
+    name: str
+    status: str
+    lifeRemainingPercent: float | None = None
+    calibrationDueAt: datetime | None = None
+    sourceSystem: str = "MES"
+    externalReference: str | None = None
+    sourceUpdatedAt: datetime
+    actorId: str
+
+
+class UpdateManufacturingResourceBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    resourceType: str
+    resourceId: str
+    revision: str | None = None
+    expectedVersion: int = Field(gt=0)
+    status: str
+    lifeRemainingPercent: float | None = None
+    calibrationDueAt: datetime | None = None
+    sourceUpdatedAt: datetime
+    actorId: str
 
 
 class ReworkApprovalBody(BaseModel):
@@ -181,8 +213,6 @@ class ProcessResourceBody(BaseModel):
     resourceType: str
     resourceId: str
     revision: str | None = None
-    status: str
-    lifeRemainingPercent: float | None = None
 
 
 class RecordExecutionSessionBody(BaseModel):
@@ -235,8 +265,9 @@ incident_agent = IncidentResponseAgent(
 natural_language_service = NaturalLanguageQueryService(
     store, deepseek_model_gateway, incident_agent
 )
-quality_service = QualityApplicationService(store, store)
+quality_service = QualityApplicationService(store, store, store)
 genealogy_service = GenealogyApplicationService(store)
+master_data_service = ManufacturingResourceApplicationService(store)
 policy = ScopedReadPolicy({"demo-planner": {"WS-MACH-01"}})
 get_work_order_tool = GetWorkOrderTool(store, policy, store)
 get_product_genealogy_tool = GetProductGenealogyTool(store, policy)
@@ -394,11 +425,9 @@ def record_execution_session(
             [
                 ProcessResourceInput(
                     item.resourceType,
-                    item.resourceId,
-                    item.revision,
-                    item.status,
-                    item.lifeRemainingPercent,
-                )
+                item.resourceId,
+                item.revision,
+            )
                 for item in body.resources
             ],
         )
@@ -425,7 +454,6 @@ def record_quality_result(inspection_id: str, body: InspectionResultBody) -> dic
         body.actorId,
         str(uuid4()),
         body.gaugeId,
-        body.calibrationDueAt,
         body.measurementRecordedAt,
     )
 
@@ -460,6 +488,52 @@ def register_equipment(body: RegisterEquipmentBody) -> dict[str, object]:
 def list_equipment(limit: int = 100) -> dict[str, object]:
     items = equipment_service.list(limit)
     return {"items": items, "count": len(items)}
+
+
+@app.post("/api/v1/master-data/manufacturing-resources", status_code=201)
+def register_manufacturing_resource(
+    body: RegisterManufacturingResourceBody,
+) -> dict[str, object]:
+    return master_data_service.register(
+        RegisterManufacturingResourceCommand(
+            str(uuid4()),
+            body.actorId,
+            body.resourceType,
+            body.resourceId,
+            body.revision,
+            body.name,
+            body.status,
+            body.lifeRemainingPercent,
+            body.calibrationDueAt,
+            body.sourceSystem,
+            body.externalReference,
+            body.sourceUpdatedAt,
+        )
+    )
+
+
+@app.get("/api/v1/master-data/manufacturing-resources")
+def list_manufacturing_resources(limit: int = 100) -> dict[str, object]:
+    items = master_data_service.list(limit)
+    return {"items": items, "count": len(items)}
+
+
+@app.put("/api/v1/master-data/manufacturing-resources/state")
+def update_manufacturing_resource(body: UpdateManufacturingResourceBody) -> dict[str, object]:
+    return master_data_service.update(
+        UpdateManufacturingResourceCommand(
+            str(uuid4()),
+            body.actorId,
+            body.resourceType,
+            body.resourceId,
+            body.revision,
+            body.expectedVersion,
+            body.status,
+            body.lifeRemainingPercent,
+            body.calibrationDueAt,
+            body.sourceUpdatedAt,
+        )
+    )
 
 
 @app.post("/api/v1/equipment/{equipment_id}/telemetry")

@@ -16,6 +16,7 @@ from autonomous_mes.domain.genealogy import (
     MaterialConsumption,
     ProductUnit,
 )
+from autonomous_mes.domain.master_data import ManufacturingResource
 from autonomous_mes.domain.quality import InspectionStatus, QualityInspection
 from autonomous_mes.domain.work_order import (
     FrozenRevisions,
@@ -34,6 +35,7 @@ from .models import (
     ExecutionSessionRow,
     GenealogyLinkRow,
     IdempotencyRecordRow,
+    ManufacturingResourceRow,
     MaterialConsumptionRow,
     ProductUnitRow,
     QualityInspectionRow,
@@ -412,6 +414,73 @@ class SqlAlchemyWorkOrderStore:
         except IntegrityError as exc:
             raise IdempotencyConflict("execution session or genealogy fact already exists") from exc
 
+    def get_manufacturing_resource(
+        self, resource_type: str, resource_id: str, revision: str = ""
+    ) -> ManufacturingResource | None:
+        key = f"{resource_type.strip().upper()}:{resource_id.strip().upper()}:{revision.strip().upper()}"
+        with self._sessions() as session:
+            row = session.get(ManufacturingResourceRow, key)
+            return _manufacturing_resource_to_domain(row) if row else None
+
+    def list_manufacturing_resources(self, limit: int = 100) -> list[ManufacturingResource]:
+        with self._sessions() as session:
+            rows = session.scalars(
+                select(ManufacturingResourceRow)
+                .order_by(ManufacturingResourceRow.updated_at.desc())
+                .limit(limit)
+            ).all()
+            return [_manufacturing_resource_to_domain(row) for row in rows]
+
+    def add_manufacturing_resource_atomically(
+        self, resource: ManufacturingResource, event: DomainEvent
+    ) -> None:
+        try:
+            with self._sessions.begin() as session:
+                session.add(
+                    ManufacturingResourceRow(
+                        resource_key=resource.key,
+                        resource_type=resource.resource_type,
+                        resource_id=resource.resource_id,
+                        revision=resource.revision,
+                        name=resource.name,
+                        status=resource.status,
+                        life_remaining_percent=resource.life_remaining_percent,
+                        calibration_due_at=resource.calibration_due_at,
+                        source_system=resource.source_system,
+                        external_reference=resource.external_reference,
+                        source_updated_at=resource.source_updated_at,
+                        version=resource.version,
+                        created_at=resource.created_at,
+                        updated_at=resource.updated_at,
+                    )
+                )
+                session.add_all(_event_rows([event]))
+        except IntegrityError as exc:
+            raise IdempotencyConflict("manufacturing resource already exists") from exc
+
+    def update_manufacturing_resource_atomically(
+        self, resource: ManufacturingResource, expected_version: int, event: DomainEvent
+    ) -> None:
+        with self._sessions.begin() as session:
+            result = session.execute(
+                update(ManufacturingResourceRow)
+                .where(
+                    ManufacturingResourceRow.resource_key == resource.key,
+                    ManufacturingResourceRow.version == expected_version,
+                )
+                .values(
+                    status=resource.status,
+                    life_remaining_percent=resource.life_remaining_percent,
+                    calibration_due_at=resource.calibration_due_at,
+                    source_updated_at=resource.source_updated_at,
+                    version=resource.version,
+                    updated_at=resource.updated_at,
+                )
+            )
+            if getattr(result, "rowcount", 0) != 1:
+                raise InvalidTransition("manufacturing resource version changed")
+            session.add_all(_event_rows([event]))
+
 
 def _row_values(item: WorkOrder) -> dict[str, Any]:
     return {
@@ -688,4 +757,22 @@ def _material_consumption_to_domain(row: MaterialConsumptionRow) -> MaterialCons
         row.quantity,
         row.unit,
         row.recorded_at,
+    )
+
+
+def _manufacturing_resource_to_domain(row: ManufacturingResourceRow) -> ManufacturingResource:
+    return ManufacturingResource(
+        row.resource_type,
+        row.resource_id,
+        row.revision,
+        row.name,
+        row.status,
+        row.life_remaining_percent,
+        row.calibration_due_at,
+        row.source_system,
+        row.external_reference,
+        row.source_updated_at,
+        row.version,
+        row.created_at,
+        row.updated_at,
     )

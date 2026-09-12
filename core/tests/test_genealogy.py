@@ -13,6 +13,10 @@ from autonomous_mes.application.genealogy import (
     RecordExecutionSessionCommand,
     RegisterProductUnitCommand,
 )
+from autonomous_mes.application.master_data import (
+    ManufacturingResourceApplicationService,
+    RegisterManufacturingResourceCommand,
+)
 from autonomous_mes.application.work_orders import (
     CreateWorkOrderCommand,
     OperationCommand,
@@ -29,6 +33,33 @@ class GenealogyTests(unittest.TestCase):
         self.store = InMemoryWorkOrderStore()
         self.orders = WorkOrderApplicationService(self.store)
         self.genealogy = GenealogyApplicationService(self.store)
+        masters = ManufacturingResourceApplicationService(self.store)
+        for index, values in enumerate(
+            [
+                ("TOOL", "tool-7", None, "刀具7", "AVAILABLE", 62.5),
+                ("FIXTURE", "fixture-3", None, "夹具3", "AVAILABLE", None),
+                ("NC_PROGRAM", "shaft-turn", "r12", "车削程序", "RELEASED", None),
+                ("TOOL", "T-1", None, "失效刀具", "AVAILABLE", 0),
+                ("NC_PROGRAM", "P-1", "R1", "草稿程序", "DRAFT", None),
+            ]
+        ):
+            kind, resource_id, revision, name, status, life = values
+            masters.register(
+                RegisterManufacturingResourceCommand(
+                    f"master-{index}",
+                    "engineer",
+                    kind,
+                    resource_id,
+                    revision,
+                    name,
+                    status,
+                    life,
+                    None,
+                    "MES",
+                    None,
+                    datetime.now(UTC),
+                )
+            )
         equipment = EquipmentApplicationService(self.store).register(
             RegisterEquipmentCommand(
                 "eq", "CNC-TRACE-1", "谱系机床", "WS-MACH-01", "WC-01", "SIMULATED"
@@ -91,9 +122,9 @@ class GenealogyTests(unittest.TestCase):
                 started + timedelta(minutes=6),
                 [MaterialLotInput("steel-lot-9", 1.25, "kg")],
                 [
-                    ProcessResourceInput("TOOL", "tool-7", None, "AVAILABLE", 62.5),
-                    ProcessResourceInput("FIXTURE", "fixture-3", None, "AVAILABLE"),
-                    ProcessResourceInput("NC_PROGRAM", "shaft-turn", "r12", "RELEASED"),
+                    ProcessResourceInput("TOOL", "tool-7", None),
+                    ProcessResourceInput("FIXTURE", "fixture-3", None),
+                    ProcessResourceInput("NC_PROGRAM", "shaft-turn", "r12"),
                 ],
             )
         )
@@ -156,14 +187,14 @@ class GenealogyTests(unittest.TestCase):
             self.genealogy.record_execution(
                 RecordExecutionSessionCommand(
                     **base,
-                    resources=[ProcessResourceInput("TOOL", "T-1", None, "AVAILABLE", 0)],
+                    resources=[ProcessResourceInput("TOOL", "T-1", None)],
                 )
             )
         with self.assertRaisesRegex(Exception, "released revision"):
             self.genealogy.record_execution(
                 RecordExecutionSessionCommand(
                     **base,
-                    resources=[ProcessResourceInput("NC_PROGRAM", "P-1", "R1", "DRAFT")],
+                    resources=[ProcessResourceInput("NC_PROGRAM", "P-1", "R1")],
                 )
             )
 

@@ -240,3 +240,27 @@ class MaterialConsumptionRow(Base):
     quantity: Mapped[float] = mapped_column(Float, nullable=False)
     unit: Mapped[str] = mapped_column(String(16), nullable=False)
     recorded_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class ManufacturingResourceRow(Base):
+    __tablename__ = "manufacturing_resources"
+    __table_args__ = (
+        UniqueConstraint(
+            "resource_type", "resource_id", "revision", name="uq_manufacturing_resource_key"
+        ),
+    )
+
+    resource_key: Mapped[str] = mapped_column(String(256), primary_key=True)
+    resource_type: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    resource_id: Mapped[str] = mapped_column(String(96), nullable=False, index=True)
+    revision: Mapped[str] = mapped_column(String(64), nullable=False, default="")
+    name: Mapped[str] = mapped_column(String(160), nullable=False)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    life_remaining_percent: Mapped[float | None] = mapped_column(Float)
+    calibration_due_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    source_system: Mapped[str] = mapped_column(String(64), nullable=False)
+    external_reference: Mapped[str | None] = mapped_column(String(256))
+    source_updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    version: Mapped[int] = mapped_column(Integer, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)

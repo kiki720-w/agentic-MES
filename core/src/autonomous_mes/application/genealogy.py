@@ -34,8 +34,6 @@ class ProcessResourceInput:
     resource_type: str
     resource_id: str
     revision: str | None
-    status: str
-    life_remaining_percent: float | None = None
 
 
 @dataclass(frozen=True)
@@ -115,16 +113,22 @@ class GenealogyApplicationService:
             raise InvalidTransition("execution evidence requires a completed operation")
         if operation.assigned_resource_id != command.equipment_id:
             raise InvalidTransition("equipment does not match the dispatched operation")
-        resources = [
-            ProcessResourceEvidence.create(
-                item.resource_type,
-                item.resource_id,
-                item.revision,
-                item.status,
-                item.life_remaining_percent,
+        resources: list[ProcessResourceEvidence] = []
+        for item in command.resources or []:
+            master = self._store.get_manufacturing_resource(
+                item.resource_type, item.resource_id, item.revision or ""
             )
-            for item in (command.resources or [])
-        ]
+            if master is None:
+                raise NotFound("manufacturing resource not found")
+            resources.append(
+                ProcessResourceEvidence.create(
+                    master.resource_type,
+                    master.resource_id,
+                    master.revision or None,
+                    master.status,
+                    master.life_remaining_percent,
+                )
+            )
         session = ExecutionSession.create(
             command.session_id,
             serial,

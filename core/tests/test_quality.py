@@ -6,6 +6,10 @@ from autonomous_mes.application.equipment import (
     EquipmentApplicationService,
     RegisterEquipmentCommand,
 )
+from autonomous_mes.application.master_data import (
+    ManufacturingResourceApplicationService,
+    RegisterManufacturingResourceCommand,
+)
 from autonomous_mes.application.quality import CreateInspectionCommand, QualityApplicationService
 from autonomous_mes.application.work_orders import (
     CreateWorkOrderCommand,
@@ -21,8 +25,29 @@ class QualityWorkflowTests(TestCase):
     def setUp(self) -> None:
         self.store = InMemoryWorkOrderStore()
         self.orders = WorkOrderApplicationService(self.store)
-        self.quality = QualityApplicationService(self.store, self.store)
+        self.quality = QualityApplicationService(self.store, self.store, self.store)
         self.equipment = EquipmentApplicationService(self.store)
+        masters = ManufacturingResourceApplicationService(self.store)
+        now = datetime.now(UTC)
+        for index, (resource_id, due) in enumerate(
+            [("GAUGE-01", now + timedelta(days=30)), ("GAUGE-EXPIRED", now - timedelta(days=1))]
+        ):
+            masters.register(
+                RegisterManufacturingResourceCommand(
+                    f"gauge-{index}",
+                    "quality-admin",
+                    "GAUGE",
+                    resource_id,
+                    None,
+                    resource_id,
+                    "AVAILABLE",
+                    None,
+                    due,
+                    "MES",
+                    None,
+                    now,
+                )
+            )
 
     def completed_order(self) -> dict[str, object]:
         equipment = self.equipment.register(
@@ -99,7 +124,6 @@ class QualityWorkflowTests(TestCase):
             "inspector",
             "q2",
             "GAUGE-01",
-            datetime.now(UTC) + timedelta(days=30),
             datetime.now(UTC),
         )
         assert inspection["status"] == "QUARANTINED"
@@ -132,6 +156,5 @@ class QualityWorkflowTests(TestCase):
                 "inspector",
                 "q-exp-result",
                 "GAUGE-EXPIRED",
-                now - timedelta(days=1),
                 now,
             )
