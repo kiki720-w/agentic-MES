@@ -1,6 +1,6 @@
 # Autonomous MES Core
 
-当前垂直切片覆盖创建/释放工单，以及机械加工工序的派工、开工、报工、完工；每个动作都会原子写入Outbox，并支持Agent只读`get_work_order`工具。
+当前垂直切片覆盖创建/释放工单，机械加工工序的派工、开工、报工、完工，以及设备台账和实时遥测采集；每个业务动作都会原子写入Outbox，并支持Agent只读`get_work_order`工具。
 
 本目录是自主实现，不依赖`candidates/`中的任何候选MES代码。
 
@@ -28,6 +28,9 @@ uvicorn autonomous_mes.api:app --app-dir src --reload
 - `POST /api/v1/work-orders/{workOrderId}/operations/{sequence}/report`
 - `POST /api/v1/work-orders/{workOrderId}/operations/{sequence}/complete`
 - `GET /api/v1/work-orders/{workOrderId}`
+- `POST /api/v1/equipment`
+- `GET /api/v1/equipment`
+- `POST /api/v1/equipment/{equipmentId}/telemetry`
 - `POST /api/v1/agent-tools/get-work-order`
 - `GET /health/live`
 - `GET /health/ready`
@@ -54,7 +57,7 @@ docker compose up -d postgres
 
 Worker通过数据库租约领取事件；失败会指数退避，超过上限进入`QUARANTINED`，支持陈旧租约恢复和带操作者/原因的人工重放。
 
-启动服务后访问`http://127.0.0.1:8000/`，可以查看工单指标、制造事件流并创建演示工单。该页面使用原生HTML/CSS/JavaScript，无需Node构建环境。
+启动服务后访问`http://127.0.0.1:8000/`，可以查看工单指标、制造事件流、设备状态，创建演示工单并模拟机床采集。遥测样本使用`sampleId`去重，旧时间戳不能覆盖当前状态；`DOWN`和`ALARM`必须携带停机原因或报警码。该页面使用原生HTML/CSS/JavaScript，无需Node构建环境。
 
 ### 本机D盘免安装环境
 

@@ -33,6 +33,8 @@ class DatabaseMigrationTests(unittest.TestCase):
                     "agent_tool_audits",
                     "alembic_version",
                     "event_outbox",
+                    "equipment",
+                    "equipment_telemetry",
                     "idempotency_records",
                     "work_orders",
                 },

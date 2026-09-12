@@ -6,6 +6,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 
 from autonomous_mes.application.ports import IdempotentResult
+from autonomous_mes.domain.equipment import Equipment, EquipmentState, TelemetrySample
 from autonomous_mes.domain.errors import IdempotencyConflict, InvalidTransition
 from autonomous_mes.domain.events import DomainEvent
 from autonomous_mes.domain.work_order import (
@@ -16,7 +17,14 @@ from autonomous_mes.domain.work_order import (
     WorkOrderStatus,
 )
 
-from .models import AgentToolAuditRow, EventOutboxRow, IdempotencyRecordRow, WorkOrderRow
+from .models import (
+    AgentToolAuditRow,
+    EquipmentRow,
+    EquipmentTelemetryRow,
+    EventOutboxRow,
+    IdempotencyRecordRow,
+    WorkOrderRow,
+)
 
 
 class SqlAlchemyWorkOrderStore:
@@ -125,6 +133,70 @@ class SqlAlchemyWorkOrderStore:
                 )
             )
 
+    def get_equipment(self, equipment_id: str) -> Equipment | None:
+        with self._sessions() as session:
+            row = session.get(EquipmentRow, equipment_id)
+            return _equipment_to_domain(row) if row else None
+
+    def get_equipment_by_code(self, code: str) -> Equipment | None:
+        with self._sessions() as session:
+            row = session.scalar(select(EquipmentRow).where(EquipmentRow.code == code))
+            return _equipment_to_domain(row) if row else None
+
+    def list_equipment(self, limit: int = 100) -> list[Equipment]:
+        with self._sessions() as session:
+            rows = session.scalars(
+                select(EquipmentRow).order_by(EquipmentRow.updated_at.desc()).limit(limit)
+            ).all()
+            return [_equipment_to_domain(row) for row in rows]
+
+    def telemetry_sample_exists(self, sample_id: str) -> bool:
+        with self._sessions() as session:
+            return session.get(EquipmentTelemetryRow, sample_id) is not None
+
+    def add_equipment_atomically(self, equipment: Equipment, event: DomainEvent) -> None:
+        try:
+            with self._sessions.begin() as session:
+                session.add(EquipmentRow(**_equipment_values(equipment)))
+                session.add_all(_event_rows([event]))
+        except IntegrityError as exc:
+            raise IdempotencyConflict("equipment code already exists") from exc
+
+    def record_telemetry_atomically(
+        self,
+        equipment: Equipment,
+        expected_stored_version: int,
+        sample: TelemetrySample,
+        event: DomainEvent,
+    ) -> None:
+        try:
+            with self._sessions.begin() as session:
+                result = session.execute(
+                    update(EquipmentRow)
+                    .where(
+                        EquipmentRow.equipment_id == equipment.equipment_id,
+                        EquipmentRow.version == expected_stored_version,
+                    )
+                    .values(**_equipment_values(equipment, include_id=False))
+                )
+                if getattr(result, "rowcount", 0) != 1:
+                    raise InvalidTransition("optimistic lock conflict")
+                session.add(
+                    EquipmentTelemetryRow(
+                        sample_id=sample.sample_id,
+                        equipment_id=equipment.equipment_id,
+                        observed_at=sample.observed_at,
+                        state=sample.state.value,
+                        spindle_load_percent=sample.spindle_load_percent,
+                        temperature_celsius=sample.temperature_celsius,
+                        alarm_code=sample.alarm_code,
+                        downtime_reason=sample.downtime_reason,
+                    )
+                )
+                session.add_all(_event_rows([event]))
+        except IntegrityError as exc:
+            raise IdempotencyConflict("telemetry sample already exists") from exc
+
 
 def _row_values(item: WorkOrder) -> dict[str, Any]:
     return {
@@ -218,3 +290,45 @@ def _event_rows(events: list[DomainEvent]) -> list[EventOutboxRow]:
         )
         for event in events
     ]
+
+
+def _equipment_values(item: Equipment, *, include_id: bool = True) -> dict[str, Any]:
+    values: dict[str, Any] = {
+        "code": item.code,
+        "name": item.name,
+        "workshop_id": item.workshop_id,
+        "work_center_id": item.work_center_id,
+        "protocol": item.protocol,
+        "state": item.state.value,
+        "version": item.version,
+        "last_seen_at": item.last_seen_at,
+        "spindle_load_percent": item.spindle_load_percent,
+        "temperature_celsius": item.temperature_celsius,
+        "alarm_code": item.alarm_code,
+        "downtime_reason": item.downtime_reason,
+        "created_at": item.created_at,
+        "updated_at": item.updated_at,
+    }
+    if include_id:
+        values["equipment_id"] = item.equipment_id
+    return values
+
+
+def _equipment_to_domain(row: EquipmentRow) -> Equipment:
+    return Equipment(
+        equipment_id=row.equipment_id,
+        code=row.code,
+        name=row.name,
+        workshop_id=row.workshop_id,
+        work_center_id=row.work_center_id,
+        protocol=row.protocol,
+        state=EquipmentState(row.state),
+        version=row.version,
+        last_seen_at=row.last_seen_at,
+        spindle_load_percent=row.spindle_load_percent,
+        temperature_celsius=row.temperature_celsius,
+        alarm_code=row.alarm_code,
+        downtime_reason=row.downtime_reason,
+        created_at=row.created_at,
+        updated_at=row.updated_at,
+    )

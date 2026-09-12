@@ -7,6 +7,11 @@ from fastapi.responses import HTMLResponse, JSONResponse
 from pydantic import BaseModel, ConfigDict, Field
 
 from autonomous_mes.application.agent_tools import GetWorkOrderTool, ToolContext
+from autonomous_mes.application.equipment import (
+    EquipmentApplicationService,
+    RecordTelemetryCommand,
+    RegisterEquipmentCommand,
+)
 from autonomous_mes.application.ports import MesStore
 from autonomous_mes.application.work_orders import (
     CreateWorkOrderCommand,
@@ -74,6 +79,27 @@ class AgentToolBody(BaseModel):
     workOrderId: str
 
 
+class RegisterEquipmentBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    code: str
+    name: str
+    workshopId: str
+    workCenterId: str
+    protocol: str = "SIMULATED"
+
+
+class TelemetryBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    sampleId: str
+    observedAt: datetime
+    expectedVersion: int
+    state: str
+    spindleLoadPercent: float | None = None
+    temperatureCelsius: float | None = None
+    alarmCode: str | None = None
+    downtimeReason: str | None = None
+
+
 settings = Settings()
 
 
@@ -88,6 +114,7 @@ def build_store() -> MesStore:
 
 store = build_store()
 service = WorkOrderApplicationService(store)
+equipment_service = EquipmentApplicationService(store)
 policy = ScopedReadPolicy({"demo-planner": {"WS-MACH-01"}})
 get_work_order_tool = GetWorkOrderTool(store, policy, store)
 app = FastAPI(title="Autonomous MES Core", version="0.1.0")
@@ -169,6 +196,46 @@ def list_work_orders(limit: int = 100) -> dict[str, object]:
 def list_outbox() -> dict[str, object]:
     items = store.list_outbox()[-100:]
     return {"items": list(reversed(items)), "count": len(items)}
+
+
+@app.post("/api/v1/equipment", status_code=201)
+def register_equipment(body: RegisterEquipmentBody) -> dict[str, object]:
+    return equipment_service.register(
+        RegisterEquipmentCommand(
+            correlation_id=str(uuid4()),
+            code=body.code,
+            name=body.name,
+            workshop_id=body.workshopId,
+            work_center_id=body.workCenterId,
+            protocol=body.protocol,
+        )
+    )
+
+
+@app.get("/api/v1/equipment")
+def list_equipment(limit: int = 100) -> dict[str, object]:
+    items = equipment_service.list(limit)
+    return {"items": items, "count": len(items)}
+
+
+@app.post("/api/v1/equipment/{equipment_id}/telemetry")
+def record_equipment_telemetry(
+    equipment_id: str, body: TelemetryBody
+) -> dict[str, object]:
+    return equipment_service.record(
+        RecordTelemetryCommand(
+            correlation_id=str(uuid4()),
+            equipment_id=equipment_id,
+            expected_version=body.expectedVersion,
+            sample_id=body.sampleId,
+            observed_at=body.observedAt,
+            state=body.state,
+            spindle_load_percent=body.spindleLoadPercent,
+            temperature_celsius=body.temperatureCelsius,
+            alarm_code=body.alarmCode,
+            downtime_reason=body.downtimeReason,
+        )
+    )
 
 
 @app.post("/api/v1/work-orders/{work_order_id}/release")

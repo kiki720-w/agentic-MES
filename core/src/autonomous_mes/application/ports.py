@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 from typing import Any, Protocol
 
+from autonomous_mes.domain.equipment import Equipment, TelemetrySample
 from autonomous_mes.domain.events import DomainEvent
 from autonomous_mes.domain.work_order import WorkOrder
 
@@ -42,5 +43,25 @@ class ToolAuditSink(Protocol):
     def record_tool_event(self, event: DomainEvent) -> None: ...
 
 
-class MesStore(WorkOrderStore, ToolAuditSink, Protocol):
+class EquipmentStore(Protocol):
+    def get_equipment(self, equipment_id: str) -> Equipment | None: ...
+
+    def get_equipment_by_code(self, code: str) -> Equipment | None: ...
+
+    def list_equipment(self, limit: int = 100) -> list[Equipment]: ...
+
+    def telemetry_sample_exists(self, sample_id: str) -> bool: ...
+
+    def add_equipment_atomically(self, equipment: Equipment, event: DomainEvent) -> None: ...
+
+    def record_telemetry_atomically(
+        self,
+        equipment: Equipment,
+        expected_stored_version: int,
+        sample: TelemetrySample,
+        event: DomainEvent,
+    ) -> None: ...
+
+
+class MesStore(WorkOrderStore, EquipmentStore, ToolAuditSink, Protocol):
     """Combined persistence port used by the current vertical slice."""

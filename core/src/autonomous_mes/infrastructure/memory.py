@@ -3,6 +3,7 @@ from threading import RLock
 from typing import Any
 
 from autonomous_mes.application.ports import IdempotentResult
+from autonomous_mes.domain.equipment import Equipment, TelemetrySample
 from autonomous_mes.domain.errors import Forbidden, IdempotencyConflict, InvalidTransition
 from autonomous_mes.domain.events import DomainEvent
 from autonomous_mes.domain.work_order import WorkOrder
@@ -17,6 +18,9 @@ class InMemoryWorkOrderStore:
         self._outbox: list[dict[str, Any]] = []
         self._idempotency: dict[str, IdempotentResult] = {}
         self._lock = RLock()
+        self._equipment: dict[str, Equipment] = {}
+        self._equipment_codes: dict[str, str] = {}
+        self._telemetry_samples: set[str] = set()
 
     def get(self, work_order_id: str) -> WorkOrder | None:
         with self._lock:
@@ -100,6 +104,66 @@ class InMemoryWorkOrderStore:
                     "publishStatus": "PENDING",
                 }
             )
+
+    def get_equipment(self, equipment_id: str) -> Equipment | None:
+        with self._lock:
+            item = self._equipment.get(equipment_id)
+            return deepcopy(item) if item else None
+
+    def get_equipment_by_code(self, code: str) -> Equipment | None:
+        with self._lock:
+            equipment_id = self._equipment_codes.get(code)
+            return self.get_equipment(equipment_id) if equipment_id else None
+
+    def list_equipment(self, limit: int = 100) -> list[Equipment]:
+        with self._lock:
+            items = sorted(self._equipment.values(), key=lambda item: item.updated_at, reverse=True)
+            return deepcopy(items[:limit])
+
+    def telemetry_sample_exists(self, sample_id: str) -> bool:
+        with self._lock:
+            return sample_id in self._telemetry_samples
+
+    def add_equipment_atomically(self, equipment: Equipment, event: DomainEvent) -> None:
+        with self._lock:
+            if equipment.code in self._equipment_codes:
+                raise IdempotencyConflict("equipment code already exists")
+            self._equipment[equipment.equipment_id] = deepcopy(equipment)
+            self._equipment_codes[equipment.code] = equipment.equipment_id
+            self._append_event(event)
+
+    def record_telemetry_atomically(
+        self,
+        equipment: Equipment,
+        expected_stored_version: int,
+        sample: TelemetrySample,
+        event: DomainEvent,
+    ) -> None:
+        with self._lock:
+            current = self._equipment.get(equipment.equipment_id)
+            if current is None or current.version != expected_stored_version:
+                raise InvalidTransition("optimistic lock conflict")
+            if sample.sample_id in self._telemetry_samples:
+                return
+            self._equipment[equipment.equipment_id] = deepcopy(equipment)
+            self._telemetry_samples.add(sample.sample_id)
+            self._append_event(event)
+
+    def _append_event(self, event: DomainEvent) -> None:
+        self._outbox.append(
+            {
+                "eventId": event.event_id,
+                "eventType": event.event_type,
+                "aggregateType": event.aggregate_type,
+                "aggregateId": event.aggregate_id,
+                "occurredAt": event.occurred_at.isoformat(),
+                "correlationId": event.correlation_id,
+                "causationId": event.causation_id,
+                "schemaVersion": event.schema_version,
+                "payload": deepcopy(event.payload),
+                "publishStatus": "PENDING",
+            }
+        )
 
 
 class ScopedReadPolicy:

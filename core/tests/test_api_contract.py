@@ -104,6 +104,35 @@ class ApiContractTests(unittest.TestCase):
         self.assertEqual(403, denied.status_code)
         self.assertEqual("FORBIDDEN", denied.json()["code"])
 
+    def test_equipment_registration_and_telemetry_ingestion(self):
+        suffix = uuid4().hex[:8]
+        registered = self.client.post(
+            "/api/v1/equipment",
+            json={
+                "code": f"CNC-API-{suffix}",
+                "name": "API数控车床",
+                "workshopId": "WS-MACH-01",
+                "workCenterId": "WC-LATHE-01",
+                "protocol": "SIMULATED",
+            },
+        )
+        self.assertEqual(201, registered.status_code, registered.text)
+        equipment = registered.json()
+        recorded = self.client.post(
+            f"/api/v1/equipment/{equipment['equipmentId']}/telemetry",
+            json={
+                "sampleId": f"sample-{suffix}",
+                "observedAt": datetime.now(UTC).isoformat(),
+                "expectedVersion": equipment["version"],
+                "state": "RUNNING",
+                "spindleLoadPercent": 68.2,
+                "temperatureCelsius": 39.5,
+            },
+        )
+        self.assertEqual(200, recorded.status_code, recorded.text)
+        self.assertEqual("RUNNING", recorded.json()["state"])
+        self.assertGreaterEqual(self.client.get("/api/v1/equipment").json()["count"], 1)
+
 
 if __name__ == "__main__":
     unittest.main()

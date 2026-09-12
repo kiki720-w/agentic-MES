@@ -1,7 +1,17 @@
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import JSON, DateTime, Integer, String, Text, UniqueConstraint, func
+from sqlalchemy import (
+    JSON,
+    DateTime,
+    Float,
+    ForeignKey,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+    func,
+)
 from sqlalchemy.orm import Mapped, mapped_column
 
 from .database import Base
@@ -82,5 +92,43 @@ class AgentToolAuditRow(Base):
     object_id: Mapped[str] = mapped_column(String(64), nullable=False)
     detail: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, default=dict)
     occurred_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
+class EquipmentRow(Base):
+    __tablename__ = "equipment"
+
+    equipment_id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    code: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
+    name: Mapped[str] = mapped_column(String(128), nullable=False)
+    workshop_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    work_center_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    protocol: Mapped[str] = mapped_column(String(32), nullable=False)
+    state: Mapped[str] = mapped_column(String(16), nullable=False)
+    version: Mapped[int] = mapped_column(Integer, nullable=False)
+    last_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    spindle_load_percent: Mapped[float | None] = mapped_column(Float)
+    temperature_celsius: Mapped[float | None] = mapped_column(Float)
+    alarm_code: Mapped[str | None] = mapped_column(String(64))
+    downtime_reason: Mapped[str | None] = mapped_column(String(256))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class EquipmentTelemetryRow(Base):
+    __tablename__ = "equipment_telemetry"
+
+    sample_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    equipment_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("equipment.equipment_id"), nullable=False, index=True
+    )
+    observed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    state: Mapped[str] = mapped_column(String(16), nullable=False)
+    spindle_load_percent: Mapped[float | None] = mapped_column(Float)
+    temperature_celsius: Mapped[float | None] = mapped_column(Float)
+    alarm_code: Mapped[str | None] = mapped_column(String(64))
+    downtime_reason: Mapped[str | None] = mapped_column(String(256))
+    received_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
