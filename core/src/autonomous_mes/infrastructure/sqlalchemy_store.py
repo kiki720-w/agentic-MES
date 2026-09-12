@@ -570,6 +570,53 @@ class SqlAlchemyWorkOrderStore:
             )
             return _quality_policy_to_domain(rows[0])
 
+    def list_quality_policy_simulation_cases(
+        self, policy: QualityRiskPolicy, lookback_days: int, limit: int
+    ) -> list[dict[str, Any]]:
+        cutoff = datetime.now(UTC) - timedelta(days=lookback_days)
+        conditions = [
+            WorkOrderOperationRow.status == "COMPLETED",
+            WorkOrderOperationRow.assigned_resource_id.is_not(None),
+            WorkOrderRow.updated_at >= cutoff,
+        ]
+        if policy.product_revision_id:
+            conditions.append(WorkOrderRow.product_revision_id == policy.product_revision_id)
+        if policy.operation_code:
+            conditions.append(WorkOrderOperationRow.operation_code == policy.operation_code)
+        with self._sessions() as session:
+            rows = session.execute(
+                select(WorkOrderRow, WorkOrderOperationRow)
+                .join(
+                    WorkOrderOperationRow,
+                    WorkOrderOperationRow.work_order_id == WorkOrderRow.work_order_id,
+                )
+                .where(*conditions)
+                .order_by(WorkOrderRow.updated_at.desc())
+                .limit(limit)
+            ).all()
+            snapshots = [
+                {
+                    "workOrderId": order.work_order_id,
+                    "humanCode": order.human_code,
+                    "productRevisionId": order.product_revision_id,
+                    "operationSequence": operation.sequence,
+                    "operationCode": operation.operation_code,
+                    "plannedQuantity": operation.planned_quantity,
+                    "goodQuantity": operation.good_quantity,
+                    "scrapQuantity": operation.scrap_quantity,
+                    "equipmentId": operation.assigned_resource_id,
+                }
+                for order, operation in rows
+            ]
+        for case in snapshots:
+            case["riskFacts"] = self.quality_risk_facts(
+                str(case["workOrderId"]),
+                int(case["operationSequence"]),
+                str(case["equipmentId"]),
+                lookback_days,
+            )
+        return snapshots
+
     def add_quality_policy_atomically(
         self, policy: QualityRiskPolicy, event: DomainEvent
     ) -> None:
@@ -1503,6 +1550,10 @@ def _quality_policy_values(
         "configuration": item.configuration,
         "change_reason": item.change_reason,
         "created_by": item.created_by,
+        "simulation_run_id": item.simulation_run_id,
+        "simulation_summary": item.simulation_summary,
+        "simulated_by": item.simulated_by,
+        "simulated_at": item.simulated_at,
         "submitted_by": item.submitted_by,
         "approved_by": item.approved_by,
         "approval_reason": item.approval_reason,
@@ -1529,6 +1580,10 @@ def _quality_policy_to_domain(row: QualityRiskPolicyRow) -> QualityRiskPolicy:
         row.configuration,
         row.change_reason,
         row.created_by,
+        row.simulation_run_id,
+        row.simulation_summary,
+        row.simulated_by,
+        row.simulated_at,
         row.submitted_by,
         row.approved_by,
         row.approval_reason,

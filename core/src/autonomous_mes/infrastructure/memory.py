@@ -666,6 +666,46 @@ class InMemoryWorkOrderStore:
             )
             return deepcopy(candidates[0]) if candidates else None
 
+    def list_quality_policy_simulation_cases(
+        self, policy: QualityRiskPolicy, lookback_days: int, limit: int
+    ) -> list[dict[str, Any]]:
+        cutoff = datetime.now(UTC) - timedelta(days=lookback_days)
+        with self._lock:
+            candidates: list[tuple[datetime, WorkOrder, Any]] = []
+            for order in self._orders.values():
+                if order.updated_at < cutoff:
+                    continue
+                if policy.product_revision_id not in {None, order.revisions.product_revision_id}:
+                    continue
+                for operation in order.operations:
+                    if operation.status.value != "COMPLETED" or not operation.assigned_resource_id:
+                        continue
+                    if policy.operation_code not in {None, operation.operation_code}:
+                        continue
+                    candidates.append((order.updated_at, order, operation))
+            candidates.sort(key=lambda item: item[0], reverse=True)
+            selected = candidates[:limit]
+        return [
+            {
+                "workOrderId": order.work_order_id,
+                "humanCode": order.human_code,
+                "productRevisionId": order.revisions.product_revision_id,
+                "operationSequence": operation.sequence,
+                "operationCode": operation.operation_code,
+                "plannedQuantity": operation.planned_quantity,
+                "goodQuantity": operation.good_quantity,
+                "scrapQuantity": operation.scrap_quantity,
+                "equipmentId": operation.assigned_resource_id,
+                "riskFacts": self.quality_risk_facts(
+                    order.work_order_id,
+                    operation.sequence,
+                    str(operation.assigned_resource_id),
+                    lookback_days,
+                ),
+            }
+            for _, order, operation in selected
+        ]
+
     def add_quality_policy_atomically(
         self, policy: QualityRiskPolicy, event: DomainEvent
     ) -> None:

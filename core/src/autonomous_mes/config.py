@@ -31,6 +31,8 @@ class Settings(BaseSettings):
     dev_display_name: str = "Demo Supervisor"
     dev_roles: str = "SUPERVISOR,PLANNER,OPERATOR,QUALITY,MASTER_DATA_ADMIN"
     dev_factory_ids: str = "FACTORY-DEMO"
+    dev_quality_subject_id: str = "demo-quality-manager"
+    dev_quality_display_name: str = "Demo Quality Manager"
     connector_key_id: str | None = None
     connector_hmac_secret: str | None = None
     connector_max_clock_skew_seconds: int = 300

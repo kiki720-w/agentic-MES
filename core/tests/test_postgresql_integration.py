@@ -196,7 +196,13 @@ class PostgreSqlIntegrationTests(unittest.TestCase):
             )
         )
         submitted = service.submit(
-            str(draft["policyId"]), int(draft["recordVersion"]), "master-admin"
+            str(draft["policyId"]),
+            int(
+                service.simulate(
+                    str(draft["policyId"]), int(draft["recordVersion"]), "master-admin"
+                )["recordVersion"]
+            ),
+            "master-admin",
         )
         service.approve(
             str(submitted["policyId"]),

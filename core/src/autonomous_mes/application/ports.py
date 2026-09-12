@@ -148,6 +148,9 @@ class QualityPolicyStore(Protocol):
     def resolve_quality_risk_policy(
         self, product_revision_id: str, operation_code: str, as_of: datetime
     ) -> QualityRiskPolicy | None: ...
+    def list_quality_policy_simulation_cases(
+        self, policy: QualityRiskPolicy, lookback_days: int, limit: int
+    ) -> list[dict[str, Any]]: ...
     def add_quality_policy_atomically(
         self, policy: QualityRiskPolicy, event: DomainEvent
     ) -> None: ...

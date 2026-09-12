@@ -58,6 +58,16 @@ class ApiContractTests(unittest.TestCase):
         self.assertIn("SUPERVISOR", identity.json()["roles"])
         self.assertEqual(["FACTORY-DEMO"], identity.json()["factoryIds"])
 
+        quality_identity = self.client.get(
+            "/api/v1/identity/me", headers={"X-Dev-Actor": "demo-quality-manager"}
+        )
+        self.assertEqual("demo-quality-manager", quality_identity.json()["subjectId"])
+        self.assertEqual(["QUALITY"], quality_identity.json()["roles"])
+        unknown_identity = self.client.get(
+            "/api/v1/identity/me", headers={"X-Dev-Actor": "unconfigured-user"}
+        )
+        self.assertEqual(403, unknown_identity.status_code)
+
         spoofed_approval = self.client.post(
             "/api/v1/agent/proposals/not-a-proposal/approve",
             json={"actorId": "attacker", "reason": "spoofed"},
@@ -77,6 +87,8 @@ class ApiContractTests(unittest.TestCase):
         self.assertIn("changeEventPage(-1)", dashboard.text)
         self.assertIn("质量风险策略", dashboard.text)
         self.assertIn("新建策略版本", dashboard.text)
+        self.assertIn("运行仿真", dashboard.text)
+        self.assertIn("mes_dev_actor", dashboard.text)
 
         default_policy = self.client.get(
             "/api/v1/quality/risk-policies/default-configuration"
@@ -141,17 +153,34 @@ class ApiContractTests(unittest.TestCase):
         )
         self.assertEqual(201, created.status_code, created.text)
         draft = created.json()
+        simulated = self.client.post(
+            f"/api/v1/quality/risk-policies/{draft['policyId']}/simulate",
+            json={"expectedRecordVersion": draft["recordVersion"], "limit": 50},
+        )
+        self.assertEqual(200, simulated.status_code, simulated.text)
+        evidence = simulated.json()
+        self.assertIsNotNone(evidence["simulationRunId"])
         submitted = self.client.post(
             f"/api/v1/quality/risk-policies/{draft['policyId']}/submit",
-            json={"expectedRecordVersion": draft["recordVersion"]},
+            json={"expectedRecordVersion": evidence["recordVersion"]},
         )
         self.assertEqual(200, submitted.status_code, submitted.text)
         pending = submitted.json()
-        approved = self.client.post(
+        self_approval = self.client.post(
             f"/api/v1/quality/risk-policies/{draft['policyId']}/approve",
             json={
                 "expectedRecordVersion": pending["recordVersion"],
                 "reason": "Contract validation complete",
+                "effectiveFrom": datetime.now(UTC).isoformat(),
+            },
+        )
+        self.assertEqual(409, self_approval.status_code)
+        approved = self.client.post(
+            f"/api/v1/quality/risk-policies/{draft['policyId']}/approve",
+            headers={"X-Dev-Actor": "demo-quality-manager"},
+            json={
+                "expectedRecordVersion": pending["recordVersion"],
+                "reason": "Independent quality approval",
                 "effectiveFrom": datetime.now(UTC).isoformat(),
             },
         )

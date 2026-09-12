@@ -7,7 +7,7 @@ from autonomous_mes.application.quality_policy import (
     QualityPolicyApplicationService,
 )
 from autonomous_mes.application.quality_risk import default_quality_risk_configuration
-from autonomous_mes.domain.errors import ValidationError
+from autonomous_mes.domain.errors import InvalidTransition, ValidationError
 from autonomous_mes.infrastructure.memory import InMemoryWorkOrderStore
 
 
@@ -34,8 +34,11 @@ def _draft(
 def _approve(
     service: QualityPolicyApplicationService, draft: dict[str, object]
 ) -> dict[str, object]:
-    submitted = service.submit(
+    simulated = service.simulate(
         str(draft["policyId"]), int(draft["recordVersion"]), "master-admin"
+    )
+    submitted = service.submit(
+        str(simulated["policyId"]), int(simulated["recordVersion"]), "master-admin"
     )
     return service.approve(
         str(submitted["policyId"]),
@@ -65,10 +68,35 @@ def test_policy_lifecycle_is_versioned_auditable_and_rollback_is_a_draft() -> No
     event_types = [item["eventType"] for item in store.list_outbox()]
     assert event_types == [
         "QualityRiskPolicyDraftCreated",
+        "QualityRiskPolicySimulated",
         "QualityRiskPolicySubmitted",
         "QualityRiskPolicyApproved",
         "QualityRiskPolicyDraftCreated",
     ]
+
+
+def test_simulation_is_required_and_maker_cannot_approve_own_policy() -> None:
+    store = InMemoryWorkOrderStore()
+    service = QualityPolicyApplicationService(store)
+    draft = _draft(service)
+    with pytest.raises(InvalidTransition, match="simulation"):
+        service.submit(str(draft["policyId"]), int(draft["recordVersion"]), "master-admin")
+
+    simulated = service.simulate(
+        str(draft["policyId"]), int(draft["recordVersion"]), "master-admin"
+    )
+    assert simulated["simulationSummary"]["coverageStatus"] == "NO_MATCHING_HISTORY"
+    pending = service.submit(
+        str(simulated["policyId"]), int(simulated["recordVersion"]), "master-admin"
+    )
+    with pytest.raises(InvalidTransition, match="maker-checker"):
+        service.approve(
+            str(pending["policyId"]),
+            int(pending["recordVersion"]),
+            "master-admin",
+            "self approval",
+            datetime.now(UTC),
+        )
 
 
 def test_most_specific_effective_policy_wins() -> None:

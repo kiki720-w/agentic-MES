@@ -85,6 +85,11 @@ class DatabaseMigrationTests(unittest.TestCase):
             self.assertIn("resource_context", execution_columns)
             quality_columns = {item["name"] for item in schema.get_columns("quality_inspections")}
             self.assertIn("gauge_id", quality_columns)
+            policy_columns = {
+                item["name"] for item in schema.get_columns("quality_risk_policies")
+            }
+            self.assertIn("simulation_summary", policy_columns)
+            self.assertIn("simulated_by", policy_columns)
             engine.dispose()
 
 

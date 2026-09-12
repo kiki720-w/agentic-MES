@@ -187,6 +187,10 @@ class QualityPolicyTransitionBody(BaseModel):
     expectedRecordVersion: int = Field(ge=1)
 
 
+class SimulateQualityPolicyBody(QualityPolicyTransitionBody):
+    limit: int = Field(default=200, ge=1, le=500)
+
+
 class ApproveQualityPolicyBody(QualityPolicyTransitionBody):
     reason: str = Field(min_length=1, max_length=512)
     effectiveFrom: datetime
@@ -348,7 +352,27 @@ bearer_scheme = HTTPBearer(auto_error=False)
 
 def current_identity(
     credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(bearer_scheme)],
+    x_dev_actor: str | None = Header(default=None, alias="X-Dev-Actor"),
 ) -> Identity:
+    if settings.auth_mode.upper() == "DEV" and x_dev_actor:
+        factory_ids = parse_csv_set(settings.dev_factory_ids) or frozenset(
+            {settings.factory_id}
+        )
+        if x_dev_actor == settings.dev_subject_id:
+            return Identity(
+                settings.dev_subject_id,
+                settings.dev_display_name,
+                parse_csv_set(settings.dev_roles),
+                factory_ids,
+            )
+        if x_dev_actor == settings.dev_quality_subject_id:
+            return Identity(
+                settings.dev_quality_subject_id,
+                settings.dev_quality_display_name,
+                frozenset({"QUALITY"}),
+                factory_ids,
+            )
+        raise Forbidden("unknown developer identity profile")
     token = credentials.credentials if credentials else None
     return identity_provider.authenticate(token)
 
@@ -459,11 +483,20 @@ def deployment_context() -> dict[str, str]:
 
 
 @app.get("/api/v1/system/auth-config")
-def auth_config() -> dict[str, str | None]:
+def auth_config() -> dict[str, object]:
     return {
         "mode": settings.auth_mode.upper(),
         "issuer": settings.oidc_issuer,
         "clientId": settings.oidc_web_client_id if settings.auth_mode.upper() == "OIDC" else None,
+        "devProfiles": [
+            {"subjectId": settings.dev_subject_id, "displayName": settings.dev_display_name},
+            {
+                "subjectId": settings.dev_quality_subject_id,
+                "displayName": settings.dev_quality_display_name,
+            },
+        ]
+        if settings.auth_mode.upper() == "DEV"
+        else [],
     }
 
 
@@ -700,6 +733,18 @@ def submit_quality_risk_policy(
     authorize_human(identity, "MASTER_DATA_ADMIN")
     return quality_policy_service.submit(
         policy_id, body.expectedRecordVersion, identity.subject_id
+    )
+
+
+@app.post("/api/v1/quality/risk-policies/{policy_id}/simulate")
+def simulate_quality_risk_policy(
+    policy_id: str,
+    body: SimulateQualityPolicyBody,
+    identity: Annotated[Identity, Depends(current_identity)],
+) -> dict[str, object]:
+    authorize_human(identity, "MASTER_DATA_ADMIN")
+    return quality_policy_service.simulate(
+        policy_id, body.expectedRecordVersion, identity.subject_id, body.limit
     )
 
 
