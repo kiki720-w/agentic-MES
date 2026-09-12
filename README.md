@@ -58,6 +58,7 @@
 - `docs/step-29-event-driven-quality-agent-acceptance.md`：OperationCompleted事件触发、幂等R2质检建议与因果链验收记录
 - `docs/step-30-human-confirmed-quality-inspection-acceptance.md`：质量人员确认Agent建议、单事务建检与目标唯一性验收记录
 - `docs/step-31-quality-risk-and-event-explorer-acceptance.md`：确定性质量风险评分、抽样建议与制造事件双向检索验收记录
+- `docs/step-32-governed-quality-risk-policy-acceptance.md`：可配置、版本化、审批生效与可追溯回滚的质量风险策略验收记录
 
 ## 当前决策门
 

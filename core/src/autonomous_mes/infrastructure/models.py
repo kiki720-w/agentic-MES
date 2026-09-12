@@ -211,6 +211,32 @@ class QualityInspectionRow(Base):
     measurement_recorded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
+class QualityRiskPolicyRow(Base):
+    __tablename__ = "quality_risk_policies"
+    __table_args__ = (
+        UniqueConstraint("policy_key", "version", name="uq_quality_risk_policy_version"),
+    )
+
+    policy_id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    policy_key: Mapped[str] = mapped_column(String(256), nullable=False, index=True)
+    version: Mapped[int] = mapped_column(Integer, nullable=False)
+    record_version: Mapped[int] = mapped_column(Integer, nullable=False)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    name: Mapped[str] = mapped_column(String(160), nullable=False)
+    scope: Mapped[str] = mapped_column(String(32), nullable=False)
+    product_revision_id: Mapped[str | None] = mapped_column(String(64), index=True)
+    operation_code: Mapped[str | None] = mapped_column(String(64), index=True)
+    configuration: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
+    change_reason: Mapped[str] = mapped_column(String(512), nullable=False)
+    created_by: Mapped[str] = mapped_column(String(64), nullable=False)
+    submitted_by: Mapped[str | None] = mapped_column(String(64))
+    approved_by: Mapped[str | None] = mapped_column(String(64))
+    approval_reason: Mapped[str | None] = mapped_column(String(512))
+    effective_from: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
 class ProductUnitRow(Base):
     __tablename__ = "product_units"
 

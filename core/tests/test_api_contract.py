@@ -75,6 +75,14 @@ class ApiContractTests(unittest.TestCase):
         self.assertIn("确认并创建检验", dashboard.text)
         self.assertIn("搜索事件类型、聚合ID、事件ID或关联ID", dashboard.text)
         self.assertIn("changeEventPage(-1)", dashboard.text)
+        self.assertIn("质量风险策略", dashboard.text)
+        self.assertIn("新建策略版本", dashboard.text)
+
+        default_policy = self.client.get(
+            "/api/v1/quality/risk-policies/default-configuration"
+        )
+        self.assertEqual(200, default_policy.status_code)
+        self.assertEqual(30, default_policy.json()["lookbackDays"])
 
         orders = self.client.get("/api/v1/work-orders")
         outbox = self.client.get("/api/v1/system/outbox")
@@ -114,6 +122,47 @@ class ApiContractTests(unittest.TestCase):
             json={"sampleSize": 1, "reason": "contract check"},
         )
         self.assertEqual(404, missing_quality_proposal.status_code)
+
+    def test_quality_risk_policy_lifecycle_contract(self):
+        default_configuration = self.client.get(
+            "/api/v1/quality/risk-policies/default-configuration"
+        ).json()
+        suffix = uuid4().hex[:8]
+        created = self.client.post(
+            "/api/v1/quality/risk-policies",
+            json={
+                "name": f"Contract policy {suffix}",
+                "scope": "PRODUCT_OPERATION",
+                "productRevisionId": f"PR-{suffix}",
+                "operationCode": "TURN",
+                "configuration": default_configuration,
+                "changeReason": "Exercise governed lifecycle",
+            },
+        )
+        self.assertEqual(201, created.status_code, created.text)
+        draft = created.json()
+        submitted = self.client.post(
+            f"/api/v1/quality/risk-policies/{draft['policyId']}/submit",
+            json={"expectedRecordVersion": draft["recordVersion"]},
+        )
+        self.assertEqual(200, submitted.status_code, submitted.text)
+        pending = submitted.json()
+        approved = self.client.post(
+            f"/api/v1/quality/risk-policies/{draft['policyId']}/approve",
+            json={
+                "expectedRecordVersion": pending["recordVersion"],
+                "reason": "Contract validation complete",
+                "effectiveFrom": datetime.now(UTC).isoformat(),
+            },
+        )
+        self.assertEqual(200, approved.status_code, approved.text)
+        rollback = self.client.post(
+            f"/api/v1/quality/risk-policies/{draft['policyId']}/rollback-draft",
+            json={"reason": "Contract rollback copy"},
+        )
+        self.assertEqual(201, rollback.status_code, rollback.text)
+        self.assertEqual("DRAFT", rollback.json()["status"])
+        self.assertEqual(2, rollback.json()["version"])
 
     def test_operational_read_models_are_paginated_and_filterable(self):
         equipment_code = f"CNC-PAGE-{uuid4().hex[:8]}"

@@ -51,6 +51,11 @@ from autonomous_mes.application.quality import (
     CreateInspectionCommand,
     QualityApplicationService,
 )
+from autonomous_mes.application.quality_policy import (
+    CreateQualityPolicyCommand,
+    QualityPolicyApplicationService,
+)
+from autonomous_mes.application.quality_risk import default_quality_risk_configuration
 from autonomous_mes.application.work_orders import (
     CreateWorkOrderCommand,
     OperationCommand,
@@ -164,6 +169,31 @@ class ApproveProposalBody(BaseModel):
 class ConfirmQualityRecommendationBody(BaseModel):
     model_config = ConfigDict(extra="forbid")
     sampleSize: int = Field(default=1, ge=1)
+    reason: str = Field(min_length=1, max_length=512)
+
+
+class CreateQualityPolicyBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    name: str = Field(min_length=1, max_length=160)
+    scope: str
+    productRevisionId: str | None = None
+    operationCode: str | None = None
+    configuration: dict[str, object]
+    changeReason: str = Field(min_length=1, max_length=512)
+
+
+class QualityPolicyTransitionBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    expectedRecordVersion: int = Field(ge=1)
+
+
+class ApproveQualityPolicyBody(QualityPolicyTransitionBody):
+    reason: str = Field(min_length=1, max_length=512)
+    effectiveFrom: datetime
+
+
+class RollbackQualityPolicyBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
     reason: str = Field(min_length=1, max_length=512)
 
 
@@ -361,6 +391,7 @@ natural_language_service = NaturalLanguageQueryService(
     store, deepseek_model_gateway, incident_agent
 )
 quality_service = QualityApplicationService(store, store, store)
+quality_policy_service = QualityPolicyApplicationService(store)
 genealogy_service = GenealogyApplicationService(store)
 master_data_service = ManufacturingResourceApplicationService(store)
 connector_credentials = (
@@ -629,6 +660,73 @@ def list_quality_eligible_operations(
     query: str | None = None,
 ) -> dict[str, object]:
     return quality_service.list_eligible_page(limit, offset, query)
+
+
+@app.get("/api/v1/quality/risk-policies/default-configuration")
+def quality_risk_default_configuration() -> dict[str, object]:
+    return default_quality_risk_configuration()
+
+
+@app.get("/api/v1/quality/risk-policies")
+def list_quality_risk_policies(limit: int = 100) -> dict[str, object]:
+    return quality_policy_service.list(limit)
+
+
+@app.post("/api/v1/quality/risk-policies", status_code=201)
+def create_quality_risk_policy(
+    body: CreateQualityPolicyBody,
+    identity: Annotated[Identity, Depends(current_identity)],
+) -> dict[str, object]:
+    authorize_human(identity, "MASTER_DATA_ADMIN")
+    return quality_policy_service.create_draft(
+        CreateQualityPolicyCommand(
+            body.name,
+            body.scope,
+            body.productRevisionId,
+            body.operationCode,
+            dict(body.configuration),
+            body.changeReason,
+            identity.subject_id,
+        )
+    )
+
+
+@app.post("/api/v1/quality/risk-policies/{policy_id}/submit")
+def submit_quality_risk_policy(
+    policy_id: str,
+    body: QualityPolicyTransitionBody,
+    identity: Annotated[Identity, Depends(current_identity)],
+) -> dict[str, object]:
+    authorize_human(identity, "MASTER_DATA_ADMIN")
+    return quality_policy_service.submit(
+        policy_id, body.expectedRecordVersion, identity.subject_id
+    )
+
+
+@app.post("/api/v1/quality/risk-policies/{policy_id}/approve")
+def approve_quality_risk_policy(
+    policy_id: str,
+    body: ApproveQualityPolicyBody,
+    identity: Annotated[Identity, Depends(current_identity)],
+) -> dict[str, object]:
+    authorize_human(identity, "QUALITY")
+    return quality_policy_service.approve(
+        policy_id,
+        body.expectedRecordVersion,
+        identity.subject_id,
+        body.reason,
+        body.effectiveFrom,
+    )
+
+
+@app.post("/api/v1/quality/risk-policies/{policy_id}/rollback-draft", status_code=201)
+def rollback_quality_risk_policy(
+    policy_id: str,
+    body: RollbackQualityPolicyBody,
+    identity: Annotated[Identity, Depends(current_identity)],
+) -> dict[str, object]:
+    authorize_human(identity, "MASTER_DATA_ADMIN")
+    return quality_policy_service.rollback_draft(policy_id, identity.subject_id, body.reason)
 
 
 @app.post("/api/v1/genealogy/product-units", status_code=201)

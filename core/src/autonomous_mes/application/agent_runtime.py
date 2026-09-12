@@ -1,9 +1,13 @@
+from datetime import UTC, datetime
 from hashlib import sha256
 from typing import Any
 
 from autonomous_mes.application.equipment import EquipmentApplicationService
 from autonomous_mes.application.ports import MesStore
-from autonomous_mes.application.quality_risk import assess_quality_risk
+from autonomous_mes.application.quality_risk import (
+    DEFAULT_QUALITY_RISK_CONFIG,
+    assess_quality_risk,
+)
 from autonomous_mes.application.work_orders import OperationCommand, WorkOrderApplicationService
 from autonomous_mes.domain.agent import AgentProposal, ProposalStatus
 from autonomous_mes.domain.errors import Forbidden, InvalidTransition, NotFound, ValidationError
@@ -176,10 +180,18 @@ class IncidentResponseAgent:
         equipment = self._equipment.get(str(operation["assignedResourceId"]))
         proposal = self._store.get_quality_recommendation(work_order_id, operation_sequence)
         if proposal is None:
+            policy = self._store.resolve_quality_risk_policy(
+                str(work_order["revisions"]["productRevisionId"]),
+                str(operation["operationCode"]),
+                datetime.now(UTC),
+            )
+            configuration = policy.configuration if policy else DEFAULT_QUALITY_RISK_CONFIG
+            ruleset = f"{policy.policy_key}@v{policy.version}" if policy else "QUALITY-RISK-V1"
             risk_facts = self._store.quality_risk_facts(
                 work_order_id,
                 operation_sequence,
                 str(equipment["equipmentId"]),
+                int(configuration["lookbackDays"]),
             )
             assessment = assess_quality_risk(
                 planned_quantity=int(operation["plannedQuantity"]),
@@ -189,6 +201,8 @@ class IncidentResponseAgent:
                 historical_failures=int(risk_facts["historicalFailures"]),
                 recent_alarm_count=int(risk_facts["recentAlarmCount"]),
                 minimum_tool_life_percent=risk_facts["minimumToolLifePercent"],
+                configuration=configuration,
+                ruleset_version=ruleset,
             )
             fingerprint = sha256(
                 f"quality:{work_order_id}:{operation_sequence}".encode()

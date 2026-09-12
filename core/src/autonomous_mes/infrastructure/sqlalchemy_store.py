@@ -20,6 +20,11 @@ from autonomous_mes.domain.genealogy import (
 )
 from autonomous_mes.domain.master_data import ManufacturingResource
 from autonomous_mes.domain.quality import InspectionStatus, QualityInspection
+from autonomous_mes.domain.quality_policy import (
+    QualityPolicyScope,
+    QualityPolicyStatus,
+    QualityRiskPolicy,
+)
 from autonomous_mes.domain.work_order import (
     FrozenRevisions,
     OperationStatus,
@@ -42,6 +47,7 @@ from .models import (
     MaterialConsumptionRow,
     ProductUnitRow,
     QualityInspectionRow,
+    QualityRiskPolicyRow,
     WorkOrderOperationRow,
     WorkOrderRow,
 )
@@ -444,7 +450,11 @@ class SqlAlchemyWorkOrderStore:
             return
 
     def quality_risk_facts(
-        self, work_order_id: str, operation_sequence: int, equipment_id: str
+        self,
+        work_order_id: str,
+        operation_sequence: int,
+        equipment_id: str,
+        lookback_days: int = 30,
     ) -> dict[str, Any]:
         with self._sessions() as session:
             history_base = (
@@ -468,7 +478,7 @@ class SqlAlchemyWorkOrderStore:
             failed = int(
                 session.scalar(history_base.where(QualityInspectionRow.result == "FAIL")) or 0
             )
-            cutoff = datetime.now(UTC) - timedelta(days=30)
+            cutoff = datetime.now(UTC) - timedelta(days=lookback_days)
             alarms = int(
                 session.scalar(
                     select(func.count())
@@ -503,6 +513,91 @@ class SqlAlchemyWorkOrderStore:
                 "recentAlarmCount": alarms,
                 "minimumToolLifePercent": min(tool_lives) if tool_lives else None,
             }
+
+    def get_quality_policy(self, policy_id: str) -> QualityRiskPolicy | None:
+        with self._sessions() as session:
+            row = session.get(QualityRiskPolicyRow, policy_id)
+            return _quality_policy_to_domain(row) if row else None
+
+    def list_quality_policies(self, limit: int = 100) -> list[QualityRiskPolicy]:
+        with self._sessions() as session:
+            rows = session.scalars(
+                select(QualityRiskPolicyRow)
+                .order_by(QualityRiskPolicyRow.updated_at.desc())
+                .limit(limit)
+            ).all()
+            return [_quality_policy_to_domain(row) for row in rows]
+
+    def next_quality_policy_version(self, policy_key: str) -> int:
+        with self._sessions() as session:
+            current = session.scalar(
+                select(func.max(QualityRiskPolicyRow.version)).where(
+                    QualityRiskPolicyRow.policy_key == policy_key
+                )
+            )
+            return int(current or 0) + 1
+
+    def resolve_quality_risk_policy(
+        self, product_revision_id: str, operation_code: str, as_of: datetime
+    ) -> QualityRiskPolicy | None:
+        with self._sessions() as session:
+            rows = list(
+                session.scalars(
+                    select(QualityRiskPolicyRow).where(
+                    QualityRiskPolicyRow.status == QualityPolicyStatus.APPROVED.value,
+                    QualityRiskPolicyRow.effective_from <= as_of,
+                    or_(
+                        QualityRiskPolicyRow.product_revision_id.is_(None),
+                        QualityRiskPolicyRow.product_revision_id == product_revision_id,
+                    ),
+                    or_(
+                        QualityRiskPolicyRow.operation_code.is_(None),
+                        QualityRiskPolicyRow.operation_code == operation_code,
+                    ),
+                    )
+                ).all()
+            )
+            if not rows:
+                return None
+            rows.sort(
+                key=lambda row: (
+                    int(row.product_revision_id is not None)
+                    + int(row.operation_code is not None),
+                    row.effective_from or row.created_at,
+                    row.version,
+                ),
+                reverse=True,
+            )
+            return _quality_policy_to_domain(rows[0])
+
+    def add_quality_policy_atomically(
+        self, policy: QualityRiskPolicy, event: DomainEvent
+    ) -> None:
+        try:
+            with self._sessions.begin() as session:
+                session.add(QualityRiskPolicyRow(**_quality_policy_values(policy)))
+                session.add_all(_event_rows([event]))
+        except IntegrityError as exc:
+            raise InvalidTransition("quality policy version already exists") from exc
+
+    def update_quality_policy_atomically(
+        self,
+        policy: QualityRiskPolicy,
+        expected_record_version: int,
+        event: DomainEvent,
+    ) -> None:
+        with self._sessions.begin() as session:
+            result = session.execute(
+                update(QualityRiskPolicyRow)
+                .where(
+                    QualityRiskPolicyRow.policy_id == policy.policy_id,
+                    QualityRiskPolicyRow.record_version == expected_record_version,
+                )
+                .values(**_quality_policy_values(policy, include_id=False))
+            )
+            if getattr(result, "rowcount", 0) != 1:
+                raise InvalidTransition("quality policy version changed")
+            session.add_all(_event_rows([event]))
 
     def update_agent_proposal_atomically(
         self, proposal: AgentProposal, expected_status: ProposalStatus, event: DomainEvent
@@ -1390,6 +1485,56 @@ def _inspection_to_domain(row: QualityInspectionRow) -> QualityInspection:
         row.gauge_id,
         row.calibration_due_at,
         row.measurement_recorded_at,
+    )
+
+
+def _quality_policy_values(
+    item: QualityRiskPolicy, *, include_id: bool = True
+) -> dict[str, Any]:
+    values = {
+        "policy_key": item.policy_key,
+        "version": item.version,
+        "record_version": item.record_version,
+        "status": item.status.value,
+        "name": item.name,
+        "scope": item.scope.value,
+        "product_revision_id": item.product_revision_id,
+        "operation_code": item.operation_code,
+        "configuration": item.configuration,
+        "change_reason": item.change_reason,
+        "created_by": item.created_by,
+        "submitted_by": item.submitted_by,
+        "approved_by": item.approved_by,
+        "approval_reason": item.approval_reason,
+        "effective_from": item.effective_from,
+        "created_at": item.created_at,
+        "updated_at": item.updated_at,
+    }
+    if include_id:
+        values["policy_id"] = item.policy_id
+    return values
+
+
+def _quality_policy_to_domain(row: QualityRiskPolicyRow) -> QualityRiskPolicy:
+    return QualityRiskPolicy(
+        row.policy_id,
+        row.policy_key,
+        row.version,
+        row.record_version,
+        QualityPolicyStatus(row.status),
+        row.name,
+        QualityPolicyScope(row.scope),
+        row.product_revision_id,
+        row.operation_code,
+        row.configuration,
+        row.change_reason,
+        row.created_by,
+        row.submitted_by,
+        row.approved_by,
+        row.approval_reason,
+        row.effective_from,
+        row.created_at,
+        row.updated_at,
     )
 
 

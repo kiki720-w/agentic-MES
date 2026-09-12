@@ -41,6 +41,7 @@ class DatabaseMigrationTests(unittest.TestCase):
                     "equipment_telemetry",
                     "idempotency_records",
                     "quality_inspections",
+                    "quality_risk_policies",
                     "product_units",
                     "genealogy_links",
                     "execution_sessions",
@@ -61,6 +62,15 @@ class DatabaseMigrationTests(unittest.TestCase):
             }
             self.assertIn("ix_quality_status_updated_id", quality_indexes)
             self.assertIn("uq_quality_work_order_operation", quality_indexes)
+            policy_indexes = {
+                item["name"] for item in schema.get_indexes("quality_risk_policies")
+            }
+            self.assertIn("ix_quality_risk_policies_status", policy_indexes)
+            policy_constraints = {
+                item["name"]
+                for item in schema.get_unique_constraints("quality_risk_policies")
+            }
+            self.assertIn("uq_quality_risk_policy_version", policy_constraints)
             resource_indexes = {
                 item["name"] for item in schema.get_indexes("manufacturing_resources")
             }

@@ -14,6 +14,11 @@ from autonomous_mes.application.genealogy import (
     RegisterProductUnitCommand,
 )
 from autonomous_mes.application.outbox import OutboxMessage
+from autonomous_mes.application.quality_policy import (
+    CreateQualityPolicyCommand,
+    QualityPolicyApplicationService,
+)
+from autonomous_mes.application.quality_risk import default_quality_risk_configuration
 from autonomous_mes.application.work_orders import (
     CreateWorkOrderCommand,
     OperationSpec,
@@ -174,6 +179,38 @@ class PostgreSqlIntegrationTests(unittest.TestCase):
 
         self.assertEqual(serial.upper(), registered["productSerial"])
         self.assertGreaterEqual(len(registered["links"]), 4)
+
+    def test_quality_policy_lifecycle_resolves_from_postgresql(self) -> None:
+        store = SqlAlchemyWorkOrderStore(self.sessions)
+        service = QualityPolicyApplicationService(store)
+        suffix = uuid4().hex[:12].upper()
+        draft = service.create_draft(
+            CreateQualityPolicyCommand(
+                name=f"PostgreSQL policy {suffix}",
+                scope="PRODUCT_OPERATION",
+                product_revision_id=f"PR-{suffix}",
+                operation_code="TURN",
+                configuration=default_quality_risk_configuration(),
+                change_reason="Verify durable governed policy",
+                actor_id="master-admin",
+            )
+        )
+        submitted = service.submit(
+            str(draft["policyId"]), int(draft["recordVersion"]), "master-admin"
+        )
+        service.approve(
+            str(submitted["policyId"]),
+            int(submitted["recordVersion"]),
+            "quality-manager",
+            "PostgreSQL transaction verified",
+            datetime.now(UTC),
+        )
+
+        resolved = store.resolve_quality_risk_policy(f"PR-{suffix}", "TURN", datetime.now(UTC))
+        self.assertIsNotNone(resolved)
+        assert resolved is not None
+        self.assertEqual(draft["policyId"], resolved.policy_id)
+        self.assertEqual(1, resolved.version)
 
 
 if __name__ == "__main__":

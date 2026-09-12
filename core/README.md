@@ -33,6 +33,10 @@ uvicorn autonomous_mes.api:app --app-dir src --reload
 - `POST /api/v1/equipment`
 - `GET /api/v1/equipment`
 - `GET /api/v1/quality/eligible-operations`：全库已完工未检工序分页队列
+- `GET/POST /api/v1/quality/risk-policies`：受治理的质量风险策略列表与草稿创建
+- `POST /api/v1/quality/risk-policies/{policyId}/submit`：提交策略审批
+- `POST /api/v1/quality/risk-policies/{policyId}/approve`：质量角色批准并设置生效时间
+- `POST /api/v1/quality/risk-policies/{policyId}/rollback-draft`：从已批准版本创建回滚草稿
 - `GET /api/v1/system/operation-projection-health`：JSON与关系工序在线一致性巡检
 - `POST /api/v1/equipment/{equipmentId}/telemetry`
 - `POST /api/v1/genealogy/product-units`
@@ -129,6 +133,8 @@ Agent可通过`POST /api/v1/agent-tools/get-product-genealogy`读取序列号谱
 质量人员可在Agent页面确认`CREATE_QUALITY_INSPECTION`草稿并输入抽样数量。服务会在执行时重查提案、工序和已有检验，迁移`0018`保证每个工单工序只有一条检验；检验创建、提案转为`EXECUTED`和两个关联Outbox事件在同一事务提交。重复确认返回原检验。该入口只接受`QUALITY`身份，Agent没有调用权限。
 
 `QUALITY-RISK-V1`在质量草稿生成时按当前报废率、同设备历史质量结果、近30天设备报警和实绩刀具最低剩余寿命计算0—100分，给出`LOW/MEDIUM/HIGH`等级与有上限的抽样数量建议。评分因子、规则版本和建议随提案持久化并用于队列排序。该启发式规则不替代企业控制计划，DeepSeek不参与打分，质量结论与放行权仍在人和确定性业务规则中。
+
+质量风险规则现在可作为受治理策略配置。策略按全局、产品、工序或产品与工序组合匹配，只读取已经质量角色批准且已到生效时间的版本；创建、提交和批准均写入Outbox审计。回滚会创建新草稿而不篡改历史。没有有效策略时继续使用内置`QUALITY-RISK-V1`，模型和Agent均不能自行发布策略。
 
 启用 DeepSeek 时只需在本机 `.env` 设置 `AUTONOMOUS_MES_DEEPSEEK_API_KEY` 并重启 API。默认使用 `deepseek-v4-flash`、JSON 输出、关闭思考模式和 12 秒超时。每条提案记录 `narrativeSource` 与 `modelName`；不要把真实密钥写入仓库。
 

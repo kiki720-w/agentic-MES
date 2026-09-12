@@ -17,6 +17,7 @@ from autonomous_mes.domain.genealogy import (
 )
 from autonomous_mes.domain.master_data import ManufacturingResource
 from autonomous_mes.domain.quality import QualityInspection
+from autonomous_mes.domain.quality_policy import QualityPolicyStatus, QualityRiskPolicy
 from autonomous_mes.domain.work_order import WorkOrder
 
 
@@ -41,6 +42,7 @@ class InMemoryWorkOrderStore:
         self._material_consumptions: dict[str, list[MaterialConsumption]] = {}
         self._manufacturing_resources: dict[str, ManufacturingResource] = {}
         self._connector_nonces: set[str] = set()
+        self._quality_policies: dict[str, QualityRiskPolicy] = {}
 
     def get(self, work_order_id: str) -> WorkOrder | None:
         with self._lock:
@@ -561,7 +563,11 @@ class InMemoryWorkOrderStore:
             self._append_event(event)
 
     def quality_risk_facts(
-        self, work_order_id: str, operation_sequence: int, equipment_id: str
+        self,
+        work_order_id: str,
+        operation_sequence: int,
+        equipment_id: str,
+        lookback_days: int = 30,
     ) -> dict[str, Any]:
         with self._lock:
             inspected = failed = 0
@@ -586,7 +592,7 @@ class InMemoryWorkOrderStore:
                 if operation and operation.assigned_resource_id == equipment_id:
                     inspected += 1
                     failed += int(inspection.result == "FAIL")
-            cutoff = datetime.now(UTC) - timedelta(days=30)
+            cutoff = datetime.now(UTC) - timedelta(days=lookback_days)
             alarms = sum(
                 item["eventType"] == "EquipmentTelemetryRecorded"
                 and item["aggregateId"] == equipment_id
@@ -612,6 +618,78 @@ class InMemoryWorkOrderStore:
                 "recentAlarmCount": alarms,
                 "minimumToolLifePercent": min(tool_lives) if tool_lives else None,
             }
+
+    def get_quality_policy(self, policy_id: str) -> QualityRiskPolicy | None:
+        with self._lock:
+            item = self._quality_policies.get(policy_id)
+            return deepcopy(item) if item else None
+
+    def list_quality_policies(self, limit: int = 100) -> list[QualityRiskPolicy]:
+        with self._lock:
+            items = sorted(
+                self._quality_policies.values(),
+                key=lambda item: (item.updated_at, item.version),
+                reverse=True,
+            )
+            return deepcopy(items[:limit])
+
+    def next_quality_policy_version(self, policy_key: str) -> int:
+        with self._lock:
+            versions = [
+                item.version
+                for item in self._quality_policies.values()
+                if item.policy_key == policy_key
+            ]
+            return max(versions, default=0) + 1
+
+    def resolve_quality_risk_policy(
+        self, product_revision_id: str, operation_code: str, as_of: datetime
+    ) -> QualityRiskPolicy | None:
+        with self._lock:
+            candidates = [
+                item
+                for item in self._quality_policies.values()
+                if item.status is QualityPolicyStatus.APPROVED
+                and item.effective_from is not None
+                and item.effective_from <= as_of
+                and item.product_revision_id in {None, product_revision_id}
+                and item.operation_code in {None, operation_code}
+            ]
+            candidates.sort(
+                key=lambda item: (
+                    int(item.product_revision_id is not None)
+                    + int(item.operation_code is not None),
+                    item.effective_from or item.created_at,
+                    item.version,
+                ),
+                reverse=True,
+            )
+            return deepcopy(candidates[0]) if candidates else None
+
+    def add_quality_policy_atomically(
+        self, policy: QualityRiskPolicy, event: DomainEvent
+    ) -> None:
+        with self._lock:
+            if any(
+                item.policy_key == policy.policy_key and item.version == policy.version
+                for item in self._quality_policies.values()
+            ):
+                raise InvalidTransition("quality policy version already exists")
+            self._quality_policies[policy.policy_id] = deepcopy(policy)
+            self._append_event(event)
+
+    def update_quality_policy_atomically(
+        self,
+        policy: QualityRiskPolicy,
+        expected_record_version: int,
+        event: DomainEvent,
+    ) -> None:
+        with self._lock:
+            current = self._quality_policies.get(policy.policy_id)
+            if current is None or current.record_version != expected_record_version:
+                raise InvalidTransition("quality policy version changed")
+            self._quality_policies[policy.policy_id] = deepcopy(policy)
+            self._append_event(event)
 
     def update_agent_proposal_atomically(
         self, proposal: AgentProposal, expected_status: ProposalStatus, event: DomainEvent

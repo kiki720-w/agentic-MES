@@ -13,6 +13,7 @@ from autonomous_mes.domain.genealogy import (
 )
 from autonomous_mes.domain.master_data import ManufacturingResource
 from autonomous_mes.domain.quality import QualityInspection
+from autonomous_mes.domain.quality_policy import QualityRiskPolicy
 from autonomous_mes.domain.work_order import WorkOrder
 
 if TYPE_CHECKING:
@@ -132,8 +133,27 @@ class AgentProposalStore(Protocol):
     ) -> None: ...
 
     def quality_risk_facts(
-        self, work_order_id: str, operation_sequence: int, equipment_id: str
+        self,
+        work_order_id: str,
+        operation_sequence: int,
+        equipment_id: str,
+        lookback_days: int = 30,
     ) -> dict[str, Any]: ...
+
+
+class QualityPolicyStore(Protocol):
+    def get_quality_policy(self, policy_id: str) -> QualityRiskPolicy | None: ...
+    def list_quality_policies(self, limit: int = 100) -> list[QualityRiskPolicy]: ...
+    def next_quality_policy_version(self, policy_key: str) -> int: ...
+    def resolve_quality_risk_policy(
+        self, product_revision_id: str, operation_code: str, as_of: datetime
+    ) -> QualityRiskPolicy | None: ...
+    def add_quality_policy_atomically(
+        self, policy: QualityRiskPolicy, event: DomainEvent
+    ) -> None: ...
+    def update_quality_policy_atomically(
+        self, policy: QualityRiskPolicy, expected_record_version: int, event: DomainEvent
+    ) -> None: ...
 
 
 class QualityStore(Protocol):
@@ -245,6 +265,7 @@ class MesStore(
     ManufacturingResourceStore,
     ConnectorSecurityStore,
     ToolAuditSink,
+    QualityPolicyStore,
     Protocol,
 ):
     """Combined persistence port used by the current vertical slice."""
