@@ -6,9 +6,9 @@
 
 ## L4 排产自治运行时（2026-09-13）
 
-桌面 0.4.3 与 Core 已实现排产域第一条 L4 目标闭环：观察、计划、策略授权、幂等执行、回读核验、失败回滚和停止开关。默认处于 SHADOW、循环关闭、执行目标为空；真实验证会拒绝演示投影、缺工艺标准、能力缺口和非原子计划替换。模拟适配器只用于自动测试，尚未接入真实 MES 写回，因此当前声明为 `L4_RUNTIME_IMPLEMENTED_NOT_PRODUCTION_VALIDATED`。详见 [L4 排产运行时说明](docs/l4-scheduling-runtime.md)。
+桌面 0.4.4 与 Core 已实现排产域第一条 L4 目标闭环：观察、计划、策略授权、幂等执行、回读核验、失败回滚和停止开关。默认处于 SHADOW、循环关闭、执行目标为空；真实验证会拒绝演示投影、缺工艺标准、能力缺口和非原子计划替换。模拟适配器只用于自动测试，尚未接入真实 MES 写回，因此当前声明为 `L4_RUNTIME_IMPLEMENTED_NOT_PRODUCTION_VALIDATED`。详见 [L4 排产运行时说明](docs/l4-scheduling-runtime.md)。
 
-Agent 工作台已完成 Codex 式附件链路：全窗口拖入、本机解析、附件随问题进入当前本地模型并返回有依据的回答。XLSX 使用 Docling 的离线结构识别，并在 Core 中保留工作表、连续数据区和字段映射边界；支持常见文字文件、CSV/XLSX、DOCX、文本或扫描 PDF，以及 PNG/JPG 本地 OCR。详见 [本地附件拖放与理解](docs/local-attachment-understanding.md)和 [真实 Excel 解析决策](docs/xlsx-document-intelligence.md)。
+Agent 工作台是本地制造任务主入口：全窗口拖入、本机解析、结构化预检、授权写入和回读核验在一个对话中完成。人员能力表可以自动映射为产能资源，重复导入会按稳定人员编号更新而不会重复新增；自然语言新订单由本地模型转换为受校验的动作，随后创建工单并运行有限产能排产。XLSX 使用 Docling 和 openpyxl 的离线结构识别；文字、DOCX、PDF 和图片 OCR 仍可作为任务资料。产能、排产和结果页面保留人工检查与修改。详见 [本地附件拖放与理解](docs/local-attachment-understanding.md)和 [Agent 主导的本地生产闭环](docs/local-manufacturing-agent.md)。
 
 早期自建 MES 流程仍保留为离线模拟器和回归测试夹具，不再作为正式产品入口或权威生产数据源。
 

@@ -190,6 +190,10 @@ function registerIpc() {
       if (![".xlsx", ".csv"].includes(extension) || content.length > 5 * 1024 * 1024) {
         throw new Error("Spreadsheet must be XLSX or CSV and no larger than 5 MB");
       }
+    } else if (endpointPath === "/api/v1/agent/imports/capacity/preview") {
+      if (extension !== ".xlsx" || content.length > 15 * 1024 * 1024) {
+        throw new Error("人员能力文件必须是 XLSX，且不超过 15 MB");
+      }
     } else if (endpointPath === "/api/v1/agent/attachments/parse") {
       if (content.length > 15 * 1024 * 1024) throw new Error("Attachment exceeds 15 MB");
     } else {

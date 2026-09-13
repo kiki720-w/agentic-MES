@@ -60,6 +60,7 @@ class GenerateScheduleCommand:
     actor_id: str
     correlation_id: str
     trigger_context: dict[str, Any] | None = None
+    preferred_resource_ids: dict[str, str] | None = None
 
 
 @dataclass(frozen=True)
@@ -284,6 +285,14 @@ class SchedulingApplicationService:
                 candidates = _matching_candidates(
                     resources, operation.work_center_id, operation.operation_code
                 )
+                preferred_resource_id = (command.preferred_resource_ids or {}).get(
+                    order.human_code
+                )
+                if preferred_resource_id:
+                    candidates = [
+                        item for item in candidates
+                        if item.resource_id == preferred_resource_id
+                    ]
                 if not candidates:
                     shortages.append(
                         _shortage(
@@ -291,7 +300,9 @@ class SchedulingApplicationService:
                             operation,
                             remaining_quantity,
                             required,
-                            "没有可用且能力匹配的人员、工作单元或在线设备",
+                            "指定人员不可用或能力不匹配"
+                            if preferred_resource_id
+                            else "没有可用且能力匹配的人员、工作单元或在线设备",
                         )
                     )
                     continue

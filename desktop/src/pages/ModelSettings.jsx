@@ -51,7 +51,7 @@ export default function ModelSettings({ actor }) {
   const currentPreset = presets[form.provider] || presets.CUSTOM;
   return <div className="native-page models-page">
     <Toast message={toast?.message} tone={toast?.tone} onClose={() => setToast(null)} />
-    <PageHeader eyebrow="MODEL CONTROL" title="模型与数据边界" description="选择云模型、本地模型或厂内 GPU 服务；模型只参与理解与解释，不直接控制生产。" actions={<button className="button" onClick={load}>↻ 刷新状态</button>} />
+    <PageHeader eyebrow="MODEL CONTROL" title="模型与数据边界" description="选择本地模型、厂内 GPU 或云模型；模型生成候选动作，Core 校验、执行并核验。" actions={<button className="button" onClick={load}>↻ 刷新状态</button>} />
     <div className="model-status-banner"><div className="model-orbit">✦</div><div><span>当前推理模型</span><strong>{status.provider} · {status.model}</strong><p>{status.baseUrl}</p></div><StatusPill value={statusLabel(status.connectionStatus)} tone={status.connectionStatus === "VERIFIED" ? "published" : "warning"} /></div>
     {!canAdmin && <div className="permission-banner"><span>锁</span><div><strong>当前身份只有查看权限</strong><p>模型切换需要主管或主数据管理员。开发模式可从左下角切换到 Demo Supervisor；生产环境由企业 OIDC 决定身份，前端不可自行提权。</p></div></div>}
     <div className="models-layout">

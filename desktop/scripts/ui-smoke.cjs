@@ -94,6 +94,7 @@ async function main() {
             const preview=${JSON.stringify(requiresSpreadsheetPreview)}?(
               body.includes("标准模板预检 ${attachmentName}")||
               body.includes("结构化导入检查 ${attachmentName}")||
+              body.includes("已识别人员能力表 ${attachmentName}")||
               body.includes("已识别 3 个工作表")
             ):true;
             const misleadingZero=body.includes("生产数据预检 ${attachmentName}：0 个工单、0 道工序、0 个产能资源");
@@ -150,7 +151,7 @@ async function main() {
       await waitFor(`document.querySelectorAll(".benchmark-comparison tbody tr").length===9`);
       await evaluate(`document.querySelector(".benchmark-case").open=true`);
       await evaluate(`document.querySelector(".benchmark-comparison").scrollIntoView({block:"start"})`);
-      const evidenceScreenshot = await call("Page.captureScreenshot", { format: "png", fromSurface: false });
+      const evidenceScreenshot = await call("Page.captureScreenshot", { format: "png", fromSurface: true });
       fs.writeFileSync(path.join(outputRoot, "comparison.png"), Buffer.from(evidenceScreenshot.data, "base64"));
     }
     const state = await call("Runtime.evaluate", {
@@ -170,7 +171,7 @@ async function main() {
       });
       scrollWorked = scrolled.result.value > 0;
     }
-    const screenshot = await call("Page.captureScreenshot", { format: "png", fromSurface: false });
+    const screenshot = await call("Page.captureScreenshot", { format: "png", fromSurface: true });
     fs.writeFileSync(path.join(outputRoot, `${index + 1}-${pages[index]}.png`), Buffer.from(screenshot.data, "base64"));
     results.push({ page: pages[index], ...value, scrollWorked });
   }

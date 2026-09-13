@@ -23,6 +23,11 @@ from autonomous_mes.application.agent_tools import (
     ListQualityCandidatesTool,
     ToolContext,
 )
+from autonomous_mes.application.agent_workbook_import import (
+    MAX_AGENT_WORKBOOK_BYTES,
+    execute_capacity_plan,
+    preview_capacity_workbook,
+)
 from autonomous_mes.application.attachment_parser import (
     MAX_ATTACHMENT_BYTES,
     parse_attachment,
@@ -48,6 +53,7 @@ from autonomous_mes.application.identity import (
     OidcTokenVerifier,
     parse_csv_set,
 )
+from autonomous_mes.application.manufacturing_agent import ManufacturingAgentService
 from autonomous_mes.application.master_data import (
     ManufacturingResourceApplicationService,
     RegisterManufacturingResourceCommand,
@@ -331,6 +337,17 @@ class NaturalLanguageBody(BaseModel):
     model_config = ConfigDict(extra="forbid")
     question: str = Field(min_length=1, max_length=2000)
     attachments: list[AttachmentContextBody] = Field(default_factory=list, max_length=8)
+
+
+class ConfirmAgentCapacityImportBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    previewFingerprint: str = Field(pattern=r"^[a-f0-9]{64}$")
+    plan: dict[str, object]
+
+
+class ManufacturingAgentTaskBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    instruction: str = Field(min_length=1, max_length=2000)
 
 
 class ModelGatewayConfigurationBody(BaseModel):
@@ -644,6 +661,9 @@ quality_policy_service = QualityPolicyApplicationService(store)
 genealogy_service = GenealogyApplicationService(store)
 master_data_service = ManufacturingResourceApplicationService(store)
 scheduling_service = SchedulingApplicationService(store)
+manufacturing_agent_service = ManufacturingAgentService(
+    service, scheduling_service, model_gateway
+)
 scheduling_agent = SchedulingAgent(
     store,
     enabled=settings.scheduling_agent_enabled,
@@ -1117,6 +1137,48 @@ async def preview_scheduling_spreadsheet(
             result["snapshot"] = canonical
             result["previewFingerprint"] = snapshot_fingerprint(canonical)
     return result
+
+
+@app.post("/api/v1/agent/imports/capacity/preview")
+async def preview_agent_capacity_import(
+    request: Request,
+    workshopId: str,
+    identity: Annotated[Identity, Depends(current_identity)],
+    x_file_name: str = Header(default="capacity.xlsx", alias="X-File-Name"),
+) -> dict[str, object]:
+    authorize_human(identity, "PLANNER", "SUPERVISOR")
+    content = await request.body()
+    if len(content) > MAX_AGENT_WORKBOOK_BYTES:
+        raise ValidationError("workbook exceeds 15 MB limit")
+    return preview_capacity_workbook(
+        content,
+        unquote(x_file_name),
+        workshopId,
+        scheduling_service.list_resources(workshopId),
+    )
+
+
+@app.post("/api/v1/agent/imports/capacity/execute", status_code=201)
+def execute_agent_capacity_import(
+    body: ConfirmAgentCapacityImportBody,
+    identity: Annotated[Identity, Depends(current_identity)],
+) -> dict[str, object]:
+    authorize_human(identity, "PLANNER")
+    return execute_capacity_plan(
+        body.plan,
+        body.previewFingerprint,
+        scheduling_service,
+        identity.subject_id,
+    )
+
+
+@app.post("/api/v1/agent/tasks/execute")
+def execute_manufacturing_agent_task(
+    body: ManufacturingAgentTaskBody,
+    identity: Annotated[Identity, Depends(current_identity)],
+) -> dict[str, object]:
+    authorize_human(identity, "PLANNER")
+    return manufacturing_agent_service.execute(body.instruction, identity.subject_id)
 
 
 @app.post("/api/v1/planning/imports/spreadsheet/confirm", status_code=201)

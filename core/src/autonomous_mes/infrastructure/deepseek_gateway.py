@@ -217,6 +217,46 @@ class OpenAICompatibleDiagnosticModel:
             self._record_status("DEGRADED", exc.__class__.__name__)
             raise ModelGatewayError("model natural language request failed") from exc
 
+    def plan_manufacturing_action(self, instruction: str) -> dict[str, Any]:
+        try:
+            result = self._request(
+                [
+                    {
+                        "role": "system",
+                        "content": (
+                            "你是本地机械加工MES的任务解析器。只把用户指令转换成JSON，不执行动作，"
+                            "不补造用户没有提供的生产事实。仅支持新建工单并排产。输出格式为"
+                            '{"action":"CREATE_ORDER_AND_SCHEDULE","order":{'
+                            '"humanCode":null,"productionOrderId":null,"materialCode":null,'
+                            '"productName":null,"quantity":null,"dueAt":null,"priority":50,'
+                            '"operationCode":null,"operationName":null,"workCenterId":null,'
+                            '"minutesPerUnit":null,"preferredOperator":null}}。'
+                            "日期输出YYYY-MM-DD；数量为正整数；单件工时单位为分钟。"
+                            "车工或车削的默认工作中心可以填写WC-LATHE-01。"
+                            "如果用户没有明确要求新建订单并排产，action填写UNSUPPORTED。"
+                        ),
+                    },
+                    {"role": "user", "content": instruction},
+                ],
+                900,
+            )
+            if not isinstance(result.get("action"), str) or not isinstance(
+                result.get("order"), dict
+            ):
+                raise TypeError("invalid manufacturing action plan")
+            self._record_status("VERIFIED")
+            return result
+        except (
+            httpx.HTTPError,
+            KeyError,
+            IndexError,
+            TypeError,
+            ValueError,
+            json.JSONDecodeError,
+        ) as exc:
+            self._record_status("DEGRADED", exc.__class__.__name__)
+            raise ModelGatewayError("model manufacturing action planning failed") from exc
+
 
 class DeepSeekDiagnosticModel(OpenAICompatibleDiagnosticModel):
     """Backward-compatible DeepSeek constructor."""
@@ -358,3 +398,10 @@ class ConfigurableModelGateway:
         if adapter is None:
             raise ModelGatewayError("model gateway is disabled")
         return adapter.answer(question, facts)
+
+    def plan_manufacturing_action(self, instruction: str) -> dict[str, Any]:
+        with self._lock:
+            adapter = self._adapter
+        if adapter is None:
+            raise ModelGatewayError("model gateway is disabled")
+        return adapter.plan_manufacturing_action(instruction)

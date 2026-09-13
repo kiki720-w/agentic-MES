@@ -39,5 +39,9 @@ class NaturalLanguageModel(Protocol):
     def answer(self, question: str, facts: dict[str, Any]) -> NaturalLanguageAnswer: ...
 
 
+class ManufacturingActionModel(Protocol):
+    def plan_manufacturing_action(self, instruction: str) -> dict[str, Any]: ...
+
+
 class ModelGatewayError(RuntimeError):
     """Raised when a remote model cannot return a validated narrative."""
