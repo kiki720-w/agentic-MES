@@ -44,12 +44,11 @@ class ErrorBoundary extends Component {
 
 function WindowControls() {
   if (desktop.platform === "browser") return null;
-  return <div className="window-controls no-drag"><button className="close" aria-label="关闭" onClick={() => desktop.window.close()}>×</button><button className="minimize" aria-label="最小化" onClick={() => desktop.window.minimize()}>−</button><button className="maximize" aria-label="最大化" onClick={() => desktop.window.maximize()}>+</button></div>;
+  return <div className="window-controls no-drag"><button className="minimize" aria-label="最小化" onClick={() => desktop.window.minimize()}>—</button><button className="maximize" aria-label="最大化" onClick={() => desktop.window.maximize()}>□</button><button className="close" aria-label="关闭" onClick={() => desktop.window.close()}>×</button></div>;
 }
 
 function Sidebar({ active, onChange, online, agentLevel, actor, profiles, onActorChange }) {
   return <aside className="sidebar">
-    <WindowControls />
     <div className="brand drag-region"><img src={appIcon} alt="" /><div><strong>CAPAXION <em>v{packageInfo.version}</em></strong><small>制造智能系统</small></div></div>
     <div className="workspace-switcher"><span className="factory-avatar">01</span><div><strong>演示工厂</strong><small>机械加工中心</small></div><span className="chevron">⌄</span></div>
     <nav><div className="nav-caption">工作区</div>{navItems.map((item) => <button key={item.id} className={active === item.id ? "active" : ""} onClick={() => onChange(item.id)}><span className="nav-icon"><NavGlyph id={item.id} /></span><span><strong>{item.label}</strong><small>{item.hint}</small></span></button>)}</nav>
@@ -98,7 +97,7 @@ export default function App() {
   const pageProps = { actor, onNavigate: setActive };
   return <ErrorBoundary><div className="app-shell">
     <Sidebar active={active} onChange={setActive} online={health.online} agentLevel={health.detail?.schedulingAgentLevel} actor={actor} profiles={profiles} onActorChange={setActor} />
-    <section className="app-main"><header className="titlebar drag-region"><div><span>{item.label}</span><small>{item.hint}</small></div><div className="titlebar-actions no-drag"><button className="theme-toggle" onClick={() => setTheme((current) => current === "light" ? "dark" : "light")} title={theme === "light" ? "切换深色模式" : "切换浅色模式"}>{theme === "light" ? "◐" : "☼"}<span>{theme === "light" ? "浅色" : "深色"}</span></button><div className="zoom-control" title="界面缩放"><button disabled={zoom <= 100} onClick={async () => setZoom(await desktop.window.zoom(-0.1))}>−</button><span>{zoom}%</span><button disabled={zoom >= 140} onClick={async () => setZoom(await desktop.window.zoom(0.1))}>＋</button></div><span className="environment"><i />本机</span></div></header><div className="content-area">
+    <section className="app-main"><header className="titlebar drag-region"><div><span>{item.label}</span><small>{item.hint}</small></div><div className="titlebar-actions no-drag"><button className="theme-toggle" onClick={() => setTheme((current) => current === "light" ? "dark" : "light")} title={theme === "light" ? "切换深色模式" : "切换浅色模式"}>{theme === "light" ? "◐" : "☼"}<span>{theme === "light" ? "浅色" : "深色"}</span></button><div className="zoom-control" title="界面缩放"><button disabled={zoom <= 100} onClick={async () => setZoom(await desktop.window.zoom(-0.1))}>−</button><span>{zoom}%</span><button disabled={zoom >= 140} onClick={async () => setZoom(await desktop.window.zoom(0.1))}>＋</button></div><span className="environment"><i />本机</span><WindowControls /></div></header><div className="content-area">
       <div className="workspace-page" hidden={active !== "workspace"}><AgentWorkspace health={health} incomingDrop={incomingDrop} onDropHandled={(id) => setIncomingDrop((current) => current?.id === id ? null : current)} {...pageProps} /></div>
       {active === "tower" && <ControlTower {...pageProps} />}
       {active === "planning" && <PlanningCenter {...pageProps} />}
