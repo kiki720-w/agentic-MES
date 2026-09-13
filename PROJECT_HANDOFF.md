@@ -5,12 +5,16 @@
 更新时间：2026-09-13  
 项目目录：D:\mes  
 GitHub：https://github.com/kiki720-w/capaxion
-功能基线：本地制造任务准确率优化（详见 docs/manufacturing-accuracy.md）
+功能基线：L4 排产自治运行时第一版（详见 docs/l4-scheduling-runtime.md）
 当前分支：main
 
 ## 本地 AI 与云端 MES 的独立网络边界（2026-09-13）
 
 桌面 0.2.3 与 Core 使用本机 Qwen3 4B，云模型出口关闭。原始模型历史成绩仍为 6/9；`manufacturing-grounding-v1` 用确定性代码产生计算、单位、来源冲突和权限证据，新版制造任务路径连续两次 9/9。工作台从最多 500 条/类生成全量汇总，再按问题选最多 12 条/类，已消除本机 4096 上下文溢出。新旧报告明确标识且禁止跨请求版本对比。详见 [准确率优化记录](docs/manufacturing-accuracy.md)。
+
+## L4 排产自治运行时（2026-09-13）
+
+产品终点已明确为 L4 Agent。桌面 0.3.0 与 Core 新增排产域观察—计划—策略—执行—核验—回滚闭环、快照二次版本校验、幂等键、停止开关和三种模式。默认 SHADOW、循环关闭、执行目标 NONE；模拟执行器仅可在 simulator mode 使用，真实 MES 写回尚未接入。当前只能声明 `L4_RUNTIME_IMPLEMENTED_NOT_PRODUCTION_VALIDATED`。详见 [L4 运行时说明](docs/l4-scheduling-runtime.md)。
 
 ## 新对话先读这里
 
@@ -32,7 +36,7 @@ GitHub：https://github.com/kiki720-w/capaxion
 4. 产品面向通用机械加工和装备制造，不为某一家工厂写死。刀具、夹具、量具、NC 程序、设备、人员与工作单元都使用通用资源语义。
 5. 排产思路吸收既有 paichan 项目的实际经验，但不照抄其复杂界面。参考仓库：https://github.com/kiki720-w/paichan
 6. 用户首先看到“每个人每天做什么”，再下钻工单、工序、资源负荷、能力缺口和计算依据。
-7. 当前 Agent 为 L3 BOUNDED：允许读取、分析、生成和提交排产建议；禁止自批、自发、绕过约束、直接写外部系统数据库或控制 PLC/CNC。
+7. 产品目标为分业务域 L4：预授权范围内可自主感知、规划、执行、核验和恢复，超界时转人工。当前排产域完成运行时第一版并处于影子模式；质量、设备控制和其他高风险域仍保持 L3 或更低。模型永远不能绕过策略、直接写外部数据库或控制 PLC/CNC。
 8. L4 是未来目标，不是当前宣传能力。只有真实系统闭环、长期影子验证、可回滚执行和生产级身份体系完成后，才能逐项开放预授权的低风险自动动作。
 
 ## 当前系统结构
@@ -45,7 +49,7 @@ GitHub：https://github.com/kiki720-w/capaxion
                       ↓
        确定性有限产能 APS 与质量规则
                       ↓
-          L3 虚拟员工「衡策」形成建议
+       「衡策」按业务域自主决策或升级人工
                       ↓
           策略校验、版本冲突与双人审批
                       ↓
@@ -61,7 +65,7 @@ GitHub：https://github.com/kiki720-w/capaxion
 - 统一 APS 快照、有限产能排产、资源能力、标准工时、计划状态机和人工移动排产结果。
 - 人员日排程和固定六工作日周计划；大表支持搜索、分页与横向滚动。
 - Agent 工作台支持自然语言和 XLSX / CSV 预检；图片和 PDF 目前只有本地附件选择入口，尚未解析、识别或发送给模型。
-- L3 排产 Agent 可自动分析并创建或提交方案，结果标注虚拟员工创建者和提交者。
+- 排产域 L4 目标运行时可观察、计划、策略授权、执行、核验和回滚；当前默认影子模式，人工排产入口仍保留原 L3 提交流程。
 - 供应商中立模型网关，可热切换 DeepSeek、Kimi、OpenAI 或自定义 OpenAI Chat Completions 兼容接口。
 - 模型设置页面：/settings/models。预设服务直接选择，只有自定义服务显示 Base URL 输入。
 - API Key 不通过状态接口回显、不进入浏览器存储；连接测试失败不会覆盖当前模型。
@@ -144,7 +148,7 @@ DeepSeek 当前官方视觉路线需要单独的视觉模型，例如 `deepseek-
 - 敏感操作继续执行 maker-checker，创建者和提交者不得批准自己的方案。
 - 生产环境完全隐藏并禁用 DEV 身份选择器。
 
-当前最高优先级仍是生产级身份与权限体系，因为没有可信身份就不能安全开放模型配置、审批或未来 L4。
+当前最高优先级仍是生产级身份与权限体系，因为没有可信身份就不能安全开放模型配置、自治策略或生产 L4 执行。
 
 ## 制造能力验收中心（本次新增）
 
@@ -153,7 +157,7 @@ DeepSeek 当前官方视觉路线需要单独的视觉模型，例如 `deepseek-
 - 首轮真实 DeepSeek 9/9 通过；这不是生产准确率或多模态验收。
 - 本地候选走独立无 Key、禁用环境代理的字面量回环地址适配器，不切换当前网关、不携带云密钥或云端回退。
 - 本机 RTX 4060 Laptop GPU 8GB 已运行 llama.cpp b10936 Vulkan + Qwen3-4B-Instruct-2507 Q4_K_M。原始模型三轮均 6/9；规则辅助任务路径连续两轮 9/9、零请求失败。只能宣称固定任务路径成绩提高，不能宣称 4B 模型本身达到 DeepSeek 或已通过生产验收。
-- 本地服务为 http://127.0.0.1:11434/v1，模型 ID qwen3-4b-instruct-2507-q4_k_m；以 --offline 启动，当前 DeepSeek 配置未切换。脚本 core/scripts/start-local-benchmark.ps1 / stop-local-benchmark.ps1 管理本次进程；权重与运行时保留于 .local-models/（Git 忽略），非系统服务或开机自启。
+- 本地服务为 http://127.0.0.1:11434/v1，模型 ID qwen3-4b-instruct-2507-q4_k_m；以 --offline 启动，当前 Core 使用本地模型且云模型出口关闭。脚本 core/scripts/start-local-benchmark.ps1 / stop-local-benchmark.ps1 管理本次进程；权重与运行时保留于 .local-models/（Git 忽略），非系统服务或开机自启。
 - PDF/图片仍未接入；XLSX/CSV 仍为本地确定性解析，本中心尚未建立多样文件准确率样本集。
 - 后台一次一轮测评，逐题原子保存，启动时将未完成任务标记中断；报告位于 core/.capaxion/benchmarks/，不进入 Git。
 
@@ -213,7 +217,7 @@ DeepSeek 当前官方视觉路线需要单独的视觉模型，例如 `deepseek-
 - 选择第一个真实系统适配器。
 - 先只读同步，不回写。
 - 连续比较 Agent 与人工排产的准交率、利用率、换型、缺口和计划员工时。
-- L3 稳定后才讨论 L4 自动执行范围。
+- L4 只能按业务域、动作风险和预授权策略逐项开放，不能一次性给予通用执行权限。
 
 ## 当前技术状态
 
@@ -227,7 +231,8 @@ DeepSeek 当前官方视觉路线需要单独的视觉模型，例如 `deepseek-
 - 关键模型网关：core/src/autonomous_mes/infrastructure/deepseek_gateway.py
 - 关键 API 装配：core/src/autonomous_mes/api.py
 - APS：core/src/autonomous_mes/application/scheduling.py
-- L3 排产 Agent：core/src/autonomous_mes/application/scheduling_agent.py
+- 排产 Agent：core/src/autonomous_mes/application/scheduling_agent.py
+- L4 排产自治运行时与策略：core/src/autonomous_mes/application/scheduling_autonomy.py
 - 模型设置页：core/src/autonomous_mes/static/model_settings.html
 - 最近验收记录：docs/step-34 到 docs/step-39
 - 桌面客户端：desktop（Electron + React + Vite）；构建命令 `pnpm desktop:build`
@@ -247,6 +252,6 @@ DeepSeek 当前官方视觉路线需要单独的视觉模型，例如 `deepseek-
 
 将下面这段话作为新对话的第一条消息：
 
-> 请继续开发 D:\mes 中的 CAPAXION（Manufacturing Decision OS）。先完整阅读 D:\mes\PROJECT_HANDOFF.md 和 D:\mes\README.md，再检查 git status、最近提交及现有测试。继承已经确认的产品定位、安全边界、L3 Agent、供应商中立模型网关、本地数据不出厂方向和 WorkBuddy 式原生桌面体验，不要重新从传统 MES 开始设计，也不要记录或暴露任何 API Key。注意当前只有 XLSX/CSV 进入真实文件处理，PDF/图片尚未理解；DeepSeek 曾降级为 DEGRADED/ValueError，本次协议加固后真实三项合成文字自检已通过，状态 VERIFIED，但未验收生产准确率。先核对 docs/minimum-ai-acceptance.md 的最小验收记录，再推进第 40 步中不依赖企业身份提供商选择的工作，保持规则降级和审批边界；只有遇到会改变产品方向、真实外部系统选择、身份提供商选择、云端数据出厂策略或不可逆操作时再停下来询问。
+> 请继续开发 D:\mes 中的 CAPAXION（Manufacturing Decision OS）。先完整阅读 D:\mes\PROJECT_HANDOFF.md、D:\mes\README.md 和 docs/l4-scheduling-runtime.md，再检查 git status、最近提交及测试。产品目标是分业务域 L4 Agent；排产自治运行时第一版已实现，但默认 SHADOW、循环关闭、执行目标 NONE，不能宣传为生产 L4。继续保持本地模型默认、云模型与业务 API 分开授权、模型不直接写数据库或控制设备。真实 MES 选择、企业身份提供商和云端数据策略仍需用户决定；不要记录或暴露 API Key。
 
 如果第二个对话不在本机项目上下文中，可以直接发送本文件，或让它从 GitHub main 分支读取 PROJECT_HANDOFF.md。

@@ -33,12 +33,12 @@ function WindowControls() {
   return <div className="window-controls no-drag"><button aria-label="最小化" onClick={() => desktop.window.minimize()}>—</button><button aria-label="最大化" onClick={() => desktop.window.maximize()}>□</button><button className="close" aria-label="关闭" onClick={() => desktop.window.close()}>×</button></div>;
 }
 
-function Sidebar({ active, onChange, online, actor, profiles, onActorChange }) {
+function Sidebar({ active, onChange, online, agentLevel, actor, profiles, onActorChange }) {
   return <aside className="sidebar">
     <div className="brand drag-region"><img src={appIcon} alt="" /><div><strong>CAPAXION</strong><small>MANUFACTURING DECISION OS</small></div></div>
     <div className="workspace-switcher"><span className="factory-avatar">01</span><div><strong>演示工厂</strong><small>机械加工中心</small></div><span className="chevron">⌄</span></div>
     <nav><div className="nav-caption">工作空间</div>{navItems.map((item) => <button key={item.id} className={active === item.id ? "active" : ""} onClick={() => onChange(item.id)}><span className="nav-icon">{item.icon}</span><span><strong>{item.label}</strong><small>{item.hint}</small></span></button>)}</nav>
-    <div className="sidebar-bottom"><div className="agent-level"><span className="pulse" />衡策 · L3 BOUNDED</div><div className="core-state"><span className={online ? "online" : "offline"} />{online ? "Core 已连接" : "Core 未连接"}</div><label className="profile"><span>{actor === "demo-supervisor" ? "DS" : actor === "demo-quality" ? "DQ" : "DP"}</span><div><strong>当前演示身份</strong><select value={actor} onChange={(e) => onActorChange(e.target.value)}>{profiles.map((profile) => <option key={profile.subjectId} value={profile.subjectId}>{profile.displayName}</option>)}</select></div></label></div>
+    <div className="sidebar-bottom"><div className="agent-level"><span className="pulse" />衡策 · {agentLevel || "状态未知"}</div><div className="core-state"><span className={online ? "online" : "offline"} />{online ? "Core 已连接" : "Core 未连接"}</div><label className="profile"><span>{actor === "demo-supervisor" ? "DS" : actor === "demo-quality" ? "DQ" : "DP"}</span><div><strong>当前演示身份</strong><select value={actor} onChange={(e) => onActorChange(e.target.value)}>{profiles.map((profile) => <option key={profile.subjectId} value={profile.subjectId}>{profile.displayName}</option>)}</select></div></label></div>
   </aside>;
 }
 
@@ -65,7 +65,7 @@ export default function App() {
 
   const pageProps = { actor, onNavigate: setActive };
   return <ErrorBoundary><div className="app-shell">
-    <Sidebar active={active} onChange={setActive} online={health.online} actor={actor} profiles={profiles} onActorChange={setActor} />
+    <Sidebar active={active} onChange={setActive} online={health.online} agentLevel={health.detail?.schedulingAgentLevel} actor={actor} profiles={profiles} onActorChange={setActor} />
     <section className="app-main"><header className="titlebar drag-region"><div><span>{item.label}</span><small>{item.hint}</small></div><div className="titlebar-actions no-drag"><div className="zoom-control" title="界面缩放"><button disabled={zoom <= 100} onClick={async () => setZoom(await desktop.window.zoom(-0.1))}>A−</button><span>{zoom}%</span><button disabled={zoom >= 140} onClick={async () => setZoom(await desktop.window.zoom(0.1))}>A＋</button></div><span className="environment"><i />LOCAL FACTORY</span><WindowControls /></div></header><div className="content-area">
       {active === "workspace" && <AgentWorkspace health={health} {...pageProps} />}
       {active === "tower" && <ControlTower {...pageProps} />}

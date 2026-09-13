@@ -33,16 +33,22 @@ class SchedulingAgent:
         *,
         enabled: bool,
         auto_submit: bool,
+        agent_id: str = SCHEDULING_AGENT_ID,
+        agent_level: str = "L3_BOUNDED",
+        publication_authority: str = "HUMAN_SUPERVISOR_ONLY",
     ) -> None:
         self._store = store
         self._scheduling = SchedulingApplicationService(store)
         self._enabled = enabled
         self._auto_submit = auto_submit
+        self._agent_id = agent_id
+        self._agent_level = agent_level
+        self._publication_authority = publication_authority
 
     def analyze(self, command: SchedulingAgentCommand) -> dict[str, Any]:
         if not self._enabled:
             raise Forbidden("L3 scheduling agent is disabled")
-        fingerprint, reasons = self._snapshot_fingerprint(command)
+        fingerprint, reasons = self.snapshot_fingerprint(command)
         existing = next(
             (
                 item
@@ -63,14 +69,14 @@ class SchedulingAgent:
                 command.use_overtime,
                 command.default_minutes_per_unit,
                 command.operation_rates,
-                SCHEDULING_AGENT_ID,
+                self._agent_id,
                 fingerprint,
                 {
-                    "generatedBy": SCHEDULING_AGENT_ID,
-                    "agentLevel": "L3_BOUNDED",
+                    "generatedBy": self._agent_id,
+                    "agentLevel": self._agent_level,
                     "inputFingerprint": fingerprint,
                     "triggerReasons": reasons,
-                    "publicationAuthority": "HUMAN_SUPERVISOR_ONLY",
+                    "publicationAuthority": self._publication_authority,
                 },
             )
         )
@@ -78,11 +84,11 @@ class SchedulingAgent:
             plan = self._scheduling.submit(
                 str(plan["planId"]),
                 int(plan["recordVersion"]),
-                SCHEDULING_AGENT_ID,
+                self._agent_id,
             )
         return self._result(plan, reasons, reused=False)
 
-    def _snapshot_fingerprint(self, command: SchedulingAgentCommand) -> tuple[str, list[str]]:
+    def snapshot_fingerprint(self, command: SchedulingAgentCommand) -> tuple[str, list[str]]:
         external_snapshot = self._store.get_latest_scheduling_snapshot(command.workshop_id)
         resources = self._store.list_planning_resources(command.workshop_id)
         active_plans = self._store.list_schedule_plans(command.workshop_id, 100)
@@ -198,11 +204,10 @@ class SchedulingAgent:
         encoded = json.dumps(snapshot, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
         return sha256(encoded.encode()).hexdigest(), reasons
 
-    @staticmethod
-    def _result(plan: dict[str, Any], reasons: list[str], *, reused: bool) -> dict[str, Any]:
+    def _result(self, plan: dict[str, Any], reasons: list[str], *, reused: bool) -> dict[str, Any]:
         return {
-            "agentId": SCHEDULING_AGENT_ID,
-            "agentLevel": "L3_BOUNDED",
+            "agentId": self._agent_id,
+            "agentLevel": self._agent_level,
             "decision": (
                 "REUSED_EXISTING_PROPOSAL"
                 if reused
@@ -210,7 +215,7 @@ class SchedulingAgent:
                 if plan["status"] == "PENDING_APPROVAL"
                 else "DRAFT_REQUIRES_DATA"
             ),
-            "publicationAuthority": "HUMAN_SUPERVISOR_ONLY",
+            "publicationAuthority": self._publication_authority,
             "triggerReasons": reasons,
             "reused": reused,
             "plan": plan,

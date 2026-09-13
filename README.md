@@ -2,7 +2,11 @@
 
 **Manufacturing Decision OS｜制造决策操作系统**
 
-本工作区正在构建面向机械加工与装备制造的制造智能控制层。产品不替换企业现有 ERP、MES、WMS、QMS 或设备平台，而是在其上建立可追溯的制造数字镜像、有限产能 APS、受控 L3 智能体和安全回写治理。
+本工作区正在构建面向机械加工与装备制造的制造智能控制层。产品不替换企业现有 ERP、MES、WMS、QMS 或设备平台，而是在其上建立可追溯的制造数字镜像、有限产能 APS、分域开放的 L4 Agent 和安全回写治理。
+
+## L4 排产自治运行时（2026-09-13）
+
+桌面 0.3.0 与 Core 已实现排产域第一条 L4 目标闭环：观察、计划、策略授权、幂等执行、回读核验、失败回滚和停止开关。默认处于 SHADOW、循环关闭、执行目标为空；真实验证会拒绝演示投影、缺工艺标准、能力缺口和非原子计划替换。模拟适配器只用于自动测试，尚未接入真实 MES 写回，因此当前声明为 `L4_RUNTIME_IMPLEMENTED_NOT_PRODUCTION_VALIDATED`。详见 [L4 排产运行时说明](docs/l4-scheduling-runtime.md)。
 
 早期自建 MES 流程仍保留为离线模拟器和回归测试夹具，不再作为正式产品入口或权威生产数据源。
 
@@ -17,9 +21,9 @@
 - 3 种产品，每种 4—8 道工序
 - 输入：连接既有 ERP/MES/WMS/QMS、机床和传感器，并保留来源、版本和观测时间
 - 核心：统一制造语义、滚动有限产能排产、约束证据、事件追溯和策略治理
-- 输出：形成建议或待审批计划，经授权人员批准后再由专用连接器回写
+- 输出：在预授权范围内自主执行并核验；超界任务转人工，外部系统只经专用连接器回写
 - 异常：插单、设备停机、缺料、质量失败、刀具异常
-- Agent：L3 排产智能体可自动感知变化、生成并提交方案，但不能自批、自发或直接控制设备
+- Agent：产品目标为分域 L4；排产自治运行时已实现第一版，当前默认影子运行，尚未通过真实 MES 和工厂现场验收
 - 推理：DeepSeek、Kimi 或其他 OpenAI 兼容 API，经可热切换模型网关调用
 - 部署：本地优先；支持厂内模型服务器，云模型仅由客户主动选择
 - 人工输入：Agent 工作台支持文字与附件入口；XLSX 经预检、指纹确认后生成标准快照
@@ -89,7 +93,7 @@
 - `docs/step-38-person-centric-scheduling-acceptance.md`：全页面 Agent 入口、真实输入摘要及人员日/周排程验收记录
 - `docs/step-39-provider-neutral-model-gateway-acceptance.md`：供应商中立模型网关、管理员 BYOK 设置与安全回退验收记录
 - `docs/desktop-client-foundation.md`：Windows 桌面客户端、安全 IPC、文件预检和本机打包验收记录
-- `GET /workspace`：自然语言、XLSX/CSV预检与L3排产协作工作台
+- `GET /workspace`：自然语言、XLSX/CSV 预检与衡策任务工作台
 - `GET /capacity`：版本化人员与工作单元产能维护
 - `GET /planning/results`：标明人工/虚拟员工身份的全宽排产结果
 - `GET /settings/models`：管理员切换模型供应商、Base URL、模型 ID 与 API Key

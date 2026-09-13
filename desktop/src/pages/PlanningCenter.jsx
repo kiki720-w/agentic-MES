@@ -5,6 +5,7 @@ import { api, desktop, localDateISO, statusLabel } from "../platform";
 export default function PlanningCenter({ actor, onNavigate }) {
   const [summary, setSummary] = useState(null);
   const [plans, setPlans] = useState([]);
+  const [autonomy, setAutonomy] = useState(null);
   const [query, setQuery] = useState("");
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
@@ -16,11 +17,12 @@ export default function PlanningCenter({ actor, onNavigate }) {
   const load = useCallback(async () => {
     setLoading(true); setError("");
     try {
-      const [nextSummary, nextPlans] = await Promise.all([
+      const [nextSummary, nextPlans, nextAutonomy] = await Promise.all([
         api("/api/v1/planning/input-summary?workshopId=WS-MACH-01&limit=100", actor),
         api("/api/v1/planning/plans?workshopId=WS-MACH-01&limit=30", actor),
+        api("/api/v1/planning/autonomy", actor),
       ]);
-      setSummary(nextSummary); setPlans(nextPlans);
+      setSummary(nextSummary); setPlans(nextPlans); setAutonomy(nextAutonomy);
     } catch (requestError) { setError(requestError.message); }
     finally { setLoading(false); }
   }, [actor]);
@@ -44,6 +46,26 @@ export default function PlanningCenter({ actor, onNavigate }) {
     try {
       const result = await desktop.core.upload({ path: "/api/v1/planning/imports/spreadsheet/preview?workshopId=WS-MACH-01", filePath: file.path, actor });
       setPreview({ ...result, fileName: file.name });
+    } catch (requestError) { setToast({ message: requestError.message, tone: "error" }); }
+    finally { setBusy(false); }
+  }
+
+  async function runAutonomy() {
+    setBusy(true);
+    try {
+      const result = await api("/api/v1/planning/autonomy/run", actor, { method: "POST", body: { workshopId: "WS-MACH-01", ...params, horizonDays: Number(params.horizonDays), defaultMinutesPerUnit: Number(params.defaultMinutesPerUnit), operationRates: {} } });
+      setToast({ message: `L4 评估：${result.decision} · ${result.state}`, tone: result.state === "VERIFIED" || result.state === "SHADOW_COMPLETE" ? "success" : "error" });
+      await load();
+    } catch (requestError) { setToast({ message: requestError.message, tone: "error" }); }
+    finally { setBusy(false); }
+  }
+
+  async function toggleKillSwitch() {
+    setBusy(true);
+    try {
+      const path = autonomy?.killSwitch ? "/api/v1/planning/autonomy/resume" : "/api/v1/planning/autonomy/stop";
+      const next = await api(path, actor, { method: "POST" });
+      setAutonomy(next); setToast({ message: next.killSwitch ? "L4 自治停止开关已启用。" : "L4 自治已恢复。", tone: "success" });
     } catch (requestError) { setToast({ message: requestError.message, tone: "error" }); }
     finally { setBusy(false); }
   }
@@ -73,6 +95,10 @@ export default function PlanningCenter({ actor, onNavigate }) {
       <MetricCard label="产能资源" value={summary.resourceCount} note={`${summary.personResourceCount} 人 · ${summary.cellResourceCount} 工作单元`} icon="◉" />
       <MetricCard label="历史方案" value={plans.length} note={plans[0]?.planNumber || "尚未生成"} icon="▦" />
     </div>
+    <Panel title="L4 排产自治" subtitle="自主观察、规划、策略授权、执行、核验和异常升级；当前状态来自 Core。" actions={<><button className="button" disabled={busy} onClick={runAutonomy}>运行一次自治评估</button><button className="button" disabled={busy || actor !== "demo-supervisor"} onClick={toggleKillSwitch}>{autonomy?.killSwitch ? "恢复自治" : "紧急停止"}</button></>}>
+      <div className="preview-stats"><div><span>目标级别</span><b>{autonomy?.level || "—"}</b></div><div><span>当前模式</span><b>{autonomy?.mode || "—"}</b></div><div><span>执行目标</span><b>{autonomy?.executionTarget || "—"}</b></div><div><span>循环</span><b>{autonomy?.loopRunning ? "运行中" : "未启动"}</b></div></div>
+      <div className="source-card"><StatusPill value={autonomy?.killSwitch ? "已紧急停止" : autonomy?.mode === "AUTONOMOUS" ? "预授权自动" : autonomy?.mode === "SHADOW" ? "影子运行" : "人工监督"} tone={autonomy?.killSwitch ? "danger" : autonomy?.mode === "AUTONOMOUS" ? "published" : "warning"} /><strong>{autonomy?.claim || "正在读取自治状态"}</strong><p>{autonomy?.lastRun ? `最近决策 ${autonomy.lastRun.decision} · 状态 ${autonomy.lastRun.state}` : "尚无自治运行记录。影子模式只给出是否会执行，不会发布或回写。"}</p></div>
+    </Panel>
     <div className="planning-layout">
       <Panel title="排产参数" subtitle="规则引擎的确定性输入，不由大模型私自修改。">
         <div className="form-grid">

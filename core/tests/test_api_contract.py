@@ -50,7 +50,8 @@ class ApiContractTests(unittest.TestCase):
                 "organizationId": "ORG-DEMO",
                 "factoryId": "FACTORY-DEMO",
                 "authMode": "DEV",
-                "schedulingAgentLevel": "L3_BOUNDED",
+                "schedulingAgentLevel": "L4_TARGET_SHADOW",
+                "schedulingAutonomyLoop": "STOPPED",
                 "simulatorMode": "true",
             },
             self.client.get("/health/ready").json(),
@@ -300,6 +301,19 @@ class ApiContractTests(unittest.TestCase):
         self.assertNotIn("customer-secret", configured.text)
         disabled = self.client.delete("/api/v1/system/model-gateway/configuration")
         self.assertEqual("DISABLED", disabled.json()["connectionStatus"])
+
+        autonomy = self.client.get("/api/v1/planning/autonomy")
+        self.assertEqual(200, autonomy.status_code)
+        self.assertEqual("L4_TARGET", autonomy.json()["level"])
+        self.assertEqual("SHADOW", autonomy.json()["mode"])
+        planner_stop = self.client.post(
+            "/api/v1/planning/autonomy/stop", headers=planner_headers
+        )
+        self.assertEqual(403, planner_stop.status_code)
+        stopped = self.client.post("/api/v1/planning/autonomy/stop")
+        self.assertTrue(stopped.json()["killSwitch"])
+        resumed = self.client.post("/api/v1/planning/autonomy/resume")
+        self.assertFalse(resumed.json()["killSwitch"])
 
         default_policy = self.client.get("/api/v1/quality/risk-policies/default-configuration")
         self.assertEqual(200, default_policy.status_code)

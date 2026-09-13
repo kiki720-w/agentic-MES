@@ -5,7 +5,7 @@ import io
 import json
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from datetime import date, datetime
+from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Annotated, Literal
 from urllib.parse import unquote, urlsplit
@@ -72,6 +72,12 @@ from autonomous_mes.application.scheduling import (
 from autonomous_mes.application.scheduling_agent import (
     SchedulingAgent,
     SchedulingAgentCommand,
+)
+from autonomous_mes.application.scheduling_autonomy import (
+    AutonomyMode,
+    L4SchedulingPolicy,
+    SchedulingAutonomyRuntime,
+    SimulatorScheduleExecution,
 )
 from autonomous_mes.application.spreadsheet_import import (
     MAX_FILE_BYTES,
@@ -627,6 +633,36 @@ scheduling_agent = SchedulingAgent(
     enabled=settings.scheduling_agent_enabled,
     auto_submit=settings.scheduling_agent_auto_submit,
 )
+autonomy_mode = AutonomyMode(settings.scheduling_autonomy_mode.strip().upper())
+execution_target = settings.scheduling_autonomy_execution_target.strip().upper()
+if execution_target not in {"NONE", "SIMULATOR"}:
+    raise ValueError("unsupported scheduling autonomy execution target")
+if execution_target == "SIMULATOR" and not settings.simulator_mode:
+    raise ValueError("SIMULATOR autonomy execution requires simulator mode")
+l4_scheduling_agent = SchedulingAgent(
+    store,
+    enabled=settings.scheduling_agent_enabled,
+    auto_submit=True,
+    agent_id="scheduling-agent-l4-v1",
+    agent_level="L4_TARGET",
+    publication_authority="PREAUTHORIZED_POLICY_ENGINE",
+)
+scheduling_autonomy = SchedulingAutonomyRuntime(
+    store,
+    l4_scheduling_agent,
+    L4SchedulingPolicy(
+        mode=autonomy_mode,
+        max_assignments=settings.scheduling_autonomy_max_assignments,
+        max_affected_orders=settings.scheduling_autonomy_max_affected_orders,
+        max_late_orders=settings.scheduling_autonomy_max_late_orders,
+        max_shortages=settings.scheduling_autonomy_max_shortages,
+        max_snapshot_age_seconds=settings.scheduling_autonomy_max_snapshot_age_seconds,
+        allow_overtime=settings.scheduling_autonomy_allow_overtime,
+        require_external_snapshot=settings.scheduling_autonomy_require_external_snapshot,
+        require_process_standards=settings.scheduling_autonomy_require_process_standards,
+    ),
+    SimulatorScheduleExecution() if execution_target == "SIMULATOR" else None,
+)
 natural_language_service = NaturalLanguageQueryService(
     store,
     model_gateway,
@@ -652,7 +688,24 @@ list_quality_candidates_tool = ListQualityCandidatesTool(store, policy)
 @asynccontextmanager
 async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     capability_benchmarks.recover_interrupted()
-    yield
+    if settings.scheduling_autonomy_loop_enabled:
+        scheduling_autonomy.start_loop(
+            lambda: [
+                SchedulingAgentCommand(
+                    workshop_id.strip(), datetime.now(UTC).date(),
+                    settings.scheduling_agent_horizon_days,
+                    settings.scheduling_agent_use_overtime,
+                    settings.scheduling_agent_default_minutes_per_unit, {},
+                )
+                for workshop_id in settings.scheduling_agent_workshop_ids.split(",")
+                if workshop_id.strip()
+            ],
+            settings.scheduling_autonomy_poll_seconds,
+        )
+    try:
+        yield
+    finally:
+        scheduling_autonomy.shutdown()
 
 
 app = FastAPI(title="Autonomous MES Core", version="0.1.0", lifespan=lifespan)
@@ -695,7 +748,12 @@ def ready() -> dict[str, str]:
         "agentRuntime": "MODEL_WITH_RULES_FALLBACK" if gateway_enabled else "RULES_ONLY",
         "storageBackend": settings.storage_backend,
         "agentLevel": "L3_EXPERIMENTAL" if settings.agent_l3_execution_enabled else "L2",
-        "schedulingAgentLevel": "L3_BOUNDED" if settings.scheduling_agent_enabled else "DISABLED",
+        "schedulingAgentLevel": (
+            f"L4_TARGET_{autonomy_mode.value}" if settings.scheduling_agent_enabled else "DISABLED"
+        ),
+        "schedulingAutonomyLoop": (
+            "RUNNING" if scheduling_autonomy.status()["loopRunning"] else "STOPPED"
+        ),
         "simulatorMode": str(settings.simulator_mode).lower(),
         "deploymentMode": settings.deployment_mode,
         "organizationId": settings.organization_id,
@@ -1101,6 +1159,57 @@ def analyze_schedule_with_agent(
             {key.upper(): value for key, value in body.operationRates.items()},
         )
     )
+
+
+@app.get("/api/v1/planning/autonomy")
+def scheduling_autonomy_status(
+    identity: Annotated[Identity, Depends(current_identity)],
+) -> dict[str, object]:
+    authorize_human(identity, "PLANNER", "SUPERVISOR", "OPERATOR", "QUALITY")
+    return scheduling_autonomy.status()
+
+
+@app.get("/api/v1/planning/autonomy/runs")
+def scheduling_autonomy_runs(
+    identity: Annotated[Identity, Depends(current_identity)],
+) -> list[dict[str, object]]:
+    authorize_human(identity, "PLANNER", "SUPERVISOR")
+    return scheduling_autonomy.history()
+
+
+@app.post("/api/v1/planning/autonomy/run")
+def run_scheduling_autonomy(
+    body: AnalyzeScheduleBody,
+    identity: Annotated[Identity, Depends(current_identity)],
+) -> dict[str, object]:
+    authorize_human(identity, "PLANNER", "SUPERVISOR")
+    return scheduling_autonomy.run_once(
+        SchedulingAgentCommand(
+            body.workshopId,
+            body.horizonStart,
+            body.horizonDays,
+            body.useOvertime,
+            body.defaultMinutesPerUnit,
+            {key.upper(): value for key, value in body.operationRates.items()},
+        ),
+        "HUMAN_REQUESTED_EVALUATION",
+    )
+
+
+@app.post("/api/v1/planning/autonomy/stop")
+def stop_scheduling_autonomy(
+    identity: Annotated[Identity, Depends(current_identity)],
+) -> dict[str, object]:
+    authorize_human(identity, "SUPERVISOR")
+    return scheduling_autonomy.kill()
+
+
+@app.post("/api/v1/planning/autonomy/resume")
+def resume_scheduling_autonomy(
+    identity: Annotated[Identity, Depends(current_identity)],
+) -> dict[str, object]:
+    authorize_human(identity, "SUPERVISOR")
+    return scheduling_autonomy.resume()
 
 
 @app.get("/api/v1/planning/plans")
