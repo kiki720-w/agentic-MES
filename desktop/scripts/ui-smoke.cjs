@@ -91,9 +91,14 @@ async function main() {
             const attachment=document.querySelector(".attachments");
             const body=document.body.innerText;
             const parsed=attachment?.textContent.includes(${JSON.stringify(attachmentName)})&&attachment.textContent.includes("已解析");
-            const preview=${JSON.stringify(requiresSpreadsheetPreview)}?body.includes("生产数据预检 ${attachmentName}"):true;
+            const preview=${JSON.stringify(requiresSpreadsheetPreview)}?(
+              body.includes("标准模板预检 ${attachmentName}")||
+              body.includes("结构化导入检查 ${attachmentName}")||
+              body.includes("已识别 3 个工作表")
+            ):true;
+            const misleadingZero=body.includes("生产数据预检 ${attachmentName}：0 个工单、0 道工序、0 个产能资源");
             if(parsed&&preview){
-              return {parsed:true,preview,text:attachment.textContent};
+              return {parsed:true,preview,misleadingZero,text:attachment.textContent};
             }
           }
           return {parsed:false,text:document.body.innerText};
@@ -101,7 +106,7 @@ async function main() {
         awaitPromise: true,
         returnByValue: true,
       });
-      if (attachment.exceptionDetails || !attachment.result.value?.parsed) {
+      if (attachment.exceptionDetails || !attachment.result.value?.parsed || attachment.result.value?.misleadingZero) {
         throw new Error("Virtual drag attachment did not parse in desktop UI");
       }
     }

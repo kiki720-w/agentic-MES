@@ -3,7 +3,7 @@ from datetime import date
 from typing import Any
 from unittest.mock import Mock
 
-from autonomous_mes.application.model_gateway import NaturalLanguageAnswer
+from autonomous_mes.application.model_gateway import ModelGatewayError, NaturalLanguageAnswer
 from autonomous_mes.application.natural_language import NaturalLanguageQueryService
 from autonomous_mes.infrastructure.memory import InMemoryWorkOrderStore
 
@@ -160,3 +160,60 @@ class NaturalLanguageQueryTests(unittest.TestCase):
         self.assertIn("WO-18", facts["attachments"][0]["extractedText"])
         self.assertEqual("Attachment", result["sourceObjects"][-1]["type"])
         scheduling_agent.analyze.assert_not_called()
+
+    def test_attachment_context_uses_summary_and_stays_within_local_model_budget(self) -> None:
+        model = Mock()
+        model.answer.return_value = NaturalLanguageAnswer("识别到人员能力表。", "FAKE", "local")
+        service = NaturalLanguageQueryService(InMemoryWorkOrderStore(), model)
+        attachments = [
+            {
+                "name": f"input-{index}.xlsx",
+                "kind": "WORKBOOK",
+                "parser": "LOCAL_DOCLING_XLSX",
+                "sha256": str(index) * 64,
+                "summary": f"摘要 {index}：人员、物料、工时",
+                "text": "原始行" * 10_000,
+            }
+            for index in range(1, 4)
+        ]
+
+        service.ask("汇总附件", attachments)
+
+        facts = model.answer.call_args.args[1]
+        excerpts = [item["extractedText"] for item in facts["attachments"]]
+        self.assertTrue(all("摘要" in item for item in excerpts))
+        self.assertLessEqual(sum(len(item) for item in excerpts), 1_900)
+
+    def test_model_failure_returns_deterministic_attachment_summary(self) -> None:
+        model = Mock()
+        model.answer.side_effect = ModelGatewayError("context limit")
+        service = NaturalLanguageQueryService(InMemoryWorkOrderStore(), model)
+
+        result = service.ask("有哪些工作表？", [{
+            "name": "计划.xlsx",
+            "kind": "WORKBOOK",
+            "parser": "LOCAL_DOCLING_XLSX",
+            "sha256": "a" * 64,
+            "summary": "3 个工作表：每日计划、人员能力、工艺编制中",
+            "text": "完整提取内容",
+        }])
+
+        self.assertIn("每日计划", result["answer"])
+        self.assertNotIn("不能解释附件内容", result["answer"])
+
+    def test_attachment_sync_requires_field_mapping_before_write(self) -> None:
+        model = Mock()
+        service = NaturalLanguageQueryService(InMemoryWorkOrderStore(), model)
+
+        result = service.ask("将附件同步到人员和工单中", [{
+            "name": "计划.xlsx",
+            "kind": "WORKBOOK",
+            "parser": "LOCAL_DOCLING_XLSX",
+            "sha256": "b" * 64,
+            "summary": "制造计划与人员能力数据",
+            "text": "人员=王师傅；物料编码=MAT-1",
+        }])
+
+        self.assertEqual("REQUIRE_FIELD_MAPPING", result["policyDecision"])
+        self.assertIn("尚未写入", result["answer"])
+        model.answer.assert_not_called()

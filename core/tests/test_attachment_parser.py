@@ -35,6 +35,28 @@ class AttachmentParserTests(unittest.TestCase):
         self.assertEqual("WORKBOOK", result["kind"])
         self.assertIn("WO-900\t24", result["text"])
         self.assertEqual(2, result["metadata"]["rowCount"])
+        self.assertEqual("Docling", result["metadata"]["engine"])
+        self.assertIn("工单", result["summary"])
+
+    def test_xlsx_preserves_every_sheet_in_summary(self) -> None:
+        workbook = Workbook()
+        first = workbook.active
+        first.title = "每日计划"
+        first.append(["人员", "物料编码", "数量"])
+        first.append(["王师傅", "MAT-1", 4])
+        capacity = workbook.create_sheet("人员能力")
+        capacity.append(["人员", "加工种类", "8小时工时"])
+        capacity.append(["王师傅", "轴类", 160])
+        content = io.BytesIO()
+        workbook.save(content)
+
+        result = parse_attachment(content.getvalue(), "车工计划.xlsx")
+
+        self.assertIn("每日计划", result["summary"])
+        self.assertIn("人员能力", result["summary"])
+        self.assertIn("人员=王师傅", result["summary"])
+        self.assertEqual("REQUIRES_FIELD_MAPPING", result["metadata"]["mappingStatus"])
+        self.assertEqual(2, result["metadata"]["sheetCount"])
 
     def test_docx_extracts_paragraphs_and_tables(self) -> None:
         document = Document()

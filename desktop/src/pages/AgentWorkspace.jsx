@@ -5,6 +5,11 @@ import { api, desktop, localDateISO } from "../platform";
 const quickPrompts = ["检查当前计划的延期风险", "说明产能缺口及计算依据", "生成一个不使用加班的排产方案"];
 function formatBytes(bytes) { if (bytes < 1024) return `${bytes} B`; if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`; return `${(bytes / 1024 / 1024).toFixed(1)} MB`; }
 function containsDraggedFiles(event) { return Array.from(event.dataTransfer?.types || []).includes("Files"); }
+function workbookDescription(metadata) {
+  const sheets = metadata?.sheets || [];
+  if (!sheets.length) return "";
+  return `已识别 ${sheets.length} 个工作表：${sheets.map((sheet) => `${sheet.name}（约 ${sheet.populatedRowCount} 行）`).join("、")}`;
+}
 
 export default function AgentWorkspace({ health, actor, onNavigate, incomingDrop, onDropHandled }) {
   const [messages, setMessages] = useState([{ role: "agent", text: "你好，我是衡策。你可以直接拖入制造资料：文字、表格、DOCX、PDF 会在本机提取内容，图片会在本机 OCR；解析后的内容可以随问题交给当前本地模型。", meta: "L4 目标智能体 · 附件内容不上传外部文件服务" }]);
@@ -65,7 +70,14 @@ export default function AgentWorkspace({ health, actor, onNavigate, incomingDrop
         const preview = await desktop.core.upload({ path: "/api/v1/planning/imports/spreadsheet/preview?workshopId=WS-MACH-01", fileId: spreadsheet.id, filePath: spreadsheet.path, actor });
         setSpreadsheetPreview(preview);
         const stats = preview.stats || {};
-        setMessages((current) => [...current, { role: "agent", text: `生产数据预检 ${spreadsheet.name}：${stats.workOrderCount || 0} 个工单、${stats.operationCount || 0} 道工序、${stats.resourceCount || 0} 个产能资源。${preview.valid ? "字段与业务关联校验通过。" : `发现 ${stats.errorCount || preview.issues?.length || 0} 项问题，因此只作为普通附件参与问答。`}`, meta: preview.valid ? "尚未写入 · 等待人工确认" : "业务导入未通过 · 附件内容仍可提问", action: preview.valid ? "confirm-spreadsheet" : null }]);
+        const parsedSpreadsheet = parseResults.find((item) => item.file.id === spreadsheet.id)?.parsed;
+        const recognized = (stats.workOrderCount || 0) + (stats.operationCount || 0) + (stats.resourceCount || 0) > 0;
+        const text = preview.valid
+          ? `标准模板预检 ${spreadsheet.name}：${stats.workOrderCount || 0} 个工单、${stats.operationCount || 0} 道工序、${stats.resourceCount || 0} 个产能资源，字段与业务关联校验通过。`
+          : recognized
+            ? `结构化导入检查 ${spreadsheet.name}：识别到 ${stats.workOrderCount || 0} 个工单、${stats.operationCount || 0} 道工序、${stats.resourceCount || 0} 个产能资源，还有 ${stats.errorCount || preview.issues?.length || 0} 项映射或校验问题。`
+            : `${workbookDescription(parsedSpreadsheet?.metadata) || `已解析 ${spreadsheet.name}`}。它不是 CAPAXION 的“工单/工序/产能”标准导入模板，因此尚未映射成可写入 MES 的业务对象；附件内容已经可以提问。`;
+        setMessages((current) => [...current, { role: "agent", text, meta: preview.valid ? "尚未写入 · 等待人工确认" : "内容已解析 · 完成字段映射后才能写入", action: preview.valid ? "confirm-spreadsheet" : null }]);
       } catch (error) { setMessages((current) => [...current, { role: "system", text: error.message, meta: "生产数据预检未执行 · 通用附件解析不受影响" }]); }
     }
     setSending(false);
@@ -108,10 +120,10 @@ export default function AgentWorkspace({ health, actor, onNavigate, incomingDrop
     const attachmentNames = parsedFiles.map((file) => file.name).join("、");
     setMessages((current) => [...current, { role: "user", text: question, meta: parsedFiles.length ? `已附加：${attachmentNames}` : "文字指令" }]); setPrompt(""); setSending(true);
     try {
-      const attachments = parsedFiles.map((file) => ({ name: file.parsed.name, kind: file.parsed.kind, parser: file.parsed.parser, sha256: file.parsed.sha256, text: file.parsed.text, truncated: file.parsed.truncated }));
+      const attachments = parsedFiles.map((file) => ({ name: file.parsed.name, kind: file.parsed.kind, parser: file.parsed.parser, sha256: file.parsed.sha256, text: file.parsed.text, summary: file.parsed.summary || "", truncated: file.parsed.truncated }));
       const result = await api("/api/v1/agent/chat", actor, { method: "POST", body: { question, attachments } });
       setMessages((current) => [...current, { role: "agent", text: result.answer || "任务已完成。", meta: `${result.policyDecision || "ALLOW"} · ${result.provider || result.source || "规则与模型网关"}` }]);
-      setFiles([]); setSpreadsheetPreview(null);
+      if (result.policyDecision !== "REQUIRE_FIELD_MAPPING") { setFiles([]); setSpreadsheetPreview(null); }
     } catch (error) { setMessages((current) => [...current, { role: "system", text: error.message, meta: "请求未执行" }]); }
     finally { setSending(false); }
   }

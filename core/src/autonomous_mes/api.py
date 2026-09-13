@@ -323,6 +323,7 @@ class AttachmentContextBody(BaseModel):
     parser: str = Field(min_length=1, max_length=80)
     sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
     text: str = Field(min_length=1, max_length=30_000)
+    summary: str = Field(default="", max_length=8_000)
     truncated: bool = False
 
 

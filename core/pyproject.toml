@@ -18,7 +18,9 @@ dependencies = [
   "httpx>=0.28,<1",
   "PyJWT[crypto]>=2.13,<3",
   "openpyxl>=3.1,<4",
+  "docling-slim[format-xlsx]==2.126.0",
   "onnxruntime>=1.30,<2",
+  "pypdfium2>=4.30,<5",
   "pypdf>=6.18,<7",
   "python-docx>=1.2,<2",
   "rapidocr>=3.9,<4"

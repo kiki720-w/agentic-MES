@@ -33,6 +33,25 @@ QUALITY_RECOMMENDATION_INTENT = re.compile(
 SCHEDULE_REPLAN_INTENT = re.compile(
     r"(?:重新排产|重排计划|生成排产|运行排产|优化排产|重新安排生产)"
 )
+ATTACHMENT_SYNC_INTENT = re.compile(
+    r"(?:同步|导入|写入|更新).{0,16}(?:人员|工单|MES)|"
+    r"(?:人员|工单|MES).{0,16}(?:同步|导入|写入|更新)",
+    re.IGNORECASE,
+)
+MAX_ATTACHMENT_CONTEXT_CHARACTERS = 1_800
+
+
+def _attachment_excerpt(item: dict[str, Any], character_limit: int) -> str:
+    text = str(item.get("text", "")).strip()
+    summary = str(item.get("summary", "")).strip()
+    if summary and text.startswith(summary):
+        text = text[len(summary):].lstrip()
+    if not summary:
+        return text[:character_limit]
+    if len(summary) >= character_limit:
+        return summary[:character_limit]
+    remaining = character_limit - len(summary)
+    return f"{summary}\n\n# 有界内容节选\n{text[:remaining]}".strip()
 
 
 class ActionProposalAgent(Protocol):
@@ -78,13 +97,20 @@ class NaturalLanguageQueryService:
         if not question or len(question) > 2000:
             raise ValidationError("question must contain 1 to 2000 characters")
         attachment_facts: list[dict[str, Any]] = []
-        remaining_characters = 32_000
-        for item in (attachments or [])[:8]:
+        attachment_summaries: list[dict[str, str]] = []
+        selected_attachments = [
+            item for item in (attachments or [])[:8] if str(item.get("text", "")).strip()
+        ]
+        per_attachment_limit = MAX_ATTACHMENT_CONTEXT_CHARACTERS // max(
+            1, len(selected_attachments)
+        )
+        for item in selected_attachments:
             text = str(item.get("text", "")).strip()
-            if not text or remaining_characters <= 0:
-                continue
-            excerpt = text[:min(12_000, remaining_characters)]
-            remaining_characters -= len(excerpt)
+            excerpt = _attachment_excerpt(item, per_attachment_limit)
+            attachment_summaries.append({
+                "name": str(item.get("name", "attachment"))[:255],
+                "deterministicSummary": str(item.get("summary", ""))[:2_500],
+            })
             attachment_facts.append({
                 "name": str(item.get("name", "attachment"))[:255],
                 "kind": str(item.get("kind", "DOCUMENT"))[:40],
@@ -101,6 +127,23 @@ class NaturalLanguageQueryService:
             return self._quality_recommendation(question, as_of)
         if not attachment_facts and ANALYZE_INCIDENTS_INTENT.search(question):
             return self._analyze_incidents(as_of)
+        if attachment_facts and ATTACHMENT_SYNC_INTENT.search(question):
+            references = [
+                {"type": "Attachment", "id": str(item["sha256"])}
+                for item in attachment_facts if item["sha256"]
+            ]
+            return {
+                "answer": (
+                    "附件内容已在本机完成理解，但尚未写入人员或工单。当前附件没有形成"
+                    "经校验的 MES 唯一主键、字段映射和关联规则；直接同步可能覆盖或重复"
+                    "现有生产数据。请先完成字段映射预览，通过校验后再生成可审批的导入操作。"
+                ),
+                "source": "RULES",
+                "model": None,
+                "policyDecision": "REQUIRE_FIELD_MAPPING",
+                "asOf": as_of,
+                "sourceObjects": references,
+            }
         if WRITE_INTENT.search(question):
             resume = self._resume_proposal(question, as_of)
             if resume is not None:
@@ -156,7 +199,7 @@ class NaturalLanguageQueryService:
         )
         if self._model is None:
             return self._fallback(
-                as_of, objects, orders, equipment, inspections, attachment_facts
+                as_of, objects, orders, equipment, inspections, attachment_summaries
             )
         try:
             result = self._model.answer(question, facts)
@@ -170,7 +213,7 @@ class NaturalLanguageQueryService:
             }
         except ModelGatewayError:
             return self._fallback(
-                as_of, objects, orders, equipment, inspections, attachment_facts
+                as_of, objects, orders, equipment, inspections, attachment_summaries
             )
 
     def _schedule_proposal(self, as_of: str) -> dict[str, Any]:
@@ -356,10 +399,17 @@ class NaturalLanguageQueryService:
         suspended = sum(x["status"] == "SUSPENDED" for x in orders)
         abnormal = sum(x["state"] in {"DOWN", "ALARM", "OFFLINE"} for x in equipment)
         quarantined = sum(x["status"] == "QUARANTINED" for x in inspections)
-        attachment_note = (
-            f"已在本机解析 {len(attachments)} 个附件，但当前模型不可用，暂时不能解释附件内容。"
-            if attachments else ""
-        )
+        attachment_note = ""
+        if attachments:
+            summaries = []
+            for item in attachments:
+                summary = str(item.get("deterministicSummary", "")).strip()
+                name = str(item.get("name", "附件"))
+                summaries.append(f"【{name}】\n{summary or '已提取内容，但没有结构化摘要。'}")
+            attachment_note = (
+                "本地模型本次未完成生成。以下是本机解析器已确认的内容：\n"
+                + "\n\n".join(summaries)
+            )
         return {
             "answer": attachment_note or f"当前共有 {len(orders)} 个工单，其中 {suspended} 个暂停；{len(equipment)} 台设备中 {abnormal} 台异常；质量隔离 {quarantined} 项。模型不可用，以上为规则汇总。",
             "source": "RULES",
