@@ -3,6 +3,17 @@ import { PageHeader } from "../components";
 import { api, desktop, localDateISO } from "../platform";
 
 const quickPrompts = ["同步附件中的人员能力到产能管理", "检查当前计划的延期风险", "生成一个不使用加班的排产方案"];
+const blockerLabels = {
+  ASSIGNMENT_LIMIT_EXCEEDED: "安排数量超过当前授权上限",
+  AFFECTED_ORDER_LIMIT_EXCEEDED: "受影响工单超过当前授权上限",
+  LATE_ORDER_LIMIT_EXCEEDED: "延期工单超过当前授权上限",
+  SHORTAGE_LIMIT_EXCEEDED: "仍有能力或产能缺口",
+  SNAPSHOT_STALE: "输入快照已经过期",
+  ATOMIC_PLAN_REPLACEMENT_REQUIRED: "已有发布方案，需要先完成原子替换能力",
+  PROCESS_STANDARD_REQUIRED: "部分工序缺少标准工时",
+  MATERIAL_NOT_READY: "存在缺料工单",
+  QUALITY_HOLD: "存在质量冻结工单",
+};
 function formatBytes(bytes) { if (bytes < 1024) return `${bytes} B`; if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`; return `${(bytes / 1024 / 1024).toFixed(1)} MB`; }
 function containsDraggedFiles(event) { return Array.from(event.dataTransfer?.types || []).includes("Files"); }
 function workbookDescription(metadata) {
@@ -169,7 +180,32 @@ export default function AgentWorkspace({ health, actor, onNavigate, incomingDrop
       }
       const capacityWriteIntent = /(?:同步|导入|写入|更新).{0,16}(?:人员|能力|产能)|(?:人员|能力|产能).{0,16}(?:同步|导入|写入|更新)/i.test(question);
       const scheduleWriteIntent = /(?:同步|导入|写入|加入).{0,16}(?:排产|计划)|(?:排产|计划).{0,16}(?:同步|导入|写入|加入)/i.test(question);
-      if (scheduleWriteIntent && spreadsheetPreview?.valid) {
+      const scheduleExecuteIntent = /(?:执行|发布|应用|生效|批准).{0,16}(?:排产|方案|计划)|(?:排产|方案|计划).{0,16}(?:执行|发布|应用|生效|批准)/i.test(question);
+      const scheduleGenerateIntent = /(?:生成|制定|重排|重新排|优化).{0,16}(?:排产|方案|计划)|(?:排产|方案|计划).{0,16}(?:生成|制定|重排|重新排|优化)/i.test(question);
+      if (scheduleExecuteIntent) {
+        const result = await api("/api/v1/planning/autonomy/run", actor, { method: "POST", body: { workshopId: "WS-MACH-01", horizonStart: localDateISO(), horizonDays: 10, useOvertime: false, defaultMinutesPerUnit: 30, operationRates: {} } });
+        const published = result.publishedPlan;
+        const blockers = result.policyDecision?.blockers || [];
+        setMessages((current) => [...current, {
+          role: result.state === "VERIFIED" ? "agent" : "system",
+          text: published
+            ? `已执行并发布排产方案 ${published.planNumber}，共 ${published.assignments.length} 项安排；执行结果已回读核验。`
+            : result.decision === "NO_CHANGE_ALREADY_PUBLISHED"
+              ? "当前排产方案已经发布，输入没有变化，因此没有重复执行。"
+              : `排产执行已停止：${blockers.length ? blockers.map((item) => blockerLabels[item] || item).join("；") : result.decision || result.state}。`,
+          meta: `${result.decision || "L4_POLICY"} · ${result.state || "UNKNOWN"}`,
+          action: "open-results",
+        }]);
+        return;
+      }
+      if (scheduleGenerateIntent && !spreadsheetPreview?.valid) {
+        const useOvertime = /(?:允许|使用|启用).{0,6}加班/.test(question) && !/不(?:允许|使用|启用)?.{0,3}加班/.test(question);
+        const result = await api("/api/v1/planning/agent/analyze", actor, { method: "POST", body: { workshopId: "WS-MACH-01", horizonStart: localDateISO(), horizonDays: 10, useOvertime, defaultMinutesPerUnit: 30, operationRates: {} } });
+        const plan = result.plan;
+        setMessages((current) => [...current, { role: "agent", text: `已生成排产方案 ${plan.planNumber}：${plan.assignments.length} 项安排、${plan.shortages.length} 项能力缺口。你可以继续说“执行并发布当前排产方案”。`, meta: `${result.decision} · ${result.reused ? "复用现有方案" : "新方案待执行"}`, action: "open-results" }]);
+        return;
+      }
+      if ((scheduleWriteIntent || scheduleGenerateIntent) && spreadsheetPreview?.valid) {
         const result = await api("/api/v1/planning/imports/spreadsheet/confirm", actor, { method: "POST", body: { previewFingerprint: spreadsheetPreview.previewFingerprint, snapshot: spreadsheetPreview.snapshot, runAgent: true, horizonStart: localDateISO(), horizonDays: 10, useOvertime: false, defaultMinutesPerUnit: 30 } });
         const plan = result.agent?.plan;
         setMessages((current) => [...current, { role: "agent", text: plan ? `已把附件中的 ${spreadsheetPreview.stats?.workOrderCount || 0} 条未完成计划同步为排产输入，并生成 ${plan.planNumber}：${plan.assignments.length} 项安排、${plan.shortages.length} 项能力缺口。` : "附件计划已写入排产输入快照。", meta: "EXECUTED_AND_VERIFIED · 排产输入已回读", action: plan ? "open-results" : null }]);
@@ -194,6 +230,10 @@ export default function AgentWorkspace({ health, actor, onNavigate, incomingDrop
         const result = await api("/api/v1/agent/tasks/execute", actor, { method: "POST", body: { instruction } });
         setMessages((current) => [...current, { role: result.status === "EXECUTED_AND_VERIFIED" ? "agent" : "system", text: `${result.answer || "任务未完成"}${(result.assumptions || []).length ? `\n\n${result.assumptions.map((item) => `• ${item}`).join("\n")}` : ""}`, meta: `${result.status} · ${result.parser || "本地任务解析器"}`, action: result.status === "EXECUTED_AND_VERIFIED" ? "open-results" : null }]);
         setPendingOrderInstruction(result.status === "NEEDS_INFORMATION" ? instruction : "");
+        return;
+      }
+      if (/(?:执行|写入|发布|同步|导入|更新|创建|新建)/.test(question)) {
+        setMessages((current) => [...current, { role: "agent", text: "我可以直接执行：附件人员产能写入、车工计划同步、排产方案生成与发布、新订单建单并排产。请在指令里说明对象和动作；如果是设备启停、质量放行或外部 MES 写回，还需要先接入对应工具。", meta: "ACTION_SCOPE · 可执行工具路由" }]);
         return;
       }
       const attachments = parsedFiles.map((file) => ({ name: file.parsed.name, kind: file.parsed.kind, parser: file.parsed.parser, sha256: file.parsed.sha256, documentId: file.parsed.documentId, summary: file.parsed.summary || "", truncated: file.parsed.truncated }));

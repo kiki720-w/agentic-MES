@@ -87,6 +87,7 @@ from autonomous_mes.application.scheduling_agent import (
 from autonomous_mes.application.scheduling_autonomy import (
     AutonomyMode,
     L4SchedulingPolicy,
+    LocalCoreScheduleExecution,
     SchedulingAutonomyRuntime,
     SimulatorScheduleExecution,
 )
@@ -687,7 +688,7 @@ scheduling_agent = SchedulingAgent(
 )
 autonomy_mode = AutonomyMode(settings.scheduling_autonomy_mode.strip().upper())
 execution_target = settings.scheduling_autonomy_execution_target.strip().upper()
-if execution_target not in {"NONE", "SIMULATOR"}:
+if execution_target not in {"NONE", "SIMULATOR", "LOCAL_CORE"}:
     raise ValueError("unsupported scheduling autonomy execution target")
 if execution_target == "SIMULATOR" and not settings.simulator_mode:
     raise ValueError("SIMULATOR autonomy execution requires simulator mode")
@@ -713,7 +714,13 @@ scheduling_autonomy = SchedulingAutonomyRuntime(
         require_external_snapshot=settings.scheduling_autonomy_require_external_snapshot,
         require_process_standards=settings.scheduling_autonomy_require_process_standards,
     ),
-    SimulatorScheduleExecution() if execution_target == "SIMULATOR" else None,
+    (
+        SimulatorScheduleExecution()
+        if execution_target == "SIMULATOR"
+        else LocalCoreScheduleExecution(store)
+        if execution_target == "LOCAL_CORE"
+        else None
+    ),
 )
 document_store = LocalDocumentStore(
     Path(__file__).resolve().parents[2] / ".capaxion" / "documents"

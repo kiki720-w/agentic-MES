@@ -8,7 +8,7 @@ from threading import Event, Lock, Thread
 from typing import Any, Protocol
 from uuid import uuid4
 
-from autonomous_mes.domain.errors import DomainError
+from autonomous_mes.domain.errors import DomainError, ValidationError
 
 from .ports import MesStore
 from .scheduling import SchedulingApplicationService
@@ -154,6 +154,53 @@ class SimulatorScheduleExecution:
 
     def rollback(self, receipt: dict[str, Any]) -> bool:
         return self._applied.pop(str(receipt.get("idempotencyKey")), None) is not None
+
+
+class LocalCoreScheduleExecution:
+    """Validate an execution target backed by CAPAXION's local plan store."""
+
+    name = "CAPAXION_LOCAL"
+
+    def __init__(self, store: MesStore) -> None:
+        self._store = store
+
+    def apply(
+        self,
+        plan: dict[str, Any],
+        idempotency_key: str,
+        expected_source_revision: str,
+    ) -> dict[str, Any]:
+        current = self._store.get_schedule_plan(str(plan.get("planId", "")))
+        if current is None:
+            raise ValidationError("schedule plan no longer exists in the local target")
+        input_source = plan.get("generationParameters", {}).get("inputSource", {})
+        if str(input_source.get("sourceRevision", "")) != expected_source_revision:
+            raise ValidationError("schedule source revision changed before local execution")
+        if current.record_version != int(plan.get("recordVersion", -1)):
+            raise ValidationError("schedule plan version changed before local execution")
+        if current.status.value not in {"PENDING_APPROVAL", "PUBLISHED"}:
+            raise ValidationError("schedule plan is not ready for local execution")
+        return {
+            "executionId": idempotency_key,
+            "idempotencyKey": idempotency_key,
+            "planId": current.plan_id,
+            "sourceRevision": expected_source_revision,
+            "target": self.name,
+            "reused": current.status.value == "PUBLISHED",
+        }
+
+    def verify(self, receipt: dict[str, Any], plan: dict[str, Any]) -> bool:
+        current = self._store.get_schedule_plan(str(receipt.get("planId", "")))
+        return (
+            current is not None
+            and current.plan_id == str(plan.get("planId", ""))
+            and current.record_version == int(plan.get("recordVersion", -1))
+            and current.status.value in {"PENDING_APPROVAL", "PUBLISHED"}
+        )
+
+    def rollback(self, receipt: dict[str, Any]) -> bool:
+        # apply() only validates the local target; publication happens after verification.
+        return bool(receipt.get("planId"))
 
 
 class SchedulingAutonomyRuntime:

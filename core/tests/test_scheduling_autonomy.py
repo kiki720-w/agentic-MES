@@ -9,6 +9,7 @@ from autonomous_mes.application.scheduling_agent import SchedulingAgent, Schedul
 from autonomous_mes.application.scheduling_autonomy import (
     AutonomyMode,
     L4SchedulingPolicy,
+    LocalCoreScheduleExecution,
     SchedulingAutonomyRuntime,
     SimulatorScheduleExecution,
 )
@@ -74,6 +75,31 @@ def test_autonomous_loop_executes_verifies_and_deduplicates():
         "SchedulePlanGenerated", "SchedulePlanSubmitted",
         "SchedulePlanApproved", "SchedulePlanPublished",
     ]
+
+
+def test_local_core_target_publishes_without_an_external_mes_adapter():
+    store, _, command, _ = runtime()
+    local_runtime = SchedulingAutonomyRuntime(
+        store,
+        SchedulingAgent(
+            store,
+            enabled=True,
+            auto_submit=True,
+            agent_id="scheduling-agent-l4-v1",
+            agent_level="L4_TARGET",
+            publication_authority="PREAUTHORIZED_POLICY_ENGINE",
+        ),
+        L4SchedulingPolicy(mode=AutonomyMode.AUTONOMOUS),
+        LocalCoreScheduleExecution(store),
+        clock=lambda: NOW,
+    )
+
+    result = local_runtime.run_once(command, "USER_INSTRUCTION")
+
+    assert result["state"] == "VERIFIED"
+    assert result["decision"] == "AUTONOMOUSLY_EXECUTED"
+    assert result["executionReceipt"]["target"] == "CAPAXION_LOCAL"
+    assert result["publishedPlan"]["status"] == "PUBLISHED"
 
 
 def test_shadow_mode_runs_full_policy_without_execution():

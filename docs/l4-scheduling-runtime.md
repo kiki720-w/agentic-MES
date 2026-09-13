@@ -1,6 +1,6 @@
 # L4 排产自治运行时第一版
 
-日期：2026-09-13。桌面版本：0.4.5。
+日期：2026-09-13。桌面版本：0.4.8。
 
 CAPAXION 的产品目标已调整为 L4 Agent。L4 在这里指：人预先配置自治范围，Agent 在该范围内持续观察、规划、执行、核验和恢复；超出边界或结果不确定时转人工。它不代表模型可以直接写数据库、控制 PLC/CNC 或绕过质量与安全联锁。
 
@@ -28,13 +28,15 @@ CAPAXION 的产品目标已调整为 L4 Agent。L4 在这里指：人预先配�
 | `SUPERVISED` | 通过策略后停在 `AWAITING_HUMAN`，用于上线前人工监督。 |
 | `AUTONOMOUS` | 通过预授权策略后执行、回读核验并发布；失败回滚或进入 CRITICAL。 |
 
+执行目标 `LOCAL_CORE` 会在版本和来源修订一致时，把方案发布到 CAPAXION 本地计划库并回读核验。它不代表已经写入外部 MES。外部系统仍需要客户专用适配器。
+
 `AUTONOMOUS` 不等于一定执行。任何策略阻断、停止开关、输入版本变化、执行适配器缺失、回读失败或本地提交失败都会停止闭环。
 
 ## 当前预授权边界
 
 默认要求：真实外部排产快照；快照不超过 300 秒；不得使用回退工时；不得新增延期、能力缺口或加班；最多 50 条分配和 20 个工单；无缺料、质量冻结或工艺缺失；不能替换已有发布计划，因为跨本地与外部系统的原子替换尚未实现。
 
-当前 Core 配置是 `SHADOW`、循环关闭、执行目标 `NONE`。真实运行验证正确拒绝了演示投影，给出 `SHORTAGE_LIMIT_EXCEEDED`、`PROCESS_STANDARD_REQUIRED`、`EXTERNAL_SNAPSHOT_REQUIRED`、`ATOMIC_PLAN_REPLACEMENT_REQUIRED` 和 `FROZEN_ROUTE_INCOMPLETE` 证据，没有执行或回写。
+仓库默认配置是 `SHADOW`、循环关闭、执行目标 `NONE`。当前本机试点环境已显式启用 `AUTONOMOUS + LOCAL_CORE`，循环仍关闭，只在用户明确下达执行或发布指令时运行。能力缺口、缺料、质量冻结、输入版本变化和未处理的已发布方案替换仍会停止执行。
 
 只有显式启用 `SIMULATOR_MODE=true` 时才能选择 `SIMULATOR` 执行适配器。它只用于闭环自动测试，不连接真实 MES。配置成未知执行目标，或在非模拟环境选择模拟执行器，Core 会拒绝启动。
 
@@ -54,6 +56,8 @@ AUTONOMOUS_MES_SCHEDULING_AUTONOMY_ALLOW_OVERTIME=false
 AUTONOMOUS_MES_SCHEDULING_AUTONOMY_REQUIRE_EXTERNAL_SNAPSHOT=true
 AUTONOMOUS_MES_SCHEDULING_AUTONOMY_REQUIRE_PROCESS_STANDARDS=true
 ```
+
+本地试点可将模式设为 `AUTONOMOUS`、执行目标设为 `LOCAL_CORE`，并按工厂允许的批量规模调整数量上限。不得把 `LOCAL_CORE` 描述成外部 MES 写回。
 
 白名单与自治配置只能由 Core 部署环境提供。桌面可以运行一次评估、查看证据，并由主管操作停止开关；不能把 SHADOW 改为 AUTONOMOUS，也不能增加执行权限。
 
