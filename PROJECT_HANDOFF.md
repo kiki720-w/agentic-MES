@@ -5,7 +5,7 @@
 更新时间：2026-09-13  
 项目目录：D:\mes  
 GitHub：https://github.com/kiki720-w/capaxion
-功能基线：main 最新提交
+功能基线：main @ `898390f`（桌面长页面滚动修复）
 当前分支：main
 
 ## 新对话先读这里
@@ -56,7 +56,7 @@ GitHub：https://github.com/kiki720-w/capaxion
 - 可治理质量风险策略、历史影响仿真、maker-checker 审批和回滚草稿。
 - 统一 APS 快照、有限产能排产、资源能力、标准工时、计划状态机和人工移动排产结果。
 - 人员日排程和固定六工作日周计划；大表支持搜索、分页与横向滚动。
-- Agent 工作台支持自然语言、XLSX / CSV 预检以及图片和 PDF 附件入口。
+- Agent 工作台支持自然语言和 XLSX / CSV 预检；图片和 PDF 目前只有本地附件选择入口，尚未解析、识别或发送给模型。
 - L3 排产 Agent 可自动分析并创建或提交方案，结果标注虚拟员工创建者和提交者。
 - 供应商中立模型网关，可热切换 DeepSeek、Kimi、OpenAI 或自定义 OpenAI Chat Completions 兼容接口。
 - 模型设置页面：/settings/models。预设服务直接选择，只有自定义服务显示 Base URL 输入。
@@ -64,6 +64,7 @@ GitHub：https://github.com/kiki720-w/capaxion
 - Agent 工作台入口已放入控制塔、排产中心、产能管理和排产结果等主要页面。
 - 已增加 `desktop/` Windows 客户端：WorkBuddy 式 Agent 主工作区、桌面导航、附件选择、Core 状态与安全边界检查。
 - 本机便携版路径为 `D:\mes\desktop\release\CAPAXION-0.2.0-x64.exe`；控制塔、排产、结果、产能和模型设置均已原生 React 化，不再通过 iframe 承载旧页面。
+- 桌面壳的高度约束和滚动容器已经修复；控制塔、排产中心、排产结果、产能管理和模型设置均通过真实鼠标滚轮自动验收。
 
 ## 当前页面
 
@@ -102,6 +103,31 @@ GitHub：https://github.com/kiki720-w/capaxion
 - 模型服务健康监测、并发队列、超时和容量指标。
 - 可供客户检查的数据出站审计证明。
 
+## 当前 AI 能力真相（续接时不得夸大）
+
+以下状态已经在 2026-09-13 通过代码和本机调用核对：
+
+- **文字接口**：`POST /api/v1/agent/chat` 已完成，能把最多 50 个工单、50 台设备和 50 项质量记录组成只读快照交给模型，也能用确定性规则识别部分排产、异常、质量和写操作意图。
+- **当前模型状态**：服务器配置为 DeepSeek `deepseek-v4-flash`，但一次真实调用返回 `source=RULES`，模型状态变为 `DEGRADED`、`lastError=ValueError`。这表示系统安全降级正常，但不能宣称 DeepSeek 文字能力已经验收通过。应先定位响应 JSON 解析或输出约束问题。
+- **多轮对话**：桌面端显示对话历史，但当前请求只向 Core 发送本轮 `question`，尚未把受控对话历史、引用对象和任务状态一起发送，因此还不是完整的连续会话 Agent。
+- **XLSX / CSV**：已经是真实可用的本地确定性解析、字段校验、指纹确认、快照生成和排产入口；它不是大模型“看懂 Excel”。桌面上传限制为用户明确选择且不超过 5 MB 的 XLSX/CSV。
+- **PDF**：目前只能选择并显示文件名，没有文本抽取、表格解析、OCR、页面渲染、引用定位或模型输入。
+- **图片**：目前只能选择并显示文件名，没有 OCR、缺陷识别、仪表读数、图纸理解或视觉模型请求。
+- **图像生成**：没有实现，也不是当前制造决策主链的优先能力。
+- **安全执行**：排产计算、权限、审批、版本冲突、质量约束和发布仍由确定性代码控制；即使未来接入视觉模型，也不得让模型输出直接成为生产动作。
+
+产品需要增加一个“AI 能力验收中心”，不能只显示“API 已配置”。建议至少展示：
+
+- 模型实际连通状态、最近一次成功时间、失败原因和是否发生规则降级。
+- 文字事实正确率、引用有据率、幻觉率、计算正确率、延迟和单次成本。
+- Excel 字段映射与业务校验通过率。
+- PDF 文本/表格/OCR 准确率和页码引用证据。
+- 图片 OCR、铭牌、仪表、刀具磨损和缺陷样本准确率。
+- 危险写意图拦截率、越权测试和审批绕过测试。
+- LOCAL_ONLY 模式下的数据出站为零的可验证证据。
+
+DeepSeek 当前官方视觉路线需要单独的视觉模型，例如 `deepseek-v4-flash-vision-exp`；普通文字模型和现有纯字符串 Chat Completions 适配器不会自动获得图片理解。PDF 应优先本地解析并结构化，只在数据策略允许时把必要页面或最小化结果交给模型。
+
 ## 身份与权限现状
 
 当前本机是 DEV 身份模式。页面中的 Demo Supervisor、Demo Planner 和 Demo Quality Manager 可以切换，只用于演示和测试，不能用于试点或生产。
@@ -118,6 +144,14 @@ GitHub：https://github.com/kiki720-w/capaxion
 
 ## 接下来推荐的开发顺序
 
+### 当前最小验收门：把“已配置”变成“已验证”
+
+- 修复 DeepSeek `deepseek-v4-flash` 返回内容与当前 JSON 解析器之间的 `ValueError`，保留安全规则降级。
+- 模型状态页区分 `CONFIGURED`、`VERIFIED`、`DEGRADED` 和 `DISABLED`，不得把有 Key 等同于可用。
+- 给 Agent 工作台增加可追溯的能力自检入口和最小文字基准集。
+- 修改附件提示，明确 XLSX/CSV 已处理、PDF/图片待能力接入，避免界面承诺超过真实实现。
+- 在这一步通过前，不对外宣传完整的多模态制造 Agent。
+
 ### 第 40 步：生产身份收口
 
 - 完成控制塔、Agent 工作台、排产和模型设置的一致 OIDC 登录状态。
@@ -131,6 +165,14 @@ GitHub：https://github.com/kiki720-w/capaxion
 - 增加 LOCAL_ONLY / PRIVATE_ENHANCED / CLOUD_OPT_IN 数据策略。
 - LOCAL_ONLY 时服务端拒绝公网模型地址，不允许静默回退云端。
 - 增加本地模型健康、延迟、队列和规则回退可视化。
+
+### 第 41A 步：本地文档与视觉理解流水线
+
+- PDF 在本地执行文本抽取、表格解析、页面渲染和 OCR，结果保留页码、坐标和文件指纹。
+- 图片先经过本地 MIME/大小校验、OCR 和制造场景分类，再决定是否调用视觉模型。
+- 视觉模型独立于文字模型配置，允许本地视觉模型、厂内推理服务器或客户主动选择的云端视觉模型。
+- 每条结论必须能回到文件、页码、图片区域或结构化字段；低置信度结果必须请求人工确认。
+- 云端模式只发送必要片段，并记录可供客户审计的数据出站清单。
 
 ### 第 42 步：模型配置治理
 
@@ -164,6 +206,7 @@ GitHub：https://github.com/kiki720-w/capaxion
 - 开发 API 地址：http://127.0.0.1:8000
 - 当前模型网关：由服务器环境变量决定；不要在续接文档中写入密钥。
 - 最近完整回归：92 passed，5 skipped；Ruff 和 mypy 通过。
+- 桌面六页最终 EXE 验收：页面加载无异常；五个长页面的真实滚轮滚动全部通过。
 - 本地 D 盘启动脚本：scripts/start-api-postgres.ps1
 - 核心代码：core/src/autonomous_mes
 - 关键模型网关：core/src/autonomous_mes/infrastructure/deepseek_gateway.py
@@ -189,6 +232,6 @@ GitHub：https://github.com/kiki720-w/capaxion
 
 将下面这段话作为新对话的第一条消息：
 
-> 请继续开发 D:\mes 中的 CAPAXION（Manufacturing Decision OS）。先完整阅读 D:\mes\PROJECT_HANDOFF.md 和 D:\mes\README.md，再检查 git status、最近提交及现有测试。继承已经确认的产品定位、安全边界、L3 Agent、供应商中立模型网关和本地数据不出厂方向，不要重新从传统 MES 开始设计，也不要记录或暴露任何 API Key。完成当前最优先且不需要我决策的工作；只有遇到会改变产品方向、真实外部系统选择、身份提供商选择或不可逆操作时再停下来询问。
+> 请继续开发 D:\mes 中的 CAPAXION（Manufacturing Decision OS）。先完整阅读 D:\mes\PROJECT_HANDOFF.md 和 D:\mes\README.md，再检查 git status、最近提交及现有测试。继承已经确认的产品定位、安全边界、L3 Agent、供应商中立模型网关、本地数据不出厂方向和 WorkBuddy 式原生桌面体验，不要重新从传统 MES 开始设计，也不要记录或暴露任何 API Key。注意当前只有 XLSX/CSV 进入真实文件处理，PDF/图片尚未理解；DeepSeek 已配置但最近一次真实文字调用降级为规则结果，状态为 DEGRADED/ValueError。先完成文档中“当前最小验收门”里不需要产品决策的工作，保持规则降级和审批边界；只有遇到会改变产品方向、真实外部系统选择、身份提供商选择、云端数据出厂策略或不可逆操作时再停下来询问。
 
 如果第二个对话不在本机项目上下文中，可以直接发送本文件，或让它从 GitHub main 分支读取 PROJECT_HANDOFF.md。
