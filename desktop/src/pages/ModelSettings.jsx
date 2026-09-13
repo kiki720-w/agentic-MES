@@ -63,14 +63,18 @@ export default function ModelSettings({ actor }) {
           <label><span>服务商标识</span><input value={form.provider} onChange={(e) => setForm({ ...form, provider: e.target.value.toUpperCase() })} /></label>
           <label><span>API Base URL</span><input value={form.baseUrl} onChange={(e) => setForm({ ...form, baseUrl: e.target.value })} /></label>
           <label><span>模型 ID</span><input value={form.model} onChange={(e) => setForm({ ...form, model: e.target.value })} /></label>
-          <div className="form-two"><label><span>API Key {currentPreset.key ? "" : "（当前仍需密钥）"}</span><input type="password" value={form.apiKey} onChange={(e) => setForm({ ...form, apiKey: e.target.value })} placeholder={status.apiKeyConfigured ? "已配置；留空则保持现有密钥" : "输入后不会回显"} /></label><label><span>超时（秒）</span><input type="number" min="1" max="120" value={form.timeoutSeconds} onChange={(e) => setForm({ ...form, timeoutSeconds: e.target.value })} /></label></div>
+          <div className="form-two"><label><span>API Key {currentPreset.key ? "" : "（厂内服务可不填）"}</span><input type="password" value={form.apiKey} onChange={(e) => setForm({ ...form, apiKey: e.target.value })} placeholder={status.apiKeyConfigured ? "已配置；留空则保持现有密钥" : "输入后不会回显"} /></label><label><span>超时（秒）</span><input type="number" min="1" max="120" value={form.timeoutSeconds} onChange={(e) => setForm({ ...form, timeoutSeconds: e.target.value })} /></label></div>
           <label className="check-row"><input type="checkbox" checked={form.verifyConnection} onChange={(e) => setForm({ ...form, verifyConnection: e.target.checked })} /><span>保存前验证连接；失败时不覆盖当前可用配置</span></label>
           <div className="model-actions"><button className="button" disabled={!canAdmin || busy} onClick={() => save(false)}>仅保存</button><button className="button primary" disabled={!canAdmin || busy || !form.baseUrl || !form.model} onClick={() => save(form.verifyConnection)}>{busy ? "验证中…" : "验证并启用"}</button></div>
         </div>
       </Panel>
     </div>
-    <Panel title="数据出厂策略" subtitle="正式版将由服务端网络策略强制执行，而不是依赖提示词。">
-      <div className="policy-cards"><article className={form.provider === "OLLAMA" || form.provider === "LM_STUDIO" ? "active" : ""}><span>推荐</span><strong>LOCAL ONLY</strong><p>模型、知识库、日志与文件解析全部位于本机或工厂网络，默认拒绝公网出口。</p></article><article className={form.provider === "VLLM" ? "active" : ""}><span>厂内部署</span><strong>PRIVATE ENHANCED</strong><p>多台客户端共享厂内 GPU 推理服务器，订单和图纸不离开工厂。</p></article><article className={["DEEPSEEK", "KIMI", "OPENAI", "CUSTOM"].includes(form.provider) ? "active" : ""}><span>主动授权</span><strong>CLOUD OPT-IN</strong><p>只发送最小化、经授权的结构化上下文，不允许隐藏的云端回退。</p></article></div>
+    <Panel title="模型与业务系统的独立网络边界" subtitle="白名单由 Core 服务端部署配置控制，选择服务商不会自动授权联网。">
+      <div className="policy-cards">
+        <article className="active"><span>模型通道</span><strong>{status.networkPolicy?.modelMode || "未知"}</strong><p>厂内模型：{status.networkPolicy?.modelLocalEndpoints?.join("、") || "未授权"}</p><p>云模型：{status.networkPolicy?.modelCloudEndpoints?.join("、") || "未授权"}。不会自动回退到云模型。</p></article>
+        <article><span>业务通道</span><strong>MES / ERP</strong><p>授权地址：{status.networkPolicy?.businessEndpoints?.join("、") || "未配置"}</p><p>已提供受控读取组件，实际云 MES 连接器尚未接入；此通道不授权云模型。</p></article>
+        <article><span>执行范围</span><strong>应用层限制</strong><p>模型请求与业务读取组件禁用环境代理和自动重定向。主机防火墙、模型进程自身联网及企业身份服务需要单独部署管理。</p></article>
+      </div>
       <p className="status-footnote">配置来源：{status.configurationSource || "—"} · 最近检查：{formatDate(status.lastCheckedAt, true)} · 最近成功：{formatDate(status.lastSuccessAt, true)} · 失败次数：{status.failureCount || 0} · {status.lastError || "无已知连接错误"}</p>
     </Panel>
   </div>;

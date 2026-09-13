@@ -8,6 +8,7 @@ from autonomous_mes.infrastructure.deepseek_gateway import (
     ConfigurableModelGateway,
     DeepSeekDiagnosticModel,
 )
+from autonomous_mes.infrastructure.egress import EgressPolicy
 
 
 def facts() -> DiagnosticFacts:
@@ -24,7 +25,7 @@ class DeepSeekGatewayTests(unittest.TestCase):
         response.json.return_value = {"choices": [{"message": {"content": json.dumps({"diagnosis": "主轴过载导致工序暂停", "recommendation": "由维修人员检查主轴后再由主管审批复工"}, ensure_ascii=False)}}]}
         post.return_value = response
 
-        gateway = DeepSeekDiagnosticModel("secret")
+        gateway = DeepSeekDiagnosticModel("secret", egress_policy=EgressPolicy(model_cloud_endpoints=("https://api.deepseek.com",)))
         result = gateway.explain(facts())
 
         self.assertEqual("DEEPSEEK", result.source)
@@ -42,7 +43,7 @@ class DeepSeekGatewayTests(unittest.TestCase):
             "choices": [{"message": {"content": '```json\n{"answer":"连接成功"}\n```'}}]
         }
         post.return_value = response
-        gateway = ConfigurableModelGateway()
+        gateway = ConfigurableModelGateway(egress_policy=EgressPolicy(model_cloud_endpoints=("https://api.moonshot.cn/v1",)))
 
         status = gateway.configure(
             "KIMI",

@@ -11,6 +11,7 @@ from autonomous_mes.infrastructure.deepseek_gateway import (
     ConfigurableModelGateway,
     OpenAICompatibleDiagnosticModel,
 )
+from autonomous_mes.infrastructure.egress import EgressPolicy
 
 
 def candidate():
@@ -108,7 +109,7 @@ def test_local_adapter_never_sends_authorization_and_model_capture_is_stable():
         assert post.call_args.kwargs["headers"] == {}
         assert post.call_args.kwargs["trust_env"] is False
         assert "tools" not in post.call_args.kwargs["json"]
-    gateway = ConfigurableModelGateway("private-key-placeholder", model="first")
+    gateway = ConfigurableModelGateway("private-key-placeholder", model="first", egress_policy=EgressPolicy(model_cloud_endpoints=("https://api.deepseek.com",)))
     captured = gateway.evaluation_adapter()
     gateway.configure("DEEPSEEK", "second", "https://api.deepseek.com", 12, None)
     assert captured.status()["model"] == "first"

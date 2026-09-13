@@ -16,6 +16,10 @@ class Settings(BaseSettings):
     model_name: str | None = None
     model_base_url: str | None = None
     model_timeout_seconds: float | None = None
+    # Exact base URLs, independently authorized by the deployment administrator.
+    model_local_endpoints: str = "http://127.0.0.1:11434/v1"
+    model_cloud_endpoints: str = ""
+    business_endpoints: str = ""
     # Legacy DeepSeek variables remain supported for existing deployments.
     deepseek_api_key: str | None = None
     deepseek_model: str = "deepseek-v4-flash"

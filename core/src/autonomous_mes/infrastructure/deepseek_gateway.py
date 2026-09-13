@@ -11,6 +11,7 @@ from autonomous_mes.application.model_gateway import (
     ModelGatewayError,
     NaturalLanguageAnswer,
 )
+from autonomous_mes.infrastructure.egress import EgressDenied, EgressPolicy, endpoint
 
 
 class TruncatedModelResponse(ValueError):
@@ -54,10 +55,12 @@ class OpenAICompatibleDiagnosticModel:
         base_url: str,
         timeout_seconds: float = 12.0,
         provider: str = "OPENAI_COMPATIBLE",
+        egress_policy: EgressPolicy | None = None,
     ) -> None:
         self._api_key = api_key
         self._model = model
-        self._base_url = base_url.rstrip("/")
+        self._base_url = endpoint(base_url)
+        self._egress_policy = egress_policy or EgressPolicy()
         self._timeout = timeout_seconds
         self._provider = provider.strip().upper()
         self._status_lock = Lock()
@@ -96,6 +99,7 @@ class OpenAICompatibleDiagnosticModel:
                 self._failure_count += 1
 
     def _request(self, messages: list[dict[str, str]], max_tokens: int) -> dict[str, Any]:
+        self._egress_policy.require_model(self._base_url)
         payload: dict[str, Any] = {
             "model": self._model,
             "messages": messages,
@@ -110,7 +114,8 @@ class OpenAICompatibleDiagnosticModel:
             headers={"Authorization": f"Bearer {self._api_key}"} if self._api_key else {},
             json=payload,
             timeout=self._timeout,
-            trust_env=self._provider != "LOCAL_BENCHMARK",
+            trust_env=False,
+            follow_redirects=False,
         )
         response.raise_for_status()
         body: dict[str, Any] = response.json()
@@ -215,8 +220,9 @@ class DeepSeekDiagnosticModel(OpenAICompatibleDiagnosticModel):
         model: str = "deepseek-v4-flash",
         base_url: str = "https://api.deepseek.com",
         timeout_seconds: float = 12.0,
+        egress_policy: EgressPolicy | None = None,
     ) -> None:
-        super().__init__(api_key, model, base_url, timeout_seconds, "DEEPSEEK")
+        super().__init__(api_key, model, base_url, timeout_seconds, "DEEPSEEK", egress_policy)
 
 
 class ConfigurableModelGateway:
@@ -229,13 +235,20 @@ class ConfigurableModelGateway:
         base_url: str = "https://api.deepseek.com",
         timeout_seconds: float = 12.0,
         provider: str = "DEEPSEEK",
+        egress_policy: EgressPolicy | None = None,
     ) -> None:
         self._lock = Lock()
         self._adapter: OpenAICompatibleDiagnosticModel | None = None
         self._api_key: str | None = None
         self._source = "DISABLED"
-        if api_key:
-            self.configure(provider, model, base_url, timeout_seconds, api_key, "ENVIRONMENT")
+        self._egress_policy = egress_policy or EgressPolicy()
+        self._blocked_configuration = False
+        if api_key or endpoint(base_url) in self._egress_policy.model_local_endpoints:
+            try:
+                self.configure(provider, model, base_url, timeout_seconds, api_key, "ENVIRONMENT")
+            except EgressDenied:
+                self._blocked_configuration = True
+                self._source = "ENVIRONMENT"
 
     def configure(
         self,
@@ -247,20 +260,27 @@ class ConfigurableModelGateway:
         source: str = "RUNTIME",
         verify_connection: bool = False,
     ) -> dict[str, object]:
+        self._egress_policy.require_model(base_url)
+        base_url = endpoint(base_url)
         with self._lock:
             current = self._adapter
-            effective_key = api_key or self._api_key
-        if api_key is None and current is not None:
+            same_destination = current is not None and (
+                current.status()["provider"] == provider.strip().upper()
+                and current.status()["baseUrl"] == base_url
+            )
+            effective_key = api_key or (self._api_key if same_destination else None)
+        local = base_url in self._egress_policy.model_local_endpoints
+        if api_key is None and current is not None and not local:
             current_status = current.status()
             if (
                 str(current_status["provider"]) != provider.strip().upper()
                 or str(current_status["baseUrl"]) != base_url.rstrip("/")
             ):
                 raise ValueError("a new API key is required when provider or base URL changes")
-        if not effective_key:
+        if not effective_key and not local:
             raise ValueError("API key is required")
         candidate = OpenAICompatibleDiagnosticModel(
-            effective_key, model, base_url, timeout_seconds, provider
+            effective_key or "", model, base_url, timeout_seconds, provider, self._egress_policy
         )
         if verify_connection:
             candidate.answer("只回复连接测试结果。", {"purpose": "CONNECTION_TEST"})
@@ -268,6 +288,7 @@ class ConfigurableModelGateway:
             self._adapter = candidate
             self._api_key = effective_key
             self._source = source
+            self._blocked_configuration = False
         return self.status()
 
     def disable(self) -> dict[str, object]:
@@ -275,12 +296,14 @@ class ConfigurableModelGateway:
             self._adapter = None
             self._api_key = None
             self._source = "DISABLED"
+            self._blocked_configuration = False
         return self.status()
 
     def status(self) -> dict[str, object]:
         with self._lock:
             adapter = self._adapter
             source = self._source
+            blocked = self._blocked_configuration
         if adapter is None:
             return {
                 "provider": "NONE",
@@ -288,13 +311,15 @@ class ConfigurableModelGateway:
                 "baseUrl": None,
                 "apiKeyConfigured": False,
                 "configurationSource": source,
-                "connectionStatus": "DISABLED",
+                "connectionStatus": "BLOCKED" if blocked else "DISABLED",
+                "networkPolicy": self._egress_policy.status(),
                 "lastCheckedAt": None,
-                "lastError": None,
+                "lastError": "EgressDenied" if blocked else None,
                 "lastSuccessAt": None,
                 "failureCount": 0,
             }
-        return {**adapter.status(), "configurationSource": source}
+        return {**adapter.status(), "configurationSource": source,
+                "networkPolicy": self._egress_policy.status()}
 
     def evaluation_adapter(self) -> OpenAICompatibleDiagnosticModel:
         """Capture one adapter so a benchmark cannot mix runtime model configurations."""

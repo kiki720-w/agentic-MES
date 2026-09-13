@@ -60,7 +60,7 @@ export function formatDate(value, withTime = false) {
 
 export function statusLabel(value) {
   return ({
-    CONFIGURED: "已配置 · 未验证", VERIFIED: "请求已验证", DEGRADED: "模型降级 · 规则可用", DISABLED: "已停用",
+    BLOCKED: "网络策略已阻止", CONFIGURED: "已配置 · 未验证", VERIFIED: "请求已验证", DEGRADED: "模型降级 · 规则可用", DISABLED: "已停用",
     DRAFT: "草稿", SUBMITTED: "待审批", PENDING_APPROVAL: "待审批", APPROVED: "已批准", PUBLISHED: "已发布",
     WITHDRAWN: "已撤回", RUNNING: "运行", IDLE: "空闲", ALARM: "报警",
     UNKNOWN: "未知", SUSPENDED: "暂停", IN_PROGRESS: "进行中", RELEASED: "已下达",

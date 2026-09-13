@@ -93,6 +93,7 @@ from autonomous_mes.infrastructure.deepseek_gateway import (
     ConfigurableModelGateway,
     OpenAICompatibleDiagnosticModel,
 )
+from autonomous_mes.infrastructure.egress import EgressPolicy
 from autonomous_mes.infrastructure.memory import InMemoryWorkOrderStore, ScopedReadPolicy
 from autonomous_mes.infrastructure.sqlalchemy_store import SqlAlchemyWorkOrderStore
 
@@ -593,12 +594,21 @@ def build_store() -> MesStore:
 store = build_store()
 service = WorkOrderApplicationService(store)
 equipment_service = EquipmentApplicationService(store)
+egress_policy = EgressPolicy(
+    tuple(url.strip() for url in settings.model_local_endpoints.split(",") if url.strip()),
+    tuple(url.strip() for url in settings.model_cloud_endpoints.split(",") if url.strip()),
+    tuple(url.strip() for url in settings.business_endpoints.split(",") if url.strip()),
+)
 model_gateway = ConfigurableModelGateway(
-    settings.model_api_key or settings.deepseek_api_key,
+    settings.model_api_key or (
+        settings.deepseek_api_key if not settings.model_base_url and not settings.model_provider
+        else None
+    ),
     settings.model_name or settings.deepseek_model,
     settings.model_base_url or settings.deepseek_base_url,
     settings.model_timeout_seconds or settings.deepseek_timeout_seconds,
     settings.model_provider or "DEEPSEEK",
+    egress_policy,
 )
 model_narrator = FallbackNarrator(model_gateway)
 incident_agent = IncidentResponseAgent(
@@ -678,7 +688,7 @@ def live() -> dict[str, str]:
 @app.get("/health/ready")
 def ready() -> dict[str, str]:
     gateway_status = model_gateway.status()
-    gateway_enabled = bool(gateway_status["apiKeyConfigured"])
+    gateway_enabled = gateway_status["connectionStatus"] not in {"DISABLED", "BLOCKED"}
     return {
         "status": "READY",
         "modelGateway": str(gateway_status["connectionStatus"]),
@@ -811,7 +821,7 @@ def start_capability_run(
                 or not 1024 <= endpoint.port <= 65535 or not body.model.strip()):
                 raise ValueError("本地测评须使用 http://127.0.0.1:端口/v1 并填写模型 ID；不接受公网或含凭据地址。")
             adapter = OpenAICompatibleDiagnosticModel(
-                "", body.model.strip(), body.baseUrl, 30, "LOCAL_BENCHMARK"
+                "", body.model.strip(), body.baseUrl, 30, "LOCAL_BENCHMARK", egress_policy
             )
         else:
             adapter = model_gateway.evaluation_adapter()

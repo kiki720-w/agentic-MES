@@ -277,7 +277,7 @@ class ApiContractTests(unittest.TestCase):
             headers=planner_headers,
             json={
                 "provider": "KIMI",
-                "baseUrl": "https://api.moonshot.cn/v1",
+                "baseUrl": "http://127.0.0.1:11434/v1",
                 "model": "customer-model",
                 "apiKey": "customer-secret",
                 "verifyConnection": False,
@@ -288,7 +288,7 @@ class ApiContractTests(unittest.TestCase):
             "/api/v1/system/model-gateway/configuration",
             json={
                 "provider": "KIMI",
-                "baseUrl": "https://api.moonshot.cn/v1",
+                "baseUrl": "http://127.0.0.1:11434/v1",
                 "model": "customer-model",
                 "apiKey": "customer-secret",
                 "verifyConnection": False,

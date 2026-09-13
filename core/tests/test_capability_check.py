@@ -6,6 +6,7 @@ import pytest
 from autonomous_mes.application.capability_check import CASES, run_text_check
 from autonomous_mes.application.model_gateway import ModelGatewayError, NaturalLanguageAnswer
 from autonomous_mes.infrastructure.deepseek_gateway import ConfigurableModelGateway
+from autonomous_mes.infrastructure.egress import EgressPolicy
 
 
 def test_benchmark_persists_reproducible_evidence_without_answer_text(tmp_path):
@@ -42,7 +43,7 @@ def test_failure_and_wrong_answer_never_pass_benchmark(tmp_path):
     ({"message": {"content": 'not json'}}, "ValueError"),
 ])
 def test_invalid_output_is_degraded_and_recoverable(choice, error):
-    gateway = ConfigurableModelGateway("test-placeholder")
+    gateway = ConfigurableModelGateway("test-placeholder", egress_policy=EgressPolicy(model_cloud_endpoints=("https://api.deepseek.com",)))
     assert gateway.status()["connectionStatus"] == "CONFIGURED"
     with patch("autonomous_mes.infrastructure.deepseek_gateway.httpx.post") as post:
         post.return_value.json.return_value = {"choices": [choice]}
@@ -61,7 +62,7 @@ def test_invalid_output_is_degraded_and_recoverable(choice, error):
 
 
 def test_failed_candidate_does_not_replace_active_model():
-    gateway = ConfigurableModelGateway("test-placeholder", model="original")
+    gateway = ConfigurableModelGateway("test-placeholder", model="original", egress_policy=EgressPolicy(model_cloud_endpoints=("https://api.deepseek.com",)))
     with patch("autonomous_mes.infrastructure.deepseek_gateway.httpx.post") as post:
         post.return_value.json.return_value = {"choices": [{"message": {"content": ""}}]}
         with pytest.raises(ModelGatewayError):
