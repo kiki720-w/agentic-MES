@@ -14,6 +14,7 @@ const blockerLabels = {
   QUALITY_HOLD: "存在质量冻结工单",
 };
 const conversationStorageKey = "capaxion.agent.conversations.v1";
+const paneStorageKey = "capaxion.agent.panes.v1";
 const welcomeMessage = { role: "agent", text: "你好，我是衡策。你可以直接拖入人员能力表或订单资料，也可以描述生产任务。我会在本机理解资料，在授权范围内写入生产数据、运行排产并回读核验。", meta: "本地制造 Agent · 人工页面始终可以检查和修改" };
 function conversationId() { return globalThis.crypto?.randomUUID?.() || `conversation-${Date.now()}-${Math.random().toString(16).slice(2)}`; }
 function newConversation() { const now = new Date().toISOString(); return { id: conversationId(), title: "新任务", createdAt: now, updatedAt: now, messages: [welcomeMessage] }; }
@@ -85,6 +86,29 @@ function historyTime(value) {
     ? date.toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" })
     : date.toLocaleDateString("zh-CN", { month: "2-digit", day: "2-digit" });
 }
+function branchForConversation(conversation) {
+  const details = conversationDetails(conversation);
+  const content = `${details.title} ${details.preview}`;
+  if (/排产|计划|车工/.test(content)) return { id: "scheduling", label: "排产任务" };
+  if (/人员|能力|产能/.test(content)) return { id: "capacity", label: "人员与产能" };
+  if (/订单|工单/.test(content)) return { id: "orders", label: "订单任务" };
+  if (/附件|文件|图纸|图片|文档/.test(content)) return { id: "documents", label: "资料分析" };
+  return { id: "general", label: "其他对话" };
+}
+function messageMetaLabel(meta) {
+  if (/EXECUTED_AND_VERIFIED|已执行并发布|已写入并回读|已回读核验/.test(meta || "")) return "已执行并核验";
+  if (/失败|未执行|未完成|ERROR/.test(meta || "")) return "需要处理";
+  return "";
+}
+function loadPaneWidths() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(paneStorageKey) || "null");
+    return {
+      history: Math.min(420, Math.max(190, Number(saved?.history) || 248)),
+      inspector: Math.min(480, Math.max(240, Number(saved?.inspector) || 292)),
+    };
+  } catch { return { history: 248, inspector: 292 }; }
+}
 function formatBytes(bytes) { if (bytes < 1024) return `${bytes} B`; if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`; return `${(bytes / 1024 / 1024).toFixed(1)} MB`; }
 function containsDraggedFiles(event) { return Array.from(event.dataTransfer?.types || []).includes("Files"); }
 function workbookDescription(metadata) {
@@ -120,8 +144,11 @@ export default function AgentWorkspace({ health, actor, onNavigate, incomingDrop
   const [pendingOrderInstruction, setPendingOrderInstruction] = useState("");
   const [evidence, setEvidence] = useState([]);
   const [historyQuery, setHistoryQuery] = useState("");
+  const [paneWidths, setPaneWidths] = useState(loadPaneWidths);
+  const [resizingPane, setResizingPane] = useState("");
   const endRef = useRef(null);
   const dragDepth = useRef(0);
+  const resizeOrigin = useRef(null);
   useEffect(() => {
     try {
       const conversations = [...conversationState.conversations]
@@ -130,7 +157,45 @@ export default function AgentWorkspace({ health, actor, onNavigate, incomingDrop
       localStorage.setItem(conversationStorageKey, JSON.stringify({ conversations, activeId: conversationState.activeId }));
     } catch { /* Conversation continues even if local storage is unavailable. */ }
   }, [conversationState]);
+  useEffect(() => {
+    try { localStorage.setItem(paneStorageKey, JSON.stringify(paneWidths)); } catch { /* Resizing still works without persistence. */ }
+  }, [paneWidths]);
+  useEffect(() => {
+    if (!resizingPane) return undefined;
+    function move(event) {
+      const origin = resizeOrigin.current;
+      if (!origin) return;
+      const delta = event.clientX - origin.x;
+      const available = document.querySelector(".apple-workspace")?.clientWidth || window.innerWidth;
+      setPaneWidths((current) => {
+        const maxHistory = Math.max(190, Math.min(420, available - current.inspector - 396));
+        const maxInspector = Math.max(240, Math.min(480, available - current.history - 396));
+        return resizingPane === "history"
+          ? { ...current, history: Math.min(maxHistory, Math.max(190, origin.width + delta)) }
+          : { ...current, inspector: Math.min(maxInspector, Math.max(240, origin.width - delta)) };
+      });
+    }
+    function stop() { resizeOrigin.current = null; setResizingPane(""); }
+    document.addEventListener("pointermove", move);
+    document.addEventListener("pointerup", stop, { once: true });
+    document.addEventListener("pointercancel", stop, { once: true });
+    window.addEventListener("blur", stop, { once: true });
+    document.body.classList.add("resizing-workspace");
+    return () => {
+      document.removeEventListener("pointermove", move);
+      document.removeEventListener("pointerup", stop);
+      document.removeEventListener("pointercancel", stop);
+      window.removeEventListener("blur", stop);
+      document.body.classList.remove("resizing-workspace");
+    };
+  }, [resizingPane]);
   useEffect(() => { endRef.current?.scrollIntoView({ behavior: "smooth" }); }, [messages, sending]);
+
+  function beginResize(pane, event) {
+    event.preventDefault();
+    resizeOrigin.current = { x: event.clientX, width: paneWidths[pane] };
+    setResizingPane(pane);
+  }
 
   function resetTaskState() {
     setPrompt(""); setFiles([]); setSpreadsheetPreview(null); setCapacityPreview(null);
@@ -200,42 +265,52 @@ export default function AgentWorkspace({ health, actor, onNavigate, incomingDrop
       noText.length ? `${noText.length} 个未提取到文字` : null,
       failed.length ? `${failed.length} 个解析失败` : null,
     ].filter(Boolean).join("，");
-    setMessages((current) => [...current, {
-      role: failed.length ? "system" : "agent",
-      text: `已${source} ${picked.map((file) => file.name).join("、")}；${details || "没有可解析内容"}。${parsed.length ? "现在可以直接针对附件提问。" : ""}`,
-      meta: "本机解析 · 原文件未上传外部文件服务",
-      attachments: picked.map((file) => file.name),
-    }]);
     const spreadsheet = picked.find((file) => /\.(xlsx|csv)$/i.test(file.name));
+    if (!spreadsheet) {
+      setMessages((current) => [...current, {
+        role: failed.length ? "system" : "agent",
+        text: `已${source} ${picked.map((file) => file.name).join("、")}；${details || "没有提取到内容"}。`,
+        meta: failed.length ? "解析失败" : "已读取",
+        attachments: picked.map((file) => file.name),
+      }]);
+    }
     if (spreadsheet) {
       try {
+        let capacityCandidate = null;
         if (/\.xlsx$/i.test(spreadsheet.name)) {
           const capacity = await desktop.core.upload({ path: "/api/v1/agent/imports/capacity/preview?workshopId=WS-MACH-01", fileId: spreadsheet.id, filePath: spreadsheet.path, actor });
-          if (capacity.valid) {
-            setCapacityPreview(capacity);
-            const stats = capacity.stats || {};
-            const skipped = stats.skippedCount ? `；另有 ${stats.skippedCount} 人缺少产能数值，将跳过并保留人工补录` : "";
-            setMessages((current) => [...current, {
-              role: "agent",
-              text: `已识别人员能力表 ${spreadsheet.name}：${stats.personCount || 0} 名可写入人员，其中新增 ${stats.createCount || 0}、更新 ${stats.updateCount || 0}、无需变更 ${stats.unchangedCount || 0}${skipped}。你可以直接说“同步到产能管理”，也可以使用写入按钮。\n\n${(capacity.assumptions || []).map((item) => `• ${item}`).join("\n")}`,
-              meta: "已生成本地写入计划 · 尚未写入",
-              action: "execute-capacity",
-            }]);
-          }
+          if (capacity.valid) capacityCandidate = capacity;
         }
         const preview = await desktop.core.upload({ path: "/api/v1/planning/imports/spreadsheet/preview?workshopId=WS-MACH-01", fileId: spreadsheet.id, filePath: spreadsheet.path, actor });
-        setSpreadsheetPreview(preview);
         const stats = preview.stats || {};
         const parsedSpreadsheet = parseResults.find((item) => item.file.id === spreadsheet.id)?.parsed;
         const recognized = (stats.workOrderCount || 0) + (stats.operationCount || 0) + (stats.resourceCount || 0) > 0;
-        const text = preview.valid
-          ? preview.mappingMode === "TURNING_PLAN_ADAPTER"
-            ? `已识别车工排产表 ${spreadsheet.name}：${stats.workOrderCount || 0} 条未完成计划、${stats.resourceCount || 0} 名产能人员；已排除 ${stats.completedExcludedCount || 0} 条完成记录。现在可以直接说“同步到排产”，或使用导入按钮。`
-            : `排产导入预检 ${spreadsheet.name}：${stats.workOrderCount || 0} 个工单、${stats.operationCount || 0} 道工序、${stats.resourceCount || 0} 个产能资源，字段与业务关联校验通过。`
-          : recognized
-            ? `结构化导入检查 ${spreadsheet.name}：识别到 ${stats.workOrderCount || 0} 个工单、${stats.operationCount || 0} 道工序、${stats.resourceCount || 0} 个产能资源，还有 ${stats.errorCount || preview.issues?.length || 0} 项映射或校验问题。`
-            : `${workbookDescription(parsedSpreadsheet?.metadata) || `已解析 ${spreadsheet.name}`}。它不是 CAPAXION 的“工单/工序/产能”标准导入模板，因此尚未映射成可写入 MES 的业务对象；附件内容已经可以提问。`;
-        setMessages((current) => [...current, { role: "agent", text, meta: preview.valid ? "排产快照已生成 · 尚未写入" : "内容已解析 · 完成字段映射后才能写入", action: preview.valid ? "confirm-spreadsheet" : null }]);
+        if (preview.valid) {
+          setSpreadsheetPreview(preview);
+          setCapacityPreview(null);
+          const text = preview.mappingMode === "TURNING_PLAN_ADAPTER"
+            ? `已识别 ${stats.workOrderCount || 0} 条未完成计划和 ${stats.resourceCount || 0} 名人员，可同步到排产。`
+            : `已识别 ${stats.workOrderCount || 0} 个工单、${stats.operationCount || 0} 道工序和 ${stats.resourceCount || 0} 个资源，可生成排产。`;
+          setMessages((current) => [...current, { role: "agent", text, meta: "尚未写入", action: "confirm-spreadsheet", attachments: [spreadsheet.name] }]);
+        } else if (capacityCandidate?.valid) {
+          setCapacityPreview(capacityCandidate);
+          setSpreadsheetPreview(null);
+          const capacityStats = capacityCandidate.stats || {};
+          const missing = capacityStats.skippedCount ? `；${capacityStats.skippedCount} 人缺少产能值` : "";
+          setMessages((current) => [...current, {
+            role: "agent",
+            text: `已识别 ${capacityStats.personCount || 0} 名人员：新增 ${capacityStats.createCount || 0}、更新 ${capacityStats.updateCount || 0}${missing}。可写入产能管理。`,
+            meta: "尚未写入",
+            action: "execute-capacity",
+            attachments: [spreadsheet.name],
+          }]);
+        } else {
+          setSpreadsheetPreview(preview);
+          const text = recognized
+            ? `已读取表格，但还有 ${stats.errorCount || preview.issues?.length || 0} 项字段需要补充。`
+            : `${workbookDescription(parsedSpreadsheet?.metadata) || `已读取 ${spreadsheet.name}`}，还无法识别为人员、订单或排产数据。`;
+          setMessages((current) => [...current, { role: "agent", text, meta: "等待补充", attachments: [spreadsheet.name] }]);
+        }
       } catch (error) { setMessages((current) => [...current, { role: "system", text: error.message, meta: "生产数据预检未执行 · 通用附件解析不受影响" }]); }
     }
     setSending(false);
@@ -359,12 +434,12 @@ export default function AgentWorkspace({ health, actor, onNavigate, incomingDrop
       if ((orderWriteIntent || pendingOrderInstruction) && !parsedFiles.length) {
         const instruction = pendingOrderInstruction ? `${pendingOrderInstruction}\n用户补充：${question}` : question;
         const result = await api("/api/v1/agent/tasks/execute", actor, { method: "POST", body: { instruction } });
-        setMessages((current) => [...current, { role: result.status === "EXECUTED_AND_VERIFIED" ? "agent" : "system", text: `${result.answer || "任务未完成"}${(result.assumptions || []).length ? `\n\n${result.assumptions.map((item) => `• ${item}`).join("\n")}` : ""}`, meta: `${result.status} · ${result.parser || "本地任务解析器"}`, action: result.status === "EXECUTED_AND_VERIFIED" ? "open-results" : null }]);
+        setMessages((current) => [...current, { role: result.status === "EXECUTED_AND_VERIFIED" ? "agent" : "system", text: result.answer || "请补充订单的名称、数量、交期和工序。", meta: result.status, action: result.status === "EXECUTED_AND_VERIFIED" ? "open-results" : null }]);
         setPendingOrderInstruction(result.status === "NEEDS_INFORMATION" ? instruction : "");
         return;
       }
       if (/(?:执行|写入|发布|同步|导入|更新|创建|新建)/.test(question)) {
-        setMessages((current) => [...current, { role: "agent", text: "我可以直接执行：附件人员产能写入、车工计划同步、排产方案生成与发布、新订单建单并排产。请在指令里说明对象和动作；如果是设备启停、质量放行或外部 MES 写回，还需要先接入对应工具。", meta: "ACTION_SCOPE · 可执行工具路由" }]);
+        setMessages((current) => [...current, { role: "agent", text: "请说明要处理的人员、订单或排产方案。外部 MES 写入需先配置对应接口。", meta: "等待补充" }]);
         return;
       }
       const attachments = parsedFiles.map((file) => ({ name: file.parsed.name, kind: file.parsed.kind, parser: file.parsed.parser, sha256: file.parsed.sha256, documentId: file.parsed.documentId, summary: file.parsed.summary || "", truncated: file.parsed.truncated }));
@@ -405,13 +480,59 @@ export default function AgentWorkspace({ health, actor, onNavigate, incomingDrop
     const details = conversationDetails(conversation);
     return `${details.title} ${details.preview} ${details.status}`.toLowerCase().includes(query);
   });
+  const historyBranches = [];
+  history.forEach((conversation) => {
+    const branch = branchForConversation(conversation);
+    let group = historyBranches.find((item) => item.id === branch.id);
+    if (!group) {
+      group = { ...branch, conversations: [] };
+      historyBranches.push(group);
+    }
+    group.conversations.push(conversation);
+  });
   const activeDetails = conversationDetails(activeConversation);
   const visibleMessages = meaningfulMessages(messages);
   const hasTask = visibleMessages.length > 0;
-  return <div className={`workspace-layout open-webui-style apple-workspace ${dragActive ? "file-drag-active" : ""}`} onDragEnter={handleDragEnter} onDragOver={(event) => { if (containsDraggedFiles(event)) event.preventDefault(); }} onDragLeave={handleDragLeave} onDrop={handleDrop}>{dragActive && <div className="file-drop-overlay"><span>⇩</span><strong>松开以添加并解析文件</strong><small>文字 / 表格 / DOCX / PDF / 图片 OCR 均在本机处理</small></div>}<aside className="conversation-history"><div className="conversation-history-head"><div><small>智能工作台</small><strong>任务记录</strong></div><button onClick={createConversation} disabled={sending} title="新建任务">＋</button></div><label className="conversation-search"><span>⌕</span><input value={historyQuery} onChange={(event) => setHistoryQuery(event.target.value)} placeholder="搜索任务、附件或结果" /></label><div className="conversation-history-list">{history.map((conversation) => { const details = conversationDetails(conversation); return <article className={conversation.id === conversationState.activeId ? "active" : ""} key={conversation.id}><button className="conversation-history-main" onClick={() => selectConversation(conversation.id)} disabled={sending}><span className="conversation-card-head"><strong>{details.title}</strong><time>{historyTime(conversation.updatedAt)}</time></span><small>{details.preview}</small><span className="conversation-card-meta"><i className={details.tone}>{details.status}</i><b>{details.turnCount ? `${details.turnCount} 轮` : "新任务"}{details.fileCount ? ` · ${details.fileCount} 个附件` : ""}</b></span></button><button className="conversation-history-delete" onClick={() => deleteConversation(conversation.id)} disabled={sending} title="删除任务">×</button></article>; })}{history.length === 0 && <div className="history-empty">没有匹配的任务</div>}</div><p>对话、附件名称和执行结果均保存在本机。</p></aside><main className="conversation">
+  return <div
+    className={`workspace-layout open-webui-style apple-workspace ${dragActive ? "file-drag-active" : ""} ${resizingPane ? "is-resizing" : ""}`}
+    style={{ "--history-width": `${paneWidths.history}px`, "--inspector-width": `${paneWidths.inspector}px` }}
+    onDragEnter={handleDragEnter}
+    onDragOver={(event) => { if (containsDraggedFiles(event)) event.preventDefault(); }}
+    onDragLeave={handleDragLeave}
+    onDrop={handleDrop}
+  >
+    {dragActive && <div className="file-drop-overlay"><span>⇩</span><strong>松开以添加并解析文件</strong><small>文字 / 表格 / DOCX / PDF / 图片 OCR 均在本机处理</small></div>}
+    <aside className="conversation-history">
+      <div className="conversation-history-head"><div><small>智能工作台</small><strong>任务记录</strong></div><button onClick={createConversation} disabled={sending} title="新建任务">＋</button></div>
+      <label className="conversation-search"><span>⌕</span><input value={historyQuery} onChange={(event) => setHistoryQuery(event.target.value)} placeholder="搜索任务" /></label>
+      <div className="conversation-history-list">
+        <section className="history-project">
+          <div className="history-project-head"><span>⌄</span><strong>演示工厂</strong><small>{history.length}</small></div>
+          {historyBranches.map((branch) => <details className="history-branch" open key={branch.id}>
+            <summary><span>›</span><strong>{branch.label}</strong><small>{branch.conversations.length}</small></summary>
+            <div className="history-branch-items">{branch.conversations.map((conversation) => {
+              const details = conversationDetails(conversation);
+              return <article className={conversation.id === conversationState.activeId ? "active" : ""} key={conversation.id}>
+                <button className="conversation-history-main" onClick={() => selectConversation(conversation.id)} disabled={sending}>
+                  <span className="conversation-card-head"><strong>{details.title}</strong><time>{historyTime(conversation.updatedAt)}</time></span>
+                  <span className="conversation-card-meta"><i className={details.tone} />{details.status}{details.fileCount ? ` · ${details.fileCount} 个附件` : ""}</span>
+                </button>
+                <button className="conversation-history-delete" onClick={() => deleteConversation(conversation.id)} disabled={sending} title="删除任务">×</button>
+              </article>;
+            })}</div>
+          </details>)}
+        </section>
+        {history.length === 0 && <div className="history-empty">没有匹配的任务</div>}
+      </div>
+    </aside>
+    <div className="pane-resizer history-resizer" role="separator" aria-label="调整任务栏宽度" title="拖动调整任务栏宽度" onPointerDown={(event) => beginResize("history", event)} onDoubleClick={() => setPaneWidths((current) => ({ ...current, history: 248 }))}><span /></div>
+    <main className="conversation">
     <header className="agent-thread-header"><div><span className={`thread-status ${activeDetails.tone}`}>{activeDetails.status}</span><h1>{hasTask ? activeDetails.title : "新的制造任务"}</h1><p>{hasTask ? `${activeDetails.turnCount || 0} 轮对话${activeDetails.fileCount ? ` · ${activeDetails.fileCount} 个附件` : ""} · 更新于 ${historyTime(activeConversation.updatedAt)}` : "上传生产资料，或直接告诉衡策要完成什么。"}</p></div><div className="thread-actions"><button className="button" onClick={() => onNavigate("models")}>模型设置</button><div className={`connection-pill ${health?.online ? "ok" : "bad"}`}><span />{health?.online ? "已连接" : "等待 Core"}</div></div></header>
     {!hasTask && <section className="conversation-empty"><div className="empty-orbit">✦</div><h2>我能为你处理什么？</h2><p>直接描述生产任务，或拖入人员能力表、订单、图纸和计划文件。</p><div className="quick-prompts">{quickPrompts.map((item) => <button key={item} onClick={() => send(item)}>{item}<span>↗</span></button>)}</div></section>}
-    <div className={`messages ${hasTask ? "" : "empty"}`}>{visibleMessages.map((message, index) => <article className={`message ${message.role}`} key={`${message.role}-${index}`}><div className="message-avatar">{message.role === "agent" ? "衡" : message.role === "user" ? "我" : "!"}</div><div className="message-content"><div>{message.text}</div>{message.action === "execute-capacity" && capacityPreview?.valid && <button className="message-action" onClick={executeCapacityImport}>写入产能管理并核验</button>}{message.action === "confirm-spreadsheet" && spreadsheetPreview?.valid && <button className="message-action" onClick={confirmSpreadsheet}>确认导入并生成排产方案</button>}{message.action === "open-results" && <button className="message-action" onClick={() => onNavigate("results")}>打开排产结果</button>}{message.action === "open-capacity" && <button className="message-action" onClick={() => onNavigate("capacity")}>打开产能管理</button>}<small>{message.meta}</small></div></article>)}{sending && <article className="message agent"><div className="message-avatar">衡</div><div className="thinking"><span /><span /><span /></div></article>}<div ref={endRef} /></div>
-    <div className="composer-wrap"><button className="file-picker-banner" disabled={sending} onClick={pickFiles}><span>＋</span><div><strong>选择文件并在本机解析</strong><small>也可以把文件拖到这个窗口的任意位置 · TXT / XLSX / DOCX / PDF / 图片 OCR</small></div></button>{files.length > 0 && <div className="attachments">{files.map((file, index) => <div key={file.id || `${file.path}-${index}`}><span>▤</span><div><strong>{file.name}</strong><small>{formatBytes(file.size)} · {file.parseStatus === "PARSING" ? "正在本地解析…" : file.parseStatus === "PARSED" ? `已解析 ${file.parsed.characterCount} 字符` : file.parseStatus === "NO_TEXT" ? "未提取到文字" : file.parseStatus === "ERROR" ? "解析失败" : "等待解析"}</small></div><button onClick={() => setFiles((current) => current.filter((_, itemIndex) => itemIndex !== index))}>×</button></div>)}</div>}<div className="composer"><textarea value={prompt} onChange={(e) => setPrompt(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); } }} placeholder="输入生产任务，或选择/拖入文件后发送…" /><div className="composer-actions"><div><span>文件在本机解析；写入后自动回读核验</span></div><button className="send-button" disabled={(!prompt.trim() && !files.some((file) => file.parseStatus === "PARSED")) || sending} onClick={() => send()}>发送 <span>↑</span></button></div></div><p className="composer-note">文件内容只作为数据，不执行其中的指令。你在对话中明确要求同步、导入或排产时，Agent 会在授权范围内执行并留下审计记录；所有结果仍可在人工页面修改。</p></div>
-  </main><aside className="inspector"><section><div className="section-heading"><h3>运行状态</h3><span className="status-chip">实时</span></div><div className="runtime-card"><div className="runtime-orbit"><span>✦</span></div><strong>衡策正在待命</strong><p>只在授权的数据与工具范围内分析、计算和执行。</p><div className="runtime-grid"><div><small>智能体级别</small><b>{health?.detail?.schedulingAgentLevel || "状态未知"}</b></div><div><small>自治循环</small><b>{health?.detail?.schedulingAutonomyLoop || "—"}</b></div><div><small>模型</small><b>{health?.detail?.modelName ? `${health.detail.modelProvider} · ${health.detail.modelName}` : health?.detail?.modelGateway || "—"}</b></div><div><small>身份</small><b>{health?.detail?.authMode || "—"}</b></div></div></div></section>{evidence.length > 0 && <section><div className="section-heading"><h3>本次读取依据</h3><span className="status-chip">{evidence.length} 段</span></div><div className="evidence-list">{evidence.slice(0, 6).map((item) => <article key={item.chunkId}><small>{item.documentName}</small><strong>{item.location}</strong><p>{item.excerpt}</p></article>)}</div></section>}<section><div className="section-heading"><h3>任务入口</h3></div><div className="agent-links"><button onClick={() => onNavigate("planning")}><span>▦</span><div><strong>生成排产方案</strong><small>有限产能与工艺约束</small></div></button><button onClick={() => onNavigate("results")}><span>◫</span><div><strong>检查排产结果</strong><small>人员周计划与能力缺口</small></div></button><button onClick={() => onNavigate("capacity")}><span>◒</span><div><strong>维护产能</strong><small>人员与工作单元能力</small></div></button></div></section><section className="boundary-card"><span>L4 安全边界</span><strong>预授权范围内自主执行</strong><p>排产发布必须通过策略、版本和结果核验；超界或失败立即停止并转人工。设备控制和质量放行不在本域授权内。</p></section></aside></div>;
+    <div className={`messages ${hasTask ? "" : "empty"}`}>{visibleMessages.map((message, index) => <article className={`message ${message.role}`} key={`${message.role}-${index}`}><div className="message-avatar">{message.role === "agent" ? "衡" : message.role === "user" ? "我" : "!"}</div><div className="message-content"><div>{message.text}</div>{message.action === "execute-capacity" && capacityPreview?.valid && <button className="message-action" onClick={executeCapacityImport}>写入产能管理并核验</button>}{message.action === "confirm-spreadsheet" && spreadsheetPreview?.valid && <button className="message-action" onClick={confirmSpreadsheet}>确认导入并生成排产方案</button>}{message.action === "open-results" && <button className="message-action" onClick={() => onNavigate("results")}>打开排产结果</button>}{message.action === "open-capacity" && <button className="message-action" onClick={() => onNavigate("capacity")}>打开产能管理</button>}{messageMetaLabel(message.meta) && <small>{messageMetaLabel(message.meta)}</small>}</div></article>)}{sending && <article className="message agent"><div className="message-avatar">衡</div><div className="thinking"><span /><span /><span /></div></article>}<div ref={endRef} /></div>
+    <div className="composer-wrap"><div className="composer">{files.length > 0 && <div className="attachments">{files.map((file, index) => <div key={file.id || `${file.path}-${index}`}><span>▤</span><div><strong>{file.name}</strong><small>{formatBytes(file.size)} · {file.parseStatus === "PARSING" ? "正在解析…" : file.parseStatus === "PARSED" ? "已解析" : file.parseStatus === "NO_TEXT" ? "未提取到文字" : file.parseStatus === "ERROR" ? "解析失败" : "等待解析"}</small></div><button onClick={() => setFiles((current) => current.filter((_, itemIndex) => itemIndex !== index))}>×</button></div>)}</div>}<textarea value={prompt} onChange={(e) => setPrompt(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); } }} placeholder="输入生产任务…" /><div className="composer-actions"><button className="composer-file-button" disabled={sending} onClick={pickFiles} aria-label="选择文件并在本机解析" data-tooltip="选择文件并在本机解析">＋</button><button className="send-button" disabled={(!prompt.trim() && !files.some((file) => file.parseStatus === "PARSED")) || sending} onClick={() => send()}>发送 <span>↑</span></button></div></div></div>
+  </main>
+  <div className="pane-resizer inspector-resizer" role="separator" aria-label="调整资料栏宽度" title="拖动调整资料栏宽度" onPointerDown={(event) => beginResize("inspector", event)} onDoubleClick={() => setPaneWidths((current) => ({ ...current, inspector: 292 }))}><span /></div>
+  <aside className="inspector"><section><div className="section-heading"><h3>运行状态</h3><span className="status-chip">实时</span></div><div className="runtime-card"><div className="runtime-orbit"><span>✦</span></div><strong>衡策正在待命</strong><p>只在授权的数据与工具范围内分析、计算和执行。</p><div className="runtime-grid"><div><small>智能体级别</small><b>{health?.detail?.schedulingAgentLevel || "状态未知"}</b></div><div><small>自治循环</small><b>{health?.detail?.schedulingAutonomyLoop || "—"}</b></div><div><small>模型</small><b>{health?.detail?.modelName ? `${health.detail.modelProvider} · ${health.detail.modelName}` : health?.detail?.modelGateway || "—"}</b></div><div><small>身份</small><b>{health?.detail?.authMode || "—"}</b></div></div></div></section>{evidence.length > 0 && <section><div className="section-heading"><h3>本次读取依据</h3><span className="status-chip">{evidence.length} 段</span></div><div className="evidence-list">{evidence.slice(0, 6).map((item) => <article key={item.chunkId}><small>{item.documentName}</small><strong>{item.location}</strong><p>{item.excerpt}</p></article>)}</div></section>}<section><div className="section-heading"><h3>任务入口</h3></div><div className="agent-links"><button onClick={() => onNavigate("planning")}><span>▦</span><div><strong>生成排产方案</strong><small>有限产能与工艺约束</small></div></button><button onClick={() => onNavigate("results")}><span>◫</span><div><strong>检查排产结果</strong><small>人员周计划与能力缺口</small></div></button><button onClick={() => onNavigate("capacity")}><span>◒</span><div><strong>维护产能</strong><small>人员与工作单元能力</small></div></button></div></section><section className="boundary-card"><span>L4 安全边界</span><strong>预授权范围内自主执行</strong><p>排产发布必须通过策略、版本和结果核验；超界或失败立即停止并转人工。设备控制和质量放行不在本域授权内。</p></section></aside>
+  </div>;
 }

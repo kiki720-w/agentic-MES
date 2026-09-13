@@ -220,11 +220,7 @@ class NaturalLanguageQueryService:
                 for item in attachment_facts if item["sha256"]
             ]
             return {
-                "answer": (
-                    "附件内容已在本机完成理解，但尚未写入人员或工单。当前附件没有形成"
-                    "经校验的 MES 唯一主键、字段映射和关联规则；直接同步可能覆盖或重复"
-                    "现有生产数据。请先完成字段映射预览，通过校验后再生成可审批的导入操作。"
-                ),
+                "answer": "尚未写入：请先补充唯一编号，并确认字段与人员或工单的对应关系。",
                 "source": "RULES",
                 "model": None,
                 "policyDecision": "REQUIRE_FIELD_MAPPING",
@@ -236,7 +232,7 @@ class NaturalLanguageQueryService:
             if resume is not None:
                 return resume
             return {
-                "answer": "该请求涉及生产状态变更，自然语言接口无权执行。请在对应业务页面发起操作，并按现有安全策略完成校验和人工审批。",
+                "answer": "当前没有可执行的写入工具。请说明要写入人员、订单还是排产。",
                 "source": "POLICY",
                 "model": None,
                 "policyDecision": "DENY_WRITE_INTENT",

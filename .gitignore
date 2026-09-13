@@ -14,6 +14,7 @@ __pycache__/
 desktop/node_modules/
 desktop/dist/
 desktop/release/
+desktop/release-*/
 .ruff_cache/
 .venv/
 dist/

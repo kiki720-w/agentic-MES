@@ -216,15 +216,17 @@ class OpenAICompatibleDiagnosticModel:
                             "当前问题与历史冲突时以当前问题为准。"
                             '不可用模型记忆补充生产事实。只输出 JSON {"answer":"..."}，'
                             "严格服从问题要求的格式，不输出推理过程；不得声称已执行生产动作。"
-                            "事实不足时按问题要求回答无法确定。"
+                            "事实不足时只说明必须补充的字段。默认先给结论，用一至三句自然语言回答，"
+                            "不复述附件、不罗列内部规则、不输出过程说明；除非用户明确要求详细分析，"
+                            "回答控制在两百个汉字以内。"
                         ),
                     },
                     {"role": "user", "content": user_content},
                 ],
-                1536,
+                640,
             )
             answer = _text_field(result, "answer")
-            if not answer or len(answer) > 3000:
+            if not answer or len(answer) > 1200:
                 raise ValueError("invalid answer length")
             self._record_status("VERIFIED")
             return NaturalLanguageAnswer(answer, self._provider, self._model)

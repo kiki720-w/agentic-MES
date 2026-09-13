@@ -72,6 +72,27 @@ async function main() {
         throw new Error("Live synthetic capability check failed in desktop UI");
       }
     }
+    if (pages[index] === "workspace" && process.env.CAPAXION_SMOKE_RESIZE === "1") {
+      const resized = await call("Runtime.evaluate", {
+        expression: `(async()=>{
+          const panel=document.querySelector(".conversation-history");
+          const handle=document.querySelector(".history-resizer");
+          const before=panel.getBoundingClientRect().width;
+          const x=handle.getBoundingClientRect().left+4;
+          handle.dispatchEvent(new PointerEvent("pointerdown",{bubbles:true,clientX:x}));
+          await new Promise(resolve=>setTimeout(resolve,30));
+          document.dispatchEvent(new PointerEvent("pointermove",{bubbles:true,clientX:x+36}));
+          document.dispatchEvent(new PointerEvent("pointerup",{bubbles:true,clientX:x+36}));
+          await new Promise(resolve=>setTimeout(resolve,60));
+          return {before,after:panel.getBoundingClientRect().width};
+        })()`,
+        awaitPromise: true,
+        returnByValue: true,
+      });
+      if (resized.exceptionDetails || resized.result.value.after < resized.result.value.before + 30) {
+        throw new Error("Workspace pane resize did not change the history width");
+      }
+    }
     if (pages[index] === "workspace" && process.env.CAPAXION_SMOKE_ATTACHMENT === "1") {
       const attachmentPath = process.env.CAPAXION_SMOKE_ATTACHMENT_PATH;
       const attachmentName = attachmentPath ? path.basename(attachmentPath) : "ui-smoke.txt";
@@ -93,11 +114,11 @@ async function main() {
             const body=document.body.innerText;
             const parsed=attachment?.textContent.includes(${JSON.stringify(attachmentName)})&&attachment.textContent.includes("已解析");
             const preview=${JSON.stringify(requiresSpreadsheetPreview)}?(
-              body.includes("标准模板预检 ${attachmentName}")||
-              body.includes("结构化导入检查 ${attachmentName}")||
-              body.includes("已识别人员能力表 ${attachmentName}")||
-              body.includes("已识别车工排产表 ${attachmentName}")||
-              body.includes("已识别 3 个工作表")
+              body.includes("可同步到排产")||
+              body.includes("可生成排产")||
+              body.includes("可写入产能管理")||
+              body.includes("项字段需要补充")||
+              body.includes("还无法识别为人员、订单或排产数据")
             ):true;
             const misleadingZero=body.includes("生产数据预检 ${attachmentName}：0 个工单、0 道工序、0 个产能资源");
             const expected=${JSON.stringify(expectedAttachmentText)}?body.includes(${JSON.stringify(expectedAttachmentText)}):true;
@@ -115,7 +136,7 @@ async function main() {
       }
       if (process.env.CAPAXION_SMOKE_ACTION_TEXT) {
         const actionText = process.env.CAPAXION_SMOKE_ACTION_TEXT;
-        const actionExpected = process.env.CAPAXION_SMOKE_ACTION_EXPECT || "EXECUTED_AND_VERIFIED";
+        const actionExpected = process.env.CAPAXION_SMOKE_ACTION_EXPECT || "已执行并核验";
         const action = await call("Runtime.evaluate", {
           expression: `(async()=>{
             let button=null;
@@ -207,7 +228,7 @@ async function main() {
       fs.writeFileSync(path.join(outputRoot, "comparison.png"), Buffer.from(evidenceScreenshot.data, "base64"));
     }
     const state = await call("Runtime.evaluate", {
-      expression: `(()=>{const page=document.querySelector(".native-page");const content=document.querySelector(".content-area");const rect=page?.getBoundingClientRect();return {title:document.querySelector(".page-header h1")?.textContent||document.querySelector(".conversation h1")?.textContent||"",version:document.querySelector(".brand em")?.textContent||"",filePickerVisible:${JSON.stringify(pages[index] === "workspace")}?Boolean(document.querySelector(".file-picker-banner")):null,textLength:document.body.innerText.length,fatal:Boolean(document.querySelector(".fatal-error")),loadError:Boolean(document.querySelector(".error-state")),viewportHeight:document.documentElement.clientHeight,contentHeight:content?.clientHeight||0,pageClientHeight:page?.clientHeight||0,pageScrollHeight:page?.scrollHeight||0,scrollable:Boolean(page&&page.scrollHeight>page.clientHeight+1),scrollPoint:rect?{x:Math.round(rect.left+rect.width/2),y:Math.round(rect.top+Math.min(rect.height/2,240))}:null}})()`,
+      expression: `(()=>{const page=document.querySelector(".native-page");const content=document.querySelector(".content-area");const rect=page?.getBoundingClientRect();return {title:document.querySelector(".page-header h1")?.textContent||document.querySelector(".conversation h1")?.textContent||"",version:document.querySelector(".brand em")?.textContent||"",filePickerVisible:${JSON.stringify(pages[index] === "workspace")}?Boolean(document.querySelector(".composer-file-button")):null,textLength:document.body.innerText.length,fatal:Boolean(document.querySelector(".fatal-error")),loadError:Boolean(document.querySelector(".error-state")),viewportHeight:document.documentElement.clientHeight,contentHeight:content?.clientHeight||0,pageClientHeight:page?.clientHeight||0,pageScrollHeight:page?.scrollHeight||0,scrollable:Boolean(page&&page.scrollHeight>page.clientHeight+1),scrollPoint:rect?{x:Math.round(rect.left+rect.width/2),y:Math.round(rect.top+Math.min(rect.height/2,240))}:null}})()`,
       returnByValue: true,
     });
     const value = state.result.value;
