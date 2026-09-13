@@ -14,6 +14,33 @@ const blockerLabels = {
   MATERIAL_NOT_READY: "存在缺料工单",
   QUALITY_HOLD: "存在质量冻结工单",
 };
+const conversationStorageKey = "capaxion.agent.conversations.v1";
+const welcomeMessage = { role: "agent", text: "你好，我是衡策。你可以直接拖入人员能力表或订单资料，也可以描述生产任务。我会在本机理解资料，在授权范围内写入生产数据、运行排产并回读核验。", meta: "本地制造 Agent · 人工页面始终可以检查和修改" };
+function conversationId() { return globalThis.crypto?.randomUUID?.() || `conversation-${Date.now()}-${Math.random().toString(16).slice(2)}`; }
+function newConversation() { const now = new Date().toISOString(); return { id: conversationId(), title: "新对话", createdAt: now, updatedAt: now, messages: [welcomeMessage] }; }
+function conversationTitle(messages) {
+  const firstUser = messages.find((message) => message.role === "user" && message.text?.trim());
+  const firstTask = messages.slice(1).find((message) => message.text?.trim());
+  const source = firstUser || firstTask;
+  return source ? source.text.replace(/\s+/g, " ").slice(0, 28) : "新对话";
+}
+function loadConversations() {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(conversationStorageKey) || "null");
+    const conversations = Array.isArray(parsed?.conversations) ? parsed.conversations.filter((item) => item?.id && Array.isArray(item.messages)) : [];
+    if (conversations.length) return { conversations, activeId: conversations.some((item) => item.id === parsed.activeId) ? parsed.activeId : conversations[0].id };
+  } catch { /* Start with a clean local history if persisted data is invalid. */ }
+  const initial = newConversation();
+  return { conversations: [initial], activeId: initial.id };
+}
+function historyTime(value) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  const today = new Date();
+  return date.toDateString() === today.toDateString()
+    ? date.toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" })
+    : date.toLocaleDateString("zh-CN", { month: "2-digit", day: "2-digit" });
+}
 function formatBytes(bytes) { if (bytes < 1024) return `${bytes} B`; if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`; return `${(bytes / 1024 / 1024).toFixed(1)} MB`; }
 function containsDraggedFiles(event) { return Array.from(event.dataTransfer?.types || []).includes("Files"); }
 function workbookDescription(metadata) {
@@ -23,7 +50,23 @@ function workbookDescription(metadata) {
 }
 
 export default function AgentWorkspace({ health, actor, onNavigate, incomingDrop, onDropHandled }) {
-  const [messages, setMessages] = useState([{ role: "agent", text: "你好，我是衡策。你可以直接拖入人员能力表或订单资料，也可以描述生产任务。我会在本机理解资料，在授权范围内写入生产数据、运行排产并回读核验。", meta: "本地制造 Agent · 人工页面始终可以检查和修改" }]);
+  const [conversationState, setConversationState] = useState(loadConversations);
+  const activeConversation = conversationState.conversations.find((item) => item.id === conversationState.activeId) || conversationState.conversations[0];
+  const messages = activeConversation?.messages || [welcomeMessage];
+  const setMessages = useCallback((updater) => {
+    setConversationState((current) => {
+      const now = new Date().toISOString();
+      return {
+        ...current,
+        conversations: current.conversations.map((conversation) => {
+          if (conversation.id !== current.activeId) return conversation;
+          const nextMessages = typeof updater === "function" ? updater(conversation.messages) : updater;
+          const boundedMessages = nextMessages.slice(-200).map((message) => ({ ...message, text: String(message.text || "").slice(0, 12000) }));
+          return { ...conversation, title: conversationTitle(boundedMessages), updatedAt: now, messages: boundedMessages };
+        }),
+      };
+    });
+  }, []);
   const [prompt, setPrompt] = useState("");
   const [files, setFiles] = useState([]);
   const [sending, setSending] = useState(false);
@@ -34,7 +77,44 @@ export default function AgentWorkspace({ health, actor, onNavigate, incomingDrop
   const [evidence, setEvidence] = useState([]);
   const endRef = useRef(null);
   const dragDepth = useRef(0);
+  useEffect(() => {
+    try {
+      const conversations = [...conversationState.conversations]
+        .sort((left, right) => String(right.updatedAt).localeCompare(String(left.updatedAt)))
+        .slice(0, 50);
+      localStorage.setItem(conversationStorageKey, JSON.stringify({ conversations, activeId: conversationState.activeId }));
+    } catch { /* Conversation continues even if local storage is unavailable. */ }
+  }, [conversationState]);
   useEffect(() => { endRef.current?.scrollIntoView({ behavior: "smooth" }); }, [messages, sending]);
+
+  function resetTaskState() {
+    setPrompt(""); setFiles([]); setSpreadsheetPreview(null); setCapacityPreview(null);
+    setPendingOrderInstruction(""); setEvidence([]);
+  }
+
+  function createConversation() {
+    if (sending) return;
+    const conversation = newConversation();
+    setConversationState((current) => ({ conversations: [conversation, ...current.conversations].slice(0, 50), activeId: conversation.id }));
+    resetTaskState();
+  }
+
+  function selectConversation(id) {
+    if (sending || id === conversationState.activeId) return;
+    setConversationState((current) => ({ ...current, activeId: id }));
+    resetTaskState();
+  }
+
+  function deleteConversation(id) {
+    if (sending) return;
+    setConversationState((current) => {
+      const remaining = current.conversations.filter((item) => item.id !== id);
+      if (remaining.length) return { conversations: remaining, activeId: current.activeId === id ? remaining[0].id : current.activeId };
+      const conversation = newConversation();
+      return { conversations: [conversation], activeId: conversation.id };
+    });
+    if (id === conversationState.activeId) resetTaskState();
+  }
 
   const processFiles = useCallback(async (picked, source = "选择") => {
     if (!picked.length) return;
@@ -267,7 +347,8 @@ export default function AgentWorkspace({ health, actor, onNavigate, incomingDrop
     setDragActive(false);
   }
 
-  return <div className={`workspace-layout ${dragActive ? "file-drag-active" : ""}`} onDragEnter={handleDragEnter} onDragOver={(event) => { if (containsDraggedFiles(event)) event.preventDefault(); }} onDragLeave={handleDragLeave} onDrop={handleDrop}>{dragActive && <div className="file-drop-overlay"><span>⇩</span><strong>松开以添加并解析文件</strong><small>文字 / 表格 / DOCX / PDF / 图片 OCR 均在本机处理</small></div>}<main className="conversation">
+  const history = [...conversationState.conversations].sort((left, right) => String(right.updatedAt).localeCompare(String(left.updatedAt)));
+  return <div className={`workspace-layout ${dragActive ? "file-drag-active" : ""}`} onDragEnter={handleDragEnter} onDragOver={(event) => { if (containsDraggedFiles(event)) event.preventDefault(); }} onDragLeave={handleDragLeave} onDrop={handleDrop}>{dragActive && <div className="file-drop-overlay"><span>⇩</span><strong>松开以添加并解析文件</strong><small>文字 / 表格 / DOCX / PDF / 图片 OCR 均在本机处理</small></div>}<aside className="conversation-history"><div className="conversation-history-head"><div><small>AGENT MEMORY</small><strong>任务对话</strong></div><button onClick={createConversation} disabled={sending} title="新建对话">＋</button></div><div className="conversation-history-list">{history.map((conversation) => { const last = conversation.messages.at(-1); return <article className={conversation.id === conversationState.activeId ? "active" : ""} key={conversation.id}><button className="conversation-history-main" onClick={() => selectConversation(conversation.id)} disabled={sending}><span><strong>{conversation.title}</strong><time>{historyTime(conversation.updatedAt)}</time></span><small>{last?.text || "尚无消息"}</small></button><button className="conversation-history-delete" onClick={() => deleteConversation(conversation.id)} disabled={sending} title="删除对话">×</button></article>; })}</div><p>记录保存在本机，包含附件名称、方案编号和执行结果。</p></aside><main className="conversation">
     <PageHeader eyebrow="LOCAL MANUFACTURING AGENT" title="今天需要处理什么？" description="拖入生产资料或直接下达任务；衡策会理解、写入、排产并核验，人工页面保留修改权。" actions={<><button className="button" onClick={() => onNavigate("models")}>切换本地 / DeepSeek</button><div className={`connection-pill ${health?.online ? "ok" : "bad"}`}><span />{health?.online ? "本地生产数据已连接" : "等待 Core"}</div></>} />
     <div className="quick-prompts">{quickPrompts.map((item) => <button key={item} onClick={() => send(item)}>{item}<span>↗</span></button>)}</div>
     <div className="messages">{messages.map((message, index) => <article className={`message ${message.role}`} key={`${message.role}-${index}`}><div className="message-avatar">{message.role === "agent" ? "衡" : message.role === "user" ? "我" : "!"}</div><div className="message-content"><div>{message.text}</div>{message.action === "execute-capacity" && capacityPreview?.valid && <button className="message-action" onClick={executeCapacityImport}>写入产能管理并核验</button>}{message.action === "confirm-spreadsheet" && spreadsheetPreview?.valid && <button className="message-action" onClick={confirmSpreadsheet}>确认导入并生成排产方案</button>}{message.action === "open-results" && <button className="message-action" onClick={() => onNavigate("results")}>打开排产结果</button>}{message.action === "open-capacity" && <button className="message-action" onClick={() => onNavigate("capacity")}>打开产能管理</button>}<small>{message.meta}</small></div></article>)}{sending && <article className="message agent"><div className="message-avatar">衡</div><div className="thinking"><span /><span /><span /></div></article>}<div ref={endRef} /></div>

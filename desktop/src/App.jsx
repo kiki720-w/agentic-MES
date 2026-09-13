@@ -77,7 +77,7 @@ export default function App() {
   return <ErrorBoundary><div className="app-shell">
     <Sidebar active={active} onChange={setActive} online={health.online} agentLevel={health.detail?.schedulingAgentLevel} actor={actor} profiles={profiles} onActorChange={setActor} />
     <section className="app-main"><header className="titlebar drag-region"><div><span>{item.label}</span><small>{item.hint}</small></div><div className="titlebar-actions no-drag"><div className="zoom-control" title="界面缩放"><button disabled={zoom <= 100} onClick={async () => setZoom(await desktop.window.zoom(-0.1))}>A−</button><span>{zoom}%</span><button disabled={zoom >= 140} onClick={async () => setZoom(await desktop.window.zoom(0.1))}>A＋</button></div><span className="environment"><i />LOCAL FACTORY</span><WindowControls /></div></header><div className="content-area">
-      {active === "workspace" && <AgentWorkspace health={health} incomingDrop={incomingDrop} onDropHandled={(id) => setIncomingDrop((current) => current?.id === id ? null : current)} {...pageProps} />}
+      <div className="workspace-page" hidden={active !== "workspace"}><AgentWorkspace health={health} incomingDrop={incomingDrop} onDropHandled={(id) => setIncomingDrop((current) => current?.id === id ? null : current)} {...pageProps} /></div>
       {active === "tower" && <ControlTower {...pageProps} />}
       {active === "planning" && <PlanningCenter {...pageProps} />}
       {active === "results" && <PlanningResults {...pageProps} />}
