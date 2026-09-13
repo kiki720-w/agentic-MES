@@ -177,6 +177,7 @@ function registerIpc() {
   });
   ipcMain.handle("core:upload", async (_event, request = {}) => {
     const apiPath = validateCorePath(request.path);
+    const endpointPath = new URL(apiPath, CORE_ENDPOINT).pathname;
     let selected = selectedFiles.get(String(request.fileId || ""));
     if (!selected && request.filePath) {
       const requestedPath = path.resolve(String(request.filePath));
@@ -185,14 +186,14 @@ function registerIpc() {
     if (!selected) throw new Error("File was not selected or dropped in CAPAXION");
     const extension = path.extname(selected.name).toLowerCase();
     const content = selected.content || fs.readFileSync(selected.path);
-    if (apiPath === "/api/v1/planning/imports/spreadsheet/preview") {
+    if (endpointPath === "/api/v1/planning/imports/spreadsheet/preview") {
       if (![".xlsx", ".csv"].includes(extension) || content.length > 5 * 1024 * 1024) {
         throw new Error("Spreadsheet must be XLSX or CSV and no larger than 5 MB");
       }
-    } else if (apiPath === "/api/v1/agent/attachments/parse") {
+    } else if (endpointPath === "/api/v1/agent/attachments/parse") {
       if (content.length > 15 * 1024 * 1024) throw new Error("Attachment exceeds 15 MB");
     } else {
-      throw new Error("File upload path is outside the desktop attachment boundary");
+      throw new Error("文件上传地址超出桌面端允许范围");
     }
     const headers = new Headers(request.headers || {});
     headers.set("Content-Type", "application/octet-stream");
@@ -202,7 +203,7 @@ function registerIpc() {
       method: "POST",
       headers,
       body: content,
-      signal: AbortSignal.timeout(apiPath === "/api/v1/agent/attachments/parse" ? 120000 : 30000),
+      signal: AbortSignal.timeout(endpointPath === "/api/v1/agent/attachments/parse" ? 120000 : 30000),
     });
     const payload = await response.json().catch(() => null);
     if (!response.ok) {

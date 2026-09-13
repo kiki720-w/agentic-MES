@@ -73,16 +73,27 @@ async function main() {
       }
     }
     if (pages[index] === "workspace" && process.env.CAPAXION_SMOKE_ATTACHMENT === "1") {
+      const attachmentPath = process.env.CAPAXION_SMOKE_ATTACHMENT_PATH;
+      const attachmentName = attachmentPath ? path.basename(attachmentPath) : "ui-smoke.txt";
+      const attachmentBytes = attachmentPath
+        ? fs.readFileSync(attachmentPath).toString("base64")
+        : Buffer.from("工单编号：WO-UI-401，计划数量：41件。", "utf8").toString("base64");
+      const requiresSpreadsheetPreview = /\.(xlsx|csv)$/i.test(attachmentName);
       const attachment = await call("Runtime.evaluate", {
         expression: `(async()=>{
+          const binary=atob(${JSON.stringify(attachmentBytes)});
+          const bytes=Uint8Array.from(binary,character=>character.charCodeAt(0));
           const transfer=new DataTransfer();
-          transfer.items.add(new File(["工单编号：WO-UI-401，计划数量：41件。"],"ui-smoke.txt",{type:"text/plain"}));
+          transfer.items.add(new File([bytes],${JSON.stringify(attachmentName)}));
           window.dispatchEvent(new DragEvent("drop",{dataTransfer:transfer,bubbles:true,cancelable:true}));
-          for(let i=0;i<80;i++){
+          for(let i=0;i<240;i++){
             await new Promise(resolve=>setTimeout(resolve,250));
             const attachment=document.querySelector(".attachments");
-            if(attachment?.textContent.includes("ui-smoke.txt")&&attachment.textContent.includes("已解析")){
-              return {parsed:true,text:attachment.textContent};
+            const body=document.body.innerText;
+            const parsed=attachment?.textContent.includes(${JSON.stringify(attachmentName)})&&attachment.textContent.includes("已解析");
+            const preview=${JSON.stringify(requiresSpreadsheetPreview)}?body.includes("生产数据预检 ${attachmentName}"):true;
+            if(parsed&&preview){
+              return {parsed:true,preview,text:attachment.textContent};
             }
           }
           return {parsed:false,text:document.body.innerText};
