@@ -38,6 +38,9 @@ ATTACHMENT_SYNC_INTENT = re.compile(
     r"(?:人员|工单|MES).{0,16}(?:同步|导入|写入|更新)",
     re.IGNORECASE,
 )
+UNUSABLE_ATTACHMENT_ANSWER = re.compile(
+    r"^(?:无法确定|无法从(?:附件|当前|提供的)?(?:内容|信息|数据|证据).{0,20}(?:确定|回答))[。！!]?$"
+)
 MAX_ATTACHMENT_CONTEXT_CHARACTERS = 1_800
 
 
@@ -203,6 +206,10 @@ class NaturalLanguageQueryService:
             )
         try:
             result = self._model.answer(question, facts)
+            if attachment_summaries and UNUSABLE_ATTACHMENT_ANSWER.match(result.answer.strip()):
+                return self._fallback(
+                    as_of, objects, orders, equipment, inspections, attachment_summaries
+                )
             return {
                 "answer": result.answer,
                 "source": result.source,
@@ -407,7 +414,7 @@ class NaturalLanguageQueryService:
                 name = str(item.get("name", "附件"))
                 summaries.append(f"【{name}】\n{summary or '已提取内容，但没有结构化摘要。'}")
             attachment_note = (
-                "本地模型本次未完成生成。以下是本机解析器已确认的内容：\n"
+                "本地模型本次未给出可用答案。以下是本机解析器已确认的内容：\n"
                 + "\n\n".join(summaries)
             )
         return {

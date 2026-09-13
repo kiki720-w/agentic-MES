@@ -201,6 +201,23 @@ class NaturalLanguageQueryTests(unittest.TestCase):
         self.assertIn("每日计划", result["answer"])
         self.assertNotIn("不能解释附件内容", result["answer"])
 
+    def test_unusable_model_answer_returns_deterministic_attachment_summary(self) -> None:
+        model = Mock()
+        model.answer.return_value = NaturalLanguageAnswer("无法确定", "LOCAL", "small-local")
+        service = NaturalLanguageQueryService(InMemoryWorkOrderStore(), model)
+
+        result = service.ask("列出一个人员和工时", [{
+            "name": "计划.xlsx",
+            "kind": "WORKBOOK",
+            "parser": "LOCAL_DOCLING_XLSX",
+            "sha256": "c" * 64,
+            "summary": "人员=王师傅；8小时工时=160",
+            "text": "人员=王师傅；8小时工时=160",
+        }])
+
+        self.assertEqual("RULES", result["source"])
+        self.assertIn("王师傅", result["answer"])
+
     def test_attachment_sync_requires_field_mapping_before_write(self) -> None:
         model = Mock()
         service = NaturalLanguageQueryService(InMemoryWorkOrderStore(), model)
