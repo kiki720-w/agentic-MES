@@ -66,7 +66,7 @@ export default function ControlTower({ actor, onNavigate }) {
         <Panel title="系统与模型" subtitle="本地控制层的运行边界">
           <div className="system-list">
             <div><span className="system-dot online" /><div><strong>CAPAXION Core</strong><small>本地制造数据与规则服务</small></div><b>已连接</b></div>
-            <div><span className={`system-dot ${data.model.apiKeyConfigured ? "online" : "warning"}`} /><div><strong>{data.model.provider}</strong><small>{data.model.model}</small></div><b>{statusLabel(data.model.connectionStatus)}</b></div>
+            <div><span className={`system-dot ${data.model.connectionStatus === "VERIFIED" ? "online" : "warning"}`} /><div><strong>{data.model.provider}</strong><small>{data.model.model}</small></div><b>{statusLabel(data.model.connectionStatus)}</b></div>
             <div><span className="system-dot warning" /><div><strong>企业系统连接器</strong><small>当前使用演示投影</small></div><b>待配置</b></div>
           </div>
         </Panel>

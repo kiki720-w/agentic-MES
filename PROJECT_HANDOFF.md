@@ -5,7 +5,7 @@
 更新时间：2026-09-13  
 项目目录：D:\mes  
 GitHub：https://github.com/kiki720-w/capaxion
-功能基线：main @ `898390f`（桌面长页面滚动修复）
+功能基线：本次最小文字能力验收门（详见 docs/minimum-ai-acceptance.md）
 当前分支：main
 
 ## 新对话先读这里
@@ -108,7 +108,7 @@ GitHub：https://github.com/kiki720-w/capaxion
 以下状态已经在 2026-09-13 通过代码和本机调用核对：
 
 - **文字接口**：`POST /api/v1/agent/chat` 已完成，能把最多 50 个工单、50 台设备和 50 项质量记录组成只读快照交给模型，也能用确定性规则识别部分排产、异常、质量和写操作意图。
-- **当前模型状态**：服务器配置为 DeepSeek `deepseek-v4-flash`，但一次真实调用返回 `source=RULES`，模型状态变为 `DEGRADED`、`lastError=ValueError`。这表示系统安全降级正常，但不能宣称 DeepSeek 文字能力已经验收通过。应先定位响应 JSON 解析或输出约束问题。
+- **当前模型状态**：服务器配置为 DeepSeek `deepseek-v4-flash`，此前一次真实调用曾返回 `source=RULES`、`DEGRADED/ValueError`。本次旧适配器合成连接测试未重现该错误；已按官方协议关闭只读解释路径的默认思考模式、开启 JSON 输出，增加预算并拒绝截断、空回答及非字符串字段。修复后真实三项合成文字自检全部通过，状态为 `VERIFIED`。这只证明最小文字基准通过，不能宣称生产准确率、多模态或完整会话已验收。
 - **多轮对话**：桌面端显示对话历史，但当前请求只向 Core 发送本轮 `question`，尚未把受控对话历史、引用对象和任务状态一起发送，因此还不是完整的连续会话 Agent。
 - **XLSX / CSV**：已经是真实可用的本地确定性解析、字段校验、指纹确认、快照生成和排产入口；它不是大模型“看懂 Excel”。桌面上传限制为用户明确选择且不超过 5 MB 的 XLSX/CSV。
 - **PDF**：目前只能选择并显示文件名，没有文本抽取、表格解析、OCR、页面渲染、引用定位或模型输入。
@@ -144,12 +144,12 @@ DeepSeek 当前官方视觉路线需要单独的视觉模型，例如 `deepseek-
 
 ## 接下来推荐的开发顺序
 
-### 当前最小验收门：把“已配置”变成“已验证”
+### 当前最小验收门：把“已配置”变成“已验证”（本次已完成最小实现与实测）
 
-- 修复 DeepSeek `deepseek-v4-flash` 返回内容与当前 JSON 解析器之间的 `ValueError`，保留安全规则降级。
-- 模型状态页区分 `CONFIGURED`、`VERIFIED`、`DEGRADED` 和 `DISABLED`，不得把有 Key 等同于可用。
-- 给 Agent 工作台增加可追溯的能力自检入口和最小文字基准集。
-- 修改附件提示，明确 XLSX/CSV 已处理、PDF/图片待能力接入，避免界面承诺超过真实实现。
+- 已加固 DeepSeek 输出协议与解析，保留安全规则降级；历史 ValueError 没有原始响应证据，不能断言唯一根因。
+- 已区分 `CONFIGURED`、`VERIFIED`、`DEGRADED` 和 `DISABLED`，记录最近成功时间与失败次数；VERIFIED 表示请求结构验证成功，不代表生产事实全部正确。
+- 桌面与网页 Agent 工作台已加入三项合成文字自检。报告保存在 `core/.capaxion/capability-checks/`（Git 忽略），含运行 ID、操作者、版本、输入与回答指纹、判定及耗时。报告不保存回答原文，不是防篡改审计。
+- 已修正附件提示：XLSX/CSV 本地预检；PDF/图片仅选择/预览，未解析；文字请求不发送附件或历史。
 - 在这一步通过前，不对外宣传完整的多模态制造 Agent。
 
 ### 第 40 步：生产身份收口
@@ -205,9 +205,9 @@ DeepSeek 当前官方视觉路线需要单独的视觉模型，例如 `deepseek-
 - Python 3.12、FastAPI、PostgreSQL、SQLAlchemy、Alembic。
 - 开发 API 地址：http://127.0.0.1:8000
 - 当前模型网关：由服务器环境变量决定；不要在续接文档中写入密钥。
-- 最近完整回归：92 passed，5 skipped；Ruff 和 mypy 通过。
+- 最近完整回归：101 passed，5 skipped；Ruff 和 mypy 通过。
 - 桌面六页最终 EXE 验收：页面加载无异常；五个长页面的真实滚轮滚动全部通过。
-- 本地 D 盘启动脚本：scripts/start-api-postgres.ps1
+- 本地 D 盘启动脚本：core/scripts/start-api-postgres.ps1
 - 核心代码：core/src/autonomous_mes
 - 关键模型网关：core/src/autonomous_mes/infrastructure/deepseek_gateway.py
 - 关键 API 装配：core/src/autonomous_mes/api.py
@@ -232,6 +232,6 @@ DeepSeek 当前官方视觉路线需要单独的视觉模型，例如 `deepseek-
 
 将下面这段话作为新对话的第一条消息：
 
-> 请继续开发 D:\mes 中的 CAPAXION（Manufacturing Decision OS）。先完整阅读 D:\mes\PROJECT_HANDOFF.md 和 D:\mes\README.md，再检查 git status、最近提交及现有测试。继承已经确认的产品定位、安全边界、L3 Agent、供应商中立模型网关、本地数据不出厂方向和 WorkBuddy 式原生桌面体验，不要重新从传统 MES 开始设计，也不要记录或暴露任何 API Key。注意当前只有 XLSX/CSV 进入真实文件处理，PDF/图片尚未理解；DeepSeek 已配置但最近一次真实文字调用降级为规则结果，状态为 DEGRADED/ValueError。先完成文档中“当前最小验收门”里不需要产品决策的工作，保持规则降级和审批边界；只有遇到会改变产品方向、真实外部系统选择、身份提供商选择、云端数据出厂策略或不可逆操作时再停下来询问。
+> 请继续开发 D:\mes 中的 CAPAXION（Manufacturing Decision OS）。先完整阅读 D:\mes\PROJECT_HANDOFF.md 和 D:\mes\README.md，再检查 git status、最近提交及现有测试。继承已经确认的产品定位、安全边界、L3 Agent、供应商中立模型网关、本地数据不出厂方向和 WorkBuddy 式原生桌面体验，不要重新从传统 MES 开始设计，也不要记录或暴露任何 API Key。注意当前只有 XLSX/CSV 进入真实文件处理，PDF/图片尚未理解；DeepSeek 曾降级为 DEGRADED/ValueError，本次协议加固后真实三项合成文字自检已通过，状态 VERIFIED，但未验收生产准确率。先核对 docs/minimum-ai-acceptance.md 的最小验收记录，再推进第 40 步中不依赖企业身份提供商选择的工作，保持规则降级和审批边界；只有遇到会改变产品方向、真实外部系统选择、身份提供商选择、云端数据出厂策略或不可逆操作时再停下来询问。
 
 如果第二个对话不在本机项目上下文中，可以直接发送本文件，或让它从 GitHub main 分支读取 PROJECT_HANDOFF.md。

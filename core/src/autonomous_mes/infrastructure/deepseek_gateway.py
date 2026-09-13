@@ -13,6 +13,21 @@ from autonomous_mes.application.model_gateway import (
 )
 
 
+class TruncatedModelResponse(ValueError):
+    """Output budget exhausted; partial output must never be accepted."""
+
+
+class EmptyModelResponse(ValueError):
+    """Provider returned no final answer."""
+
+
+def _text_field(result: dict[str, Any], key: str) -> str:
+    value = result[key]
+    if not isinstance(value, str):
+        raise TypeError("model field must be text")
+    return value.strip()
+
+
 def _json_object(content: str) -> dict[str, Any]:
     value = content.strip()
     if value.startswith("```"):
@@ -46,9 +61,11 @@ class OpenAICompatibleDiagnosticModel:
         self._timeout = timeout_seconds
         self._provider = provider.strip().upper()
         self._status_lock = Lock()
-        self._connection_status = "NOT_TESTED"
+        self._connection_status = "CONFIGURED"
         self._last_checked_at: str | None = None
         self._last_error: str | None = None
+        self._last_success_at: str | None = None
+        self._failure_count = 0
 
     def status(self) -> dict[str, object]:
         with self._status_lock:
@@ -60,6 +77,8 @@ class OpenAICompatibleDiagnosticModel:
                 "connectionStatus": self._connection_status,
                 "lastCheckedAt": self._last_checked_at,
                 "lastError": self._last_error,
+                "lastSuccessAt": self._last_success_at,
+                "failureCount": self._failure_count,
             }
 
     def _record_status(self, status: str, error: str | None = None) -> None:
@@ -67,14 +86,21 @@ class OpenAICompatibleDiagnosticModel:
             self._connection_status = status
             self._last_checked_at = datetime.now(UTC).isoformat()
             self._last_error = error
+            if status == "VERIFIED":
+                self._last_success_at = self._last_checked_at
+            elif status == "DEGRADED":
+                self._failure_count += 1
 
     def _request(self, messages: list[dict[str, str]], max_tokens: int) -> dict[str, Any]:
-        payload = {
+        payload: dict[str, Any] = {
             "model": self._model,
             "messages": messages,
             "max_tokens": max_tokens,
             "temperature": 0.1,
         }
+        if self._provider == "DEEPSEEK":
+            payload["thinking"] = {"type": "disabled"}
+            payload["response_format"] = {"type": "json_object"}
         response = httpx.post(
             f"{self._base_url}/chat/completions",
             headers={"Authorization": f"Bearer {self._api_key}"},
@@ -83,7 +109,14 @@ class OpenAICompatibleDiagnosticModel:
         )
         response.raise_for_status()
         body: dict[str, Any] = response.json()
-        content = body["choices"][0]["message"]["content"]
+        choice = body["choices"][0]
+        if not isinstance(choice, dict):
+            raise TypeError("model choice must be an object")
+        if choice.get("finish_reason") == "length":
+            raise TruncatedModelResponse()
+        content = choice["message"]["content"]
+        if content == "":
+            raise EmptyModelResponse()
         if not isinstance(content, str):
             raise TypeError("model response content must be text")
         return _json_object(content)
@@ -103,10 +136,10 @@ class OpenAICompatibleDiagnosticModel:
                     },
                     {"role": "user", "content": json.dumps(facts.__dict__, ensure_ascii=False)},
                 ],
-                320,
+                1024,
             )
-            diagnosis = str(result["diagnosis"]).strip()
-            recommendation = str(result["recommendation"]).strip()
+            diagnosis = _text_field(result, "diagnosis")
+            recommendation = _text_field(result, "recommendation")
             if (
                 not diagnosis
                 or not recommendation
@@ -114,7 +147,7 @@ class OpenAICompatibleDiagnosticModel:
                 or len(recommendation) > 800
             ):
                 raise ValueError("invalid narrative length")
-            self._record_status("CONNECTED")
+            self._record_status("VERIFIED")
             return DiagnosticNarrative(
                 diagnosis, recommendation, self._provider, self._model
             )
@@ -149,12 +182,12 @@ class OpenAICompatibleDiagnosticModel:
                         ),
                     },
                 ],
-                700,
+                1536,
             )
-            answer = str(result["answer"]).strip()
+            answer = _text_field(result, "answer")
             if not answer or len(answer) > 3000:
                 raise ValueError("invalid answer length")
-            self._record_status("CONNECTED")
+            self._record_status("VERIFIED")
             return NaturalLanguageAnswer(answer, self._provider, self._model)
         except (
             httpx.HTTPError,
@@ -253,6 +286,8 @@ class ConfigurableModelGateway:
                 "connectionStatus": "DISABLED",
                 "lastCheckedAt": None,
                 "lastError": None,
+                "lastSuccessAt": None,
+                "failureCount": 0,
             }
         return {**adapter.status(), "configurationSource": source}
 

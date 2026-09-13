@@ -120,7 +120,7 @@ function registerIpc() {
       method,
       headers,
       body: request.body === undefined ? undefined : JSON.stringify(request.body),
-      signal: AbortSignal.timeout(30000),
+      signal: AbortSignal.timeout(apiPath === "/api/v1/agent/capability-check" ? 370000 : 30000),
     });
     const text = await response.text();
     let payload;

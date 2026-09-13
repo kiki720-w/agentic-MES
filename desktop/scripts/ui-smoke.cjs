@@ -45,6 +45,26 @@ async function main() {
       expression: `document.querySelectorAll(".sidebar nav button")[${index}]?.click()`,
     });
     await wait(1600);
+    if (pages[index] === "workspace" && process.env.CAPAXION_SMOKE_SELF_CHECK === "1") {
+      const check = await call("Runtime.evaluate", {
+        expression: `(async()=>{
+          const button=[...document.querySelectorAll(".quick-prompts button")].find(b=>b.textContent.includes("文字能力自检"));
+          if(!button) throw new Error("Capability check entry missing");
+          button.click();
+          for(let i=0;i<120;i++){
+            await new Promise(resolve=>setTimeout(resolve,500));
+            const text=document.querySelector(".messages")?.textContent||"";
+            if(text.includes("text-smoke-v1")) return {passed:text.includes("文字自检：通过"),evidence:text.includes("证据已保存到本机 Core")};
+          }
+          throw new Error("Capability check did not complete");
+        })()`,
+        awaitPromise: true,
+        returnByValue: true,
+      });
+      if (check.exceptionDetails || !check.result.value?.passed || !check.result.value?.evidence) {
+        throw new Error("Live synthetic capability check failed in desktop UI");
+      }
+    }
     const state = await call("Runtime.evaluate", {
       expression: `(()=>{const page=document.querySelector(".native-page");const content=document.querySelector(".content-area");const rect=page?.getBoundingClientRect();return {title:document.querySelector(".page-header h1")?.textContent||document.querySelector(".conversation h1")?.textContent||"",textLength:document.body.innerText.length,fatal:Boolean(document.querySelector(".fatal-error")),loadError:Boolean(document.querySelector(".error-state")),viewportHeight:document.documentElement.clientHeight,contentHeight:content?.clientHeight||0,pageClientHeight:page?.clientHeight||0,pageScrollHeight:page?.scrollHeight||0,scrollable:Boolean(page&&page.scrollHeight>page.clientHeight+1),scrollPoint:rect?{x:Math.round(rect.left+rect.width/2),y:Math.round(rect.top+Math.min(rect.height/2,240))}:null}})()`,
       returnByValue: true,

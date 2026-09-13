@@ -22,6 +22,10 @@
 - 工时模型：工序需求 = 准备工时 + 剩余数量 × 单件工时，缺失时才使用排产回退值
 - 大样本界面：输入、产能、计算与全宽结果分离，长表按搜索和分页查看
 
+## 最小文字能力验收
+
+桌面和网页 Agent 工作台提供“文字能力自检”，使用三项固定合成样本验证事实引用、缺失事实和计算。DeepSeek `deepseek-v4-flash` 本次实测 3/3 通过；模型状态区分 CONFIGURED / VERIFIED / DEGRADED / DISABLED，失败继续安全降级。VERIFIED 仅表示请求有效，生产准确率、PDF/图片理解和完整多轮会话尚未验收。报告保存在本机 `core/.capaxion/capability-checks/`，不提交 Git。详见 [验收记录](docs/minimum-ai-acceptance.md)。
+
 ## 当前交付物
 
 - PROJECT_HANDOFF.md：新对话续接所需的产品决策、当前状态、安全边界和开发顺序

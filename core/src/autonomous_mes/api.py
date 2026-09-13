@@ -21,6 +21,7 @@ from autonomous_mes.application.agent_tools import (
     ListQualityCandidatesTool,
     ToolContext,
 )
+from autonomous_mes.application.capability_check import run_text_check
 from autonomous_mes.application.connector_security import HmacConnectorAuthenticator
 from autonomous_mes.application.equipment import (
     EquipmentApplicationService,
@@ -664,10 +665,11 @@ def live() -> dict[str, str]:
 
 @app.get("/health/ready")
 def ready() -> dict[str, str]:
-    gateway_enabled = bool(model_gateway.status()["apiKeyConfigured"])
+    gateway_status = model_gateway.status()
+    gateway_enabled = bool(gateway_status["apiKeyConfigured"])
     return {
         "status": "READY",
-        "modelGateway": "CONFIGURED" if gateway_enabled else "DISABLED",
+        "modelGateway": str(gateway_status["connectionStatus"]),
         "agentRuntime": "MODEL_WITH_RULES_FALLBACK" if gateway_enabled else "RULES_ONLY",
         "storageBackend": settings.storage_backend,
         "agentLevel": "L3_EXPERIMENTAL" if settings.agent_l3_execution_enabled else "L2",
@@ -759,6 +761,18 @@ def disable_model_gateway_configuration(
 ) -> dict[str, object]:
     authorize_human(identity, "SUPERVISOR", "MASTER_DATA_ADMIN")
     return model_gateway.disable()
+
+
+@app.post("/api/v1/agent/capability-check")
+def agent_capability_check(
+    identity: Annotated[Identity, Depends(current_identity)],
+) -> dict[str, object]:
+    authorize_human(identity, "SUPERVISOR", "PLANNER", "QUALITY", "OPERATOR")
+    report = run_text_check(
+        model_gateway, identity.subject_id, model_gateway.status(),
+        Path(__file__).resolve().parents[2] / ".capaxion" / "capability-checks",
+    )
+    return {**report, "modelStatus": model_gateway.status()}
 
 
 @app.post("/api/v1/agent/chat")

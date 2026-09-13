@@ -28,10 +28,11 @@ class DeepSeekGatewayTests(unittest.TestCase):
         result = gateway.explain(facts())
 
         self.assertEqual("DEEPSEEK", result.source)
-        self.assertEqual("CONNECTED", gateway.status()["connectionStatus"])
+        self.assertEqual("VERIFIED", gateway.status()["connectionStatus"])
         request = post.call_args.kwargs["json"]
         self.assertNotIn("tools", request)
-        self.assertNotIn("response_format", request)
+        self.assertEqual({"type": "json_object"}, request["response_format"])
+        self.assertEqual({"type": "disabled"}, request["thinking"])
         self.assertNotIn("secret", json.dumps(gateway.status()))
 
     @patch("autonomous_mes.infrastructure.deepseek_gateway.httpx.post")
@@ -53,7 +54,7 @@ class DeepSeekGatewayTests(unittest.TestCase):
         )
 
         self.assertEqual("KIMI", status["provider"])
-        self.assertEqual("CONNECTED", status["connectionStatus"])
+        self.assertEqual("VERIFIED", status["connectionStatus"])
         self.assertTrue(status["apiKeyConfigured"])
         self.assertNotIn("customer-secret", json.dumps(status))
         self.assertEqual(
