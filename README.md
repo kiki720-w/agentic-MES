@@ -6,15 +6,15 @@
 
 ## L4 排产自治运行时（2026-09-13）
 
-桌面 0.4.6 与 Core 已实现排产域第一条 L4 目标闭环：观察、计划、策略授权、幂等执行、回读核验、失败回滚和停止开关。默认处于 SHADOW、循环关闭、执行目标为空；真实验证会拒绝演示投影、缺工艺标准、能力缺口和非原子计划替换。模拟适配器只用于自动测试，尚未接入真实 MES 写回，因此当前声明为 `L4_RUNTIME_IMPLEMENTED_NOT_PRODUCTION_VALIDATED`。详见 [L4 排产运行时说明](docs/l4-scheduling-runtime.md)。
+桌面 0.4.7 与 Core 已实现排产域第一条 L4 目标闭环：观察、计划、策略授权、幂等执行、回读核验、失败回滚和停止开关。默认处于 SHADOW、循环关闭、执行目标为空；真实验证会拒绝演示投影、缺工艺标准、能力缺口和非原子计划替换。模拟适配器只用于自动测试，尚未接入真实 MES 写回，因此当前声明为 `L4_RUNTIME_IMPLEMENTED_NOT_PRODUCTION_VALIDATED`。详见 [L4 排产运行时说明](docs/l4-scheduling-runtime.md)。
 
-Agent 工作台是制造任务主入口：全窗口拖入、本机解析、结构化预检、授权写入和回读核验在一个对话中完成。附件保存在本机内容寻址文档库中，并按问题检索带工作表、页码或章节来源的片段，不再只读取文件开头。人员能力表可以自动映射为产能资源，重复导入会按稳定人员编号更新而不会重复新增；自然语言新订单由当前模型转换为受校验的动作，随后创建工单并运行有限产能排产。XLSX 使用 Docling 和 openpyxl 的离线结构识别；文字、DOCX、PDF 和图片 OCR 仍可作为任务资料。产能、排产和结果页面保留人工检查与修改。详见 [工作台文档理解架构](docs/workbench-document-intelligence.md)、[本地附件拖放与理解](docs/local-attachment-understanding.md)和 [Agent 主导的本地生产闭环](docs/local-manufacturing-agent.md)。
+Agent 工作台是制造任务主入口：全窗口拖入、本机解析、结构化预检、授权写入和回读核验在一个对话中完成。附件保存在本机内容寻址文档库中，并按问题检索带工作表、页码或章节来源的片段，不再只读取文件开头。人员能力表可以自动映射为产能资源，重复导入会按稳定人员编号更新而不会重复新增；车工计划表会优先读取“车工每日计划”，排除完成记录，并把未完成行转换为排产快照。自然语言新订单由当前模型转换为受校验的动作，随后创建工单并运行有限产能排产。XLSX 使用 Docling 和 openpyxl 的离线结构识别；文字、DOCX、PDF 和图片 OCR 仍可作为任务资料。产能、排产和结果页面保留人工检查与修改。详见 [工作台文档理解架构](docs/workbench-document-intelligence.md)、[本地附件拖放与理解](docs/local-attachment-understanding.md)和 [Agent 主导的本地生产闭环](docs/local-manufacturing-agent.md)。
 
 早期自建 MES 流程仍保留为离线模拟器和回归测试夹具，不再作为正式产品入口或权威生产数据源。
 
 ## 本地 AI 与云端 MES 的独立网络边界（2026-09-13）
 
-桌面 0.4.6 与 Core 默认使用本机 Qwen3 8B Q4_K_M；部署配置已可选择性授权 DeepSeek API，且不会自动回退到云端。工作台携带最近 10 轮会话，并保留等待补齐的订单任务。当前规则辅助制造基准通过 9/9，中位耗时 472 ms；历史 4B 原始模型的 6/9 结果继续保留，不能与系统任务路径混为一谈。该结果只适用于固定合成题，不等于生产准确率。详见 [准确率优化记录](docs/manufacturing-accuracy.md)和[网络边界说明](docs/independent-network-boundaries.md)。
+桌面 0.4.7 与 Core 默认使用本机 Qwen3 8B Q4_K_M；部署配置已可选择性授权 DeepSeek API，且不会自动回退到云端。工作台携带最近 10 轮会话，并保留等待补齐的订单任务。当前规则辅助制造基准通过 9/9，中位耗时 472 ms；历史 4B 原始模型的 6/9 结果继续保留，不能与系统任务路径混为一谈。该结果只适用于固定合成题，不等于生产准确率。详见 [准确率优化记录](docs/manufacturing-accuracy.md)和[网络边界说明](docs/independent-network-boundaries.md)。
 
 ## 当前产品边界
 

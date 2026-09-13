@@ -96,6 +96,7 @@ from autonomous_mes.application.spreadsheet_import import (
     preview_spreadsheet,
     snapshot_fingerprint,
 )
+from autonomous_mes.application.turning_plan_import import preview_turning_plan_workbook
 from autonomous_mes.application.work_orders import (
     CreateWorkOrderCommand,
     OperationCommand,
@@ -1176,6 +1177,12 @@ async def preview_scheduling_spreadsheet(
     if len(content) > MAX_FILE_BYTES:
         raise ValidationError("spreadsheet exceeds 5 MB limit")
     result = preview_spreadsheet(content, unquote(x_file_name), workshopId)
+    if not result.get("valid"):
+        adapted = preview_turning_plan_workbook(
+            content, unquote(x_file_name), workshopId
+        )
+        if adapted is not None:
+            result = adapted
     if result.get("valid") and result.get("snapshot"):
         try:
             canonical = SchedulingSnapshotPush.model_validate(result["snapshot"]).model_dump(

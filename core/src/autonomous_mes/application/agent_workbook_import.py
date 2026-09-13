@@ -53,9 +53,20 @@ def _stable_person_code(name: str) -> str:
 
 
 def capacity_plan_fingerprint(plan: dict[str, Any]) -> str:
-    canonical = {
+    values = {
         key: value for key, value in plan.items() if key != "previewFingerprint"
     }
+
+    def normalize(value: Any) -> Any:
+        if isinstance(value, dict):
+            return {key: normalize(item) for key, item in value.items()}
+        if isinstance(value, list):
+            return [normalize(item) for item in value]
+        if isinstance(value, float) and value.is_integer():
+            return int(value)
+        return value
+
+    canonical = normalize(values)
     encoded = json.dumps(
         canonical, ensure_ascii=False, sort_keys=True, separators=(",", ":")
     ).encode("utf-8")

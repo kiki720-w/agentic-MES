@@ -79,6 +79,7 @@ async function main() {
         ? fs.readFileSync(attachmentPath).toString("base64")
         : Buffer.from("工单编号：WO-UI-401，计划数量：41件。", "utf8").toString("base64");
       const requiresSpreadsheetPreview = /\.(xlsx|csv)$/i.test(attachmentName);
+      const expectedAttachmentText = process.env.CAPAXION_SMOKE_EXPECT_TEXT || "";
       const attachment = await call("Runtime.evaluate", {
         expression: `(async()=>{
           const binary=atob(${JSON.stringify(attachmentBytes)});
@@ -95,10 +96,12 @@ async function main() {
               body.includes("标准模板预检 ${attachmentName}")||
               body.includes("结构化导入检查 ${attachmentName}")||
               body.includes("已识别人员能力表 ${attachmentName}")||
+              body.includes("已识别车工排产表 ${attachmentName}")||
               body.includes("已识别 3 个工作表")
             ):true;
             const misleadingZero=body.includes("生产数据预检 ${attachmentName}：0 个工单、0 道工序、0 个产能资源");
-            if(parsed&&preview){
+            const expected=${JSON.stringify(expectedAttachmentText)}?body.includes(${JSON.stringify(expectedAttachmentText)}):true;
+            if(parsed&&preview&&expected){
               return {parsed:true,preview,misleadingZero,text:attachment.textContent};
             }
           }
@@ -109,6 +112,32 @@ async function main() {
       });
       if (attachment.exceptionDetails || !attachment.result.value?.parsed || attachment.result.value?.misleadingZero) {
         throw new Error("Virtual drag attachment did not parse in desktop UI");
+      }
+      if (process.env.CAPAXION_SMOKE_ACTION_TEXT) {
+        const actionText = process.env.CAPAXION_SMOKE_ACTION_TEXT;
+        const actionExpected = process.env.CAPAXION_SMOKE_ACTION_EXPECT || "EXECUTED_AND_VERIFIED";
+        const action = await call("Runtime.evaluate", {
+          expression: `(async()=>{
+            let button=null;
+            for(let i=0;i<240&&!button;i++){
+              button=[...document.querySelectorAll(".message-action")].find(item=>item.textContent.includes(${JSON.stringify(actionText)}));
+              if(!button) await new Promise(resolve=>setTimeout(resolve,250));
+            }
+            if(!button) return {passed:false,text:document.body.innerText};
+            button.click();
+            for(let i=0;i<240;i++){
+              await new Promise(resolve=>setTimeout(resolve,250));
+              const body=document.body.innerText;
+              if(body.includes(${JSON.stringify(actionExpected)})) return {passed:true};
+            }
+            return {passed:false,text:document.body.innerText};
+          })()`,
+          awaitPromise: true,
+          returnByValue: true,
+        });
+        if (action.exceptionDetails || !action.result.value?.passed) {
+          throw new Error(`Attachment action failed: ${actionText}`);
+        }
       }
       if (process.env.CAPAXION_SMOKE_DOCUMENT_QUERY) {
         const documentQuery = await call("Runtime.evaluate", {

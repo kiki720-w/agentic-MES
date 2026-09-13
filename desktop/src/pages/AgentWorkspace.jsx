@@ -32,7 +32,14 @@ export default function AgentWorkspace({ health, actor, onNavigate, incomingDrop
       return;
     }
     const pending = picked.map((file) => ({ ...file, parseStatus: "PARSING", parsed: null, parseError: null }));
-    setFiles((current) => [...current, ...pending]);
+    if (picked.some((file) => /\.(xlsx|csv)$/i.test(file.name))) {
+      setCapacityPreview(null);
+      setSpreadsheetPreview(null);
+    }
+    setFiles((current) => [
+      ...current.filter((existing) => !pending.some((file) => file.path && file.path === existing.path)),
+      ...pending,
+    ]);
     setSending(true);
     const parseResults = await Promise.all(pending.map(async (file) => {
       try {
@@ -64,7 +71,6 @@ export default function AgentWorkspace({ health, actor, onNavigate, incomingDrop
           const capacity = await desktop.core.upload({ path: "/api/v1/agent/imports/capacity/preview?workshopId=WS-MACH-01", fileId: spreadsheet.id, filePath: spreadsheet.path, actor });
           if (capacity.valid) {
             setCapacityPreview(capacity);
-            setSpreadsheetPreview(null);
             const stats = capacity.stats || {};
             const skipped = stats.skippedCount ? `；另有 ${stats.skippedCount} 人缺少产能数值，将跳过并保留人工补录` : "";
             setMessages((current) => [...current, {
@@ -73,8 +79,6 @@ export default function AgentWorkspace({ health, actor, onNavigate, incomingDrop
               meta: "已生成本地写入计划 · 尚未写入",
               action: "execute-capacity",
             }]);
-            setSending(false);
-            return;
           }
         }
         const preview = await desktop.core.upload({ path: "/api/v1/planning/imports/spreadsheet/preview?workshopId=WS-MACH-01", fileId: spreadsheet.id, filePath: spreadsheet.path, actor });
@@ -83,11 +87,13 @@ export default function AgentWorkspace({ health, actor, onNavigate, incomingDrop
         const parsedSpreadsheet = parseResults.find((item) => item.file.id === spreadsheet.id)?.parsed;
         const recognized = (stats.workOrderCount || 0) + (stats.operationCount || 0) + (stats.resourceCount || 0) > 0;
         const text = preview.valid
-          ? `标准模板预检 ${spreadsheet.name}：${stats.workOrderCount || 0} 个工单、${stats.operationCount || 0} 道工序、${stats.resourceCount || 0} 个产能资源，字段与业务关联校验通过。`
+          ? preview.mappingMode === "TURNING_PLAN_ADAPTER"
+            ? `已识别车工排产表 ${spreadsheet.name}：${stats.workOrderCount || 0} 条未完成计划、${stats.resourceCount || 0} 名产能人员；已排除 ${stats.completedExcludedCount || 0} 条完成记录。现在可以直接说“同步到排产”，或使用导入按钮。`
+            : `排产导入预检 ${spreadsheet.name}：${stats.workOrderCount || 0} 个工单、${stats.operationCount || 0} 道工序、${stats.resourceCount || 0} 个产能资源，字段与业务关联校验通过。`
           : recognized
             ? `结构化导入检查 ${spreadsheet.name}：识别到 ${stats.workOrderCount || 0} 个工单、${stats.operationCount || 0} 道工序、${stats.resourceCount || 0} 个产能资源，还有 ${stats.errorCount || preview.issues?.length || 0} 项映射或校验问题。`
             : `${workbookDescription(parsedSpreadsheet?.metadata) || `已解析 ${spreadsheet.name}`}。它不是 CAPAXION 的“工单/工序/产能”标准导入模板，因此尚未映射成可写入 MES 的业务对象；附件内容已经可以提问。`;
-        setMessages((current) => [...current, { role: "agent", text, meta: preview.valid ? "尚未写入 · 等待人工确认" : "内容已解析 · 完成字段映射后才能写入", action: preview.valid ? "confirm-spreadsheet" : null }]);
+        setMessages((current) => [...current, { role: "agent", text, meta: preview.valid ? "排产快照已生成 · 尚未写入" : "内容已解析 · 完成字段映射后才能写入", action: preview.valid ? "confirm-spreadsheet" : null }]);
       } catch (error) { setMessages((current) => [...current, { role: "system", text: error.message, meta: "生产数据预检未执行 · 通用附件解析不受影响" }]); }
     }
     setSending(false);
@@ -124,15 +130,28 @@ export default function AgentWorkspace({ health, actor, onNavigate, incomingDrop
     finally { setSending(false); }
   }
 
+  async function submitCapacityPlan(plan) {
+    try {
+      return await api("/api/v1/agent/imports/capacity/execute", actor, { method: "POST", body: { previewFingerprint: plan.previewFingerprint, plan } });
+    } catch (error) {
+      const stale = /fingerprint changed|data changed after preview|preview the file again/i.test(error.message);
+      const sourceFile = files.find((file) => file.name === plan.source?.filename && /\.xlsx$/i.test(file.name));
+      if (!stale || !sourceFile) throw error;
+      const refreshed = await desktop.core.upload({ path: "/api/v1/agent/imports/capacity/preview?workshopId=WS-MACH-01", fileId: sourceFile.id, filePath: sourceFile.path, actor });
+      if (!refreshed.valid) throw error;
+      setCapacityPreview(refreshed);
+      return api("/api/v1/agent/imports/capacity/execute", actor, { method: "POST", body: { previewFingerprint: refreshed.previewFingerprint, plan: refreshed } });
+    }
+  }
+
   async function executeCapacityImport() {
     if (!capacityPreview?.valid || sending) return;
     setSending(true);
     try {
-      const result = await api("/api/v1/agent/imports/capacity/execute", actor, { method: "POST", body: { previewFingerprint: capacityPreview.previewFingerprint, plan: capacityPreview } });
+      const result = await submitCapacityPlan(capacityPreview);
       const stats = result.stats || {};
       setMessages((current) => [...current, { role: "agent", text: `已写入并回读核验 ${result.verifiedCount || 0} 名人员：新增 ${stats.createCount || 0}、更新 ${stats.updateCount || 0}、保持不变 ${stats.unchangedCount || 0}。现在可以在产能管理中人工检查或修改。`, meta: "EXECUTED_AND_VERIFIED · 本地生产数据库", action: "open-capacity" }]);
       setCapacityPreview(null);
-      setFiles([]);
     } catch (error) { setMessages((current) => [...current, { role: "system", text: error.message, meta: "写入未完成 · 未通过回读核验" }]); }
     finally { setSending(false); }
   }
@@ -149,12 +168,24 @@ export default function AgentWorkspace({ health, actor, onNavigate, incomingDrop
         return;
       }
       const capacityWriteIntent = /(?:同步|导入|写入|更新).{0,16}(?:人员|能力|产能)|(?:人员|能力|产能).{0,16}(?:同步|导入|写入|更新)/i.test(question);
+      const scheduleWriteIntent = /(?:同步|导入|写入|加入).{0,16}(?:排产|计划)|(?:排产|计划).{0,16}(?:同步|导入|写入|加入)/i.test(question);
+      if (scheduleWriteIntent && spreadsheetPreview?.valid) {
+        const result = await api("/api/v1/planning/imports/spreadsheet/confirm", actor, { method: "POST", body: { previewFingerprint: spreadsheetPreview.previewFingerprint, snapshot: spreadsheetPreview.snapshot, runAgent: true, horizonStart: localDateISO(), horizonDays: 10, useOvertime: false, defaultMinutesPerUnit: 30 } });
+        const plan = result.agent?.plan;
+        setMessages((current) => [...current, { role: "agent", text: plan ? `已把附件中的 ${spreadsheetPreview.stats?.workOrderCount || 0} 条未完成计划同步为排产输入，并生成 ${plan.planNumber}：${plan.assignments.length} 项安排、${plan.shortages.length} 项能力缺口。` : "附件计划已写入排产输入快照。", meta: "EXECUTED_AND_VERIFIED · 排产输入已回读", action: plan ? "open-results" : null }]);
+        setSpreadsheetPreview(null);
+        setFiles([]);
+        return;
+      }
       if (capacityWriteIntent && capacityPreview?.valid) {
-        const result = await api("/api/v1/agent/imports/capacity/execute", actor, { method: "POST", body: { previewFingerprint: capacityPreview.previewFingerprint, plan: capacityPreview } });
+        const result = await submitCapacityPlan(capacityPreview);
         const stats = result.stats || {};
         setMessages((current) => [...current, { role: "agent", text: `任务已执行：${result.verifiedCount || 0} 名人员已写入产能管理并回读一致。新增 ${stats.createCount || 0}、更新 ${stats.updateCount || 0}、保持不变 ${stats.unchangedCount || 0}。`, meta: "EXECUTED_AND_VERIFIED · 本地生产数据库", action: "open-capacity" }]);
         setCapacityPreview(null);
-        setFiles([]);
+        return;
+      }
+      if (scheduleWriteIntent && parsedFiles.length) {
+        setMessages((current) => [...current, { role: "system", text: "附件已经解析，但还没有形成可执行的排产映射。需要至少识别物料编码、名称、数量、计划完成时间和单件工时；请查看上方预检问题。", meta: "REQUIRE_SCHEDULE_MAPPING · 未写入" }]);
         return;
       }
       const orderWriteIntent = /(?:新增|新建|加入|添加|创建|录入).{0,10}(?:订单|工单)|(?:订单|工单).{0,10}(?:新增|新建|加入|添加|创建|录入)/i.test(question);

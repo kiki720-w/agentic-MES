@@ -1,9 +1,11 @@
 import io
+import json
 import unittest
 
 from openpyxl import Workbook
 
 from autonomous_mes.application.agent_workbook_import import (
+    capacity_plan_fingerprint,
     execute_capacity_plan,
     preview_capacity_workbook,
 )
@@ -60,6 +62,21 @@ class AgentWorkbookImportTests(unittest.TestCase):
         second = preview_capacity_workbook(content, "车工计划.xlsx", "WS-MACH-01", current)
         self.assertEqual(0, second["stats"]["createCount"])
         self.assertEqual(2, second["stats"]["unchangedCount"])
+
+    def test_fingerprint_survives_browser_json_number_roundtrip(self) -> None:
+        preview = preview_capacity_workbook(
+            capacity_workbook(), "车工计划.xlsx", "WS-MACH-01", []
+        )
+        browser_roundtrip = json.loads(json.dumps(preview))
+        for action in browser_roundtrip["actions"]:
+            resource = action["resource"]
+            for field in ("dailyCapacityMinutes", "overtimeCapacityMinutes"):
+                if isinstance(resource[field], float) and resource[field].is_integer():
+                    resource[field] = int(resource[field])
+
+        self.assertEqual(
+            preview["previewFingerprint"], capacity_plan_fingerprint(browser_roundtrip)
+        )
 
     def test_changed_capacity_generates_versioned_update(self) -> None:
         first = preview_capacity_workbook(
