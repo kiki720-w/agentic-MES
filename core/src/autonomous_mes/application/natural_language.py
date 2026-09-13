@@ -5,6 +5,7 @@ from typing import Any, Protocol
 from autonomous_mes.domain.errors import InvalidTransition, NotFound, ValidationError
 
 from .equipment import EquipmentApplicationService
+from .manufacturing_grounding import compact_operational_snapshot
 from .model_gateway import (
     ModelGatewayError,
     NaturalLanguageModel,
@@ -94,31 +95,32 @@ class NaturalLanguageQueryService:
                 "sourceObjects": [],
             }
 
-        orders = self._orders.list(50)
-        equipment = self._equipment.list(50)
-        inspections = self._quality.list(50)
-        facts = {
-            "asOf": as_of,
-            "workOrders": [
-                {
-                    "id": x["workOrderId"],
-                    "code": x["humanCode"],
-                    "status": x["status"],
-                    "quantity": x["quantity"],
-                    "dueAt": x["dueAt"],
-                    "operations": x["operations"],
-                }
-                for x in orders
-            ],
-            "equipment": equipment,
-            "qualityInspections": inspections,
+        orders = self._orders.list(500)
+        equipment = self._equipment.list(500)
+        inspections = self._quality.list(500)
+        facts = {"asOf": as_of, **compact_operational_snapshot(
+            question, orders, equipment, inspections
+        )}
+        selected_order_ids = {
+            str(item["workOrderId"]) for item in facts["workOrders"]
+            if item.get("workOrderId")
+        }
+        selected_equipment_ids = {
+            str(item["equipmentId"]) for item in facts["equipment"]
+            if item.get("equipmentId")
+        }
+        selected_inspection_ids = {
+            str(item["inspectionId"]) for item in facts["qualityInspections"]
+            if item.get("inspectionId")
         }
         objects = (
-            [{"type": "WorkOrder", "id": str(x["workOrderId"])} for x in orders]
-            + [{"type": "Equipment", "id": str(x["equipmentId"])} for x in equipment]
+            [{"type": "WorkOrder", "id": str(x["workOrderId"])} for x in orders
+             if str(x["workOrderId"]) in selected_order_ids]
+            + [{"type": "Equipment", "id": str(x["equipmentId"])} for x in equipment
+               if str(x["equipmentId"]) in selected_equipment_ids]
             + [
                 {"type": "QualityInspection", "id": str(x["inspectionId"])}
-                for x in inspections
+                for x in inspections if str(x["inspectionId"]) in selected_inspection_ids
             ]
         )
         if self._model is None:

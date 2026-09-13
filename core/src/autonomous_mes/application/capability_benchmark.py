@@ -15,7 +15,7 @@ from uuid import UUID, uuid4
 from autonomous_mes.application.model_gateway import ModelGatewayError
 from autonomous_mes.infrastructure.deepseek_gateway import OpenAICompatibleDiagnosticModel
 
-VERSION = "manufacturing-text-v1"
+VERSION = "manufacturing-task-v2"
 CASES: list[dict[str, Any]] = [
     {"id": "order-reference", "category": "事实与引用", "question": "仅回答工单编号和数量，格式为编号|数量。",
      "facts": {"workOrders": [{"code": "WO-EVAL-001", "quantity": 24}]},
@@ -108,10 +108,12 @@ class CapabilityBenchmarks:
             "createdAt": datetime.now(UTC).isoformat(), "actor": actor, "target": target,
             "provider": status["provider"], "model": status["model"],
             "endpointSha256": sha256(str(status.get("baseUrl", "")).encode()).hexdigest(),
-            "requestProfile": {"version": "readonly-answer-v2", "maxTokens": 1536,
-                               "temperature": 0.1, "timeoutSeconds": status.get("timeoutSeconds"),
+            "requestProfile": {"version": "grounded-readonly-answer-v3", "maxTokens": 1536,
+                               "temperature": 0, "timeoutSeconds": status.get("timeoutSeconds"),
                                "thinking": "disabled" if status["provider"] == "DEEPSEEK" else "provider-default",
-                               "jsonMode": status["provider"] == "DEEPSEEK"},
+                               "jsonMode": status["provider"] == "DEEPSEEK",
+                               "deterministicGrounding": "manufacturing-grounding-v1"},
+            "taskMode": "GROUNDED_MODEL",
             "status": "RUNNING", "dataScope": "SYNTHETIC_ONLY", "checks": [],
             "total": len(CASES), "completed": 0, "passedCount": 0,
             "grading": "exact-match-v1", "cost": None, "hardwareMemory": None,
@@ -167,6 +169,8 @@ class CapabilityBenchmarks:
         compatible = (a["status"] == b["status"] == "COMPLETED"
                       and a["suiteVersion"] == b["suiteVersion"]
                       and a["fixtureSha256"] == b["fixtureSha256"]
-                      and a["grading"] == b["grading"])
+                      and a["grading"] == b["grading"]
+                      and a.get("requestProfile", {}).get("version")
+                      == b.get("requestProfile", {}).get("version"))
         return {"comparable": compatible, "left": a, "right": b,
-                "note": "仅同版本、同样本、同评分规则的已完成结果可比；单次合成测试不代表生产准确率。"}
+                "note": "仅同试卷、同样本、同评分规则和请求配置的已完成结果可比；合成测试不代表生产准确率。"}

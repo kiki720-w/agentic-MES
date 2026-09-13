@@ -5,12 +5,12 @@
 更新时间：2026-09-13  
 项目目录：D:\mes  
 GitHub：https://github.com/kiki720-w/capaxion
-功能基线：本次最小文字能力验收门（详见 docs/minimum-ai-acceptance.md）
+功能基线：本地制造任务准确率优化（详见 docs/manufacturing-accuracy.md）
 当前分支：main
 
 ## 本地 AI 与云端 MES 的独立网络边界（2026-09-13）
 
-桌面 0.2.2 与 Core 已实现独立服务端白名单：默认仅允许指定本地模型，云模型需要单独授权；业务系统授权不会开放模型出口。本地服务支持无密钥，切换不沿用云密钥。当前开发环境使用本机 Qwen3 4B，云模型出口关闭，其历史测评仍为 6/9。业务只读传输组件已建立，实际云 MES 连接器、重连同步和生产回写尚未接入；此限制属于应用层，不代表整机防火墙。详见 [实现与部署说明](docs/independent-network-boundaries.md)。
+桌面 0.2.3 与 Core 使用本机 Qwen3 4B，云模型出口关闭。原始模型历史成绩仍为 6/9；`manufacturing-grounding-v1` 用确定性代码产生计算、单位、来源冲突和权限证据，新版制造任务路径连续两次 9/9。工作台从最多 500 条/类生成全量汇总，再按问题选最多 12 条/类，已消除本机 4096 上下文溢出。新旧报告明确标识且禁止跨请求版本对比。详见 [准确率优化记录](docs/manufacturing-accuracy.md)。
 
 ## 新对话先读这里
 
@@ -149,10 +149,10 @@ DeepSeek 当前官方视觉路线需要单独的视觉模型，例如 `deepseek-
 ## 制造能力验收中心（本次新增）
 
 - 原生桌面新增“AI 能力验收”侧栏，详见 docs/capability-benchmark-center.md。
-- manufacturing-text-v1 九道合成文字题，展示标准/实际答案、事实依据、耗时、历史与同版对比，支持 JSON 导出。
+- 历史 `manufacturing-text-v1` 衡量原始模型；新版 `manufacturing-task-v2` 衡量确定性证据与模型组成的任务路径，展示标准/实际答案、依据、耗时、模式、历史与兼容报告对比。
 - 首轮真实 DeepSeek 9/9 通过；这不是生产准确率或多模态验收。
 - 本地候选走独立无 Key、禁用环境代理的字面量回环地址适配器，不切换当前网关、不携带云密钥或云端回退。
-- 本机 RTX 4060 Laptop GPU 8GB 已运行 llama.cpp b10936 Vulkan + Qwen3-4B-Instruct-2507 Q4_K_M，固定来源与校验和见 setup-local-benchmark.py。两轮本地实测均 6/9，剩余工时、单位换算和来源冲突题错误；DeepSeek 三轮均 9/9。不能宣称此本地候选已达到 DeepSeek 效果。
+- 本机 RTX 4060 Laptop GPU 8GB 已运行 llama.cpp b10936 Vulkan + Qwen3-4B-Instruct-2507 Q4_K_M。原始模型三轮均 6/9；规则辅助任务路径连续两轮 9/9、零请求失败。只能宣称固定任务路径成绩提高，不能宣称 4B 模型本身达到 DeepSeek 或已通过生产验收。
 - 本地服务为 http://127.0.0.1:11434/v1，模型 ID qwen3-4b-instruct-2507-q4_k_m；以 --offline 启动，当前 DeepSeek 配置未切换。脚本 core/scripts/start-local-benchmark.ps1 / stop-local-benchmark.ps1 管理本次进程；权重与运行时保留于 .local-models/（Git 忽略），非系统服务或开机自启。
 - PDF/图片仍未接入；XLSX/CSV 仍为本地确定性解析，本中心尚未建立多样文件准确率样本集。
 - 后台一次一轮测评，逐题原子保存，启动时将未完成任务标记中断；报告位于 core/.capaxion/benchmarks/，不进入 Git。

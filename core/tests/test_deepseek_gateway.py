@@ -58,6 +58,10 @@ class DeepSeekGatewayTests(unittest.TestCase):
         self.assertEqual("VERIFIED", status["connectionStatus"])
         self.assertTrue(status["apiKeyConfigured"])
         self.assertNotIn("customer-secret", json.dumps(status))
+        request = post.call_args.kwargs["json"]
+        user_payload = json.loads(request["messages"][1]["content"])
+        self.assertEqual("manufacturing-grounding-v1",
+                         user_payload["deterministicEvidence"]["version"])
         self.assertEqual(
             "https://api.moonshot.cn/v1/chat/completions",
             post.call_args.args[0],

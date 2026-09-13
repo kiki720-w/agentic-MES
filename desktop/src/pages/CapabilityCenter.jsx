@@ -3,7 +3,7 @@ import { PageHeader, Panel } from "../components";
 import { api, formatDate, statusLabel } from "../platform";
 
 const labels = { READY_TO_TEST: "可测评", IMPLEMENTED_NOT_BENCHMARKED: "已接入 · 本中心未测", NOT_INTEGRATED: "未接入", NOT_BENCHMARKED: "本中心未测", RUNNING: "测评中", COMPLETED: "已完成", FAILED: "运行失败", INTERRUPTED: "已中断" };
-const runLabel = (run) => `${run.target === "LOCAL" ? "本地" : run.provider} · ${run.model} · ${formatDate(run.createdAt, true)} · ${run.runId.slice(0, 8)}`;
+const runLabel = (run) => `${run.target === "LOCAL" ? "本地" : run.provider} · ${run.model} · ${run.taskMode === "GROUNDED_MODEL" ? "规则辅助" : "原始模型"} · ${formatDate(run.createdAt, true)} · ${run.runId.slice(0, 8)}`;
 
 export default function CapabilityCenter({ actor }) {
   const [data, setData] = useState(null);
@@ -55,9 +55,9 @@ export default function CapabilityCenter({ actor }) {
     {error && <div role="alert" className="permission-banner">{error}</div>}
     <div className="capability-catalog">{data?.capabilities?.map((item) => <article key={item.id}><strong>{item.name}</strong><span>{labels[item.status]}</span><p>{item.detail}</p></article>)}</div>
     <div className="models-layout">
-      <Panel title="当前模型 · 制造文字基准" subtitle="9 题：事实引用、缺失与冲突、工时和单位计算、边界理解。">
+      <Panel title="当前系统 · 制造任务准确率" subtitle="本地模型负责理解与表达，固定规则提供计算、单位、来源冲突和权限证据。">
         <p>{data?.modelStatus?.provider || "—"} · {data?.modelStatus?.model || "未配置"} · {statusLabel(data?.modelStatus?.connectionStatus)}</p>
-        <p className="status-footnote">采用严格答案匹配。每次发出 9 次模型请求；若当前配置为云端，将发送这些合成样本。运行期间固定本次模型，不受随后切换配置影响。</p>
+        <p className="status-footnote">采用严格答案匹配。每次发出 9 次模型请求；新报告标记为“规则辅助”，不会冒充原始模型能力。历史“原始模型”报告保留但不能与新版直接比较。</p>
         <button className="button primary" disabled={busy || running || !data?.modelStatus?.model} onClick={() => start("ACTIVE")}>开始当前模型测评</button>
       </Panel>
       <Panel title="本地候选 · 独立测评" subtitle="使用相同题目，不替换工作台正在使用的模型。">
@@ -69,10 +69,10 @@ export default function CapabilityCenter({ actor }) {
     </div>
     <Panel title="历史结果与同题对比" subtitle="未运行的模型没有分数。不同版本、样本或评分规则的报告不能直接比较。">
       {!data?.runs?.length && <p>尚无制造基准报告；之前三题自检与本基准分开保存。</p>}
-      <div className="benchmark-table"><table><thead><tr><th>模型 / 时间 / 运行编号</th><th>状态</th><th>进度</th><th>同题通过率</th><th>请求失败</th><th>中位耗时</th></tr></thead><tbody>{data?.runs?.map((run) => <tr key={run.runId}><td><button className="button" onClick={() => { setReport(null); setSelected(run.runId); }}>{runLabel(run)}</button></td><td>{labels[run.status] || run.status}</td><td>{run.completed}/{run.total}</td><td>{run.status === "COMPLETED" ? `${run.scorePercent}%` : "—"}</td><td>{run.requestFailures ?? "—"}</td><td>{run.medianLatencyMs == null ? "—" : `${run.medianLatencyMs} ms`}</td></tr>)}</tbody></table></div>
+      <div className="benchmark-table"><table><thead><tr><th>模型 / 模式 / 时间 / 运行编号</th><th>状态</th><th>完成</th><th>通过结果</th><th>请求失败</th><th>中位耗时</th></tr></thead><tbody>{data?.runs?.map((run) => <tr key={run.runId}><td><button className="button" onClick={() => { setReport(null); setSelected(run.runId); }}>{runLabel(run)}</button></td><td>{labels[run.status] || run.status}</td><td>已完成 {run.completed}/{run.total} 题</td><td>{run.status === "COMPLETED" ? `通过 ${run.passedCount}/${run.total}（${run.scorePercent}%）` : "—"}</td><td>{run.requestFailures ?? "—"}</td><td>{run.medianLatencyMs == null ? "—" : `${run.medianLatencyMs} ms`}</td></tr>)}</tbody></table></div>
       <div className="benchmark-compare">{["left", "right"].map((side) => <select aria-label={side === "left" ? "基准报告" : "候选报告"} key={side} value={pair[side]} onChange={(e) => { setPair({ ...pair, [side]: e.target.value }); setComparison(null); }}><option value="">{side === "left" ? "选择基准报告" : "选择候选报告"}</option>{data?.runs?.map((run) => <option key={run.runId} value={run.runId}>{runLabel(run)}</option>)}</select>)}<button className="button" disabled={busy || !pair.left || !pair.right || pair.left === pair.right} onClick={compare}>对比</button></div>
       {comparison && <div className="benchmark-comparison"><p>{comparison.note}</p>{comparison.comparable ? <><p>基准 {comparison.left.scorePercent}% · 候选 {comparison.right.scorePercent}% · 中位耗时 {comparison.left.medianLatencyMs} / {comparison.right.medianLatencyMs} ms</p><div className="benchmark-table"><table><thead><tr><th>题目</th><th>基准结果</th><th>候选结果</th></tr></thead><tbody>{comparison.left.checks.map((check, index) => <tr key={check.id}><td>{check.id}</td><td>{check.passed ? "通过" : "未通过"} · {check.actual ?? check.error}</td><td>{comparison.right.checks[index].passed ? "通过" : "未通过"} · {comparison.right.checks[index].actual ?? comparison.right.checks[index].error}</td></tr>)}</tbody></table></div></> : <strong>不可比较：有报告未完成，或试卷/评分版本不同。</strong>}</div>}
-      <p className="status-footnote">暂不估算成本、显存占用或综合“幻觉率”。本页通过率仅针对这 9 道固定合成题，不能推广为真实生产准确率。</p>
+      <p className="status-footnote">“完成 9/9”只表示题目全部运行；“通过 9/9”才表示全部答对。暂不估算成本、显存占用或综合幻觉率；固定合成题不能替代工厂样本验收。</p>
     </Panel>
     {report && <Panel title={`逐题证据 · ${report.runId}`} subtitle={`${report.suiteVersion} · ${report.fixtureSha256}`} actions={<button className="button" disabled={report.status === "RUNNING"} onClick={download}>导出 JSON 证据</button>}>
       <p>{labels[report.status]} · 操作者 {report.actor} · {report.completed}/{report.total} 题</p>
