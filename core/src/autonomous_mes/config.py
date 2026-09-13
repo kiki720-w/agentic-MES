@@ -22,7 +22,7 @@ class Settings(BaseSettings):
     business_endpoints: str = ""
     # Legacy DeepSeek variables remain supported for existing deployments.
     deepseek_api_key: str | None = None
-    deepseek_model: str = "deepseek-v4-flash"
+    deepseek_model: str = "deepseek-v4-flash-vision-exp"
     deepseek_base_url: str = "https://api.deepseek.com"
     deepseek_timeout_seconds: float = 12.0
     agent_l3_execution_enabled: bool = False

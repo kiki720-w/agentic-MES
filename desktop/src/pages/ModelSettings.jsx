@@ -3,7 +3,7 @@ import { ErrorState, LoadingState, PageHeader, Panel, StatusPill, Toast } from "
 import { api, formatDate, statusLabel } from "../platform";
 
 const presets = {
-  DEEPSEEK: { label: "DeepSeek", baseUrl: "https://api.deepseek.com", model: "deepseek-chat", key: true, note: "云端通用推理" },
+  DEEPSEEK: { label: "DeepSeek V4 Vision", baseUrl: "https://api.deepseek.com", model: "deepseek-v4-flash-vision-exp", key: true, note: "云端文字、图片与长上下文" },
   KIMI: { label: "Kimi / Moonshot", baseUrl: "https://api.moonshot.cn/v1", model: "moonshot-v1-auto", key: true, note: "云端长上下文" },
   OPENAI: { label: "OpenAI", baseUrl: "https://api.openai.com/v1", model: "gpt-5", key: true, note: "云端多能力模型" },
   OLLAMA: { label: "Ollama 本地", baseUrl: "http://127.0.0.1:11434/v1", model: "qwen3:8b", key: false, note: "待本地服务与出站策略验收" },
@@ -55,7 +55,7 @@ export default function ModelSettings({ actor }) {
     <div className="model-status-banner"><div className="model-orbit">✦</div><div><span>当前推理模型</span><strong>{status.provider} · {status.model}</strong><p>{status.baseUrl}</p></div><StatusPill value={statusLabel(status.connectionStatus)} tone={status.connectionStatus === "VERIFIED" ? "published" : "warning"} /></div>
     {!canAdmin && <div className="permission-banner"><span>锁</span><div><strong>当前身份只有查看权限</strong><p>模型切换需要主管或主数据管理员。开发模式可从左下角切换到 Demo Supervisor；生产环境由企业 OIDC 决定身份，前端不可自行提权。</p></div></div>}
     <div className="models-layout">
-      <Panel title="选择模型服务" subtitle="本地优先，云端必须由客户主动选择。">
+      <Panel title="选择模型服务" subtitle="选择 DeepSeek 时，相关文档片段和图片会发送给 DeepSeek API。">
         <div className="provider-grid">{Object.entries(presets).map(([key, preset]) => <button key={key} className={form.provider === key ? "active" : ""} onClick={() => selectProvider(key)}><span>{key === "OLLAMA" || key === "LM_STUDIO" || key === "VLLM" ? "本地" : "API"}</span><strong>{preset.label}</strong><small>{preset.note}</small><i>{form.provider === key ? "✓" : ""}</i></button>)}</div>
       </Panel>
       <Panel title="连接配置" subtitle="密钥只发送到本机 Core，不写浏览器存储，也不会通过状态接口回显。">

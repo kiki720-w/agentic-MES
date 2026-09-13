@@ -19,7 +19,7 @@ from rapidocr import RapidOCR
 from autonomous_mes.domain.errors import ValidationError
 
 MAX_ATTACHMENT_BYTES = 15 * 1024 * 1024
-MAX_EXTRACTED_CHARACTERS = 30_000
+MAX_EXTRACTED_CHARACTERS = 1_000_000
 MAX_PDF_PAGES = 100
 MAX_SHEETS = 20
 MAX_ROWS_PER_SHEET = 1_000
@@ -385,7 +385,7 @@ def parse_attachment(content: bytes, filename: str) -> dict[str, Any]:
 
     text, truncated = _bounded(text)
     if truncated:
-        warnings.append("提取内容超过 30000 字符，已截断。")
+        warnings.append("提取内容超过 1000000 字符，已截断。")
     return {
         "name": safe_name,
         "kind": kind,

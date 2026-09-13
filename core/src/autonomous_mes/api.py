@@ -35,6 +35,7 @@ from autonomous_mes.application.attachment_parser import (
 from autonomous_mes.application.capability_benchmark import CapabilityBenchmarks, capability_catalog
 from autonomous_mes.application.capability_check import run_text_check
 from autonomous_mes.application.connector_security import HmacConnectorAuthenticator
+from autonomous_mes.application.document_store import LocalDocumentStore
 from autonomous_mes.application.equipment import (
     EquipmentApplicationService,
     RecordTelemetryCommand,
@@ -328,9 +329,16 @@ class AttachmentContextBody(BaseModel):
     kind: str = Field(min_length=1, max_length=40)
     parser: str = Field(min_length=1, max_length=80)
     sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
-    text: str = Field(min_length=1, max_length=30_000)
+    documentId: str | None = Field(default=None, pattern=r"^doc_[a-f0-9]{32}$")
+    text: str = Field(default="", max_length=30_000)
     summary: str = Field(default="", max_length=8_000)
     truncated: bool = False
+
+    @model_validator(mode="after")
+    def require_document_or_text(self) -> "AttachmentContextBody":
+        if not self.documentId and not self.text.strip():
+            raise ValueError("attachment requires documentId or text")
+        return self
 
 
 class ConversationTurnBody(BaseModel):
@@ -706,6 +714,9 @@ scheduling_autonomy = SchedulingAutonomyRuntime(
     ),
     SimulatorScheduleExecution() if execution_target == "SIMULATOR" else None,
 )
+document_store = LocalDocumentStore(
+    Path(__file__).resolve().parents[2] / ".capaxion" / "documents"
+)
 natural_language_service = NaturalLanguageQueryService(
     store,
     model_gateway,
@@ -715,6 +726,7 @@ natural_language_service = NaturalLanguageQueryService(
     scheduling_horizon_days=settings.scheduling_agent_horizon_days,
     scheduling_default_minutes_per_unit=settings.scheduling_agent_default_minutes_per_unit,
     scheduling_use_overtime=settings.scheduling_agent_use_overtime,
+    document_store=document_store,
 )
 connector_credentials = (
     {settings.connector_key_id: settings.connector_hmac_secret}
@@ -782,12 +794,14 @@ def live() -> dict[str, str]:
 
 
 @app.get("/health/ready")
-def ready() -> dict[str, str]:
+def ready() -> dict[str, object]:
     gateway_status = model_gateway.status()
     gateway_enabled = gateway_status["connectionStatus"] not in {"DISABLED", "BLOCKED"}
     return {
         "status": "READY",
         "modelGateway": str(gateway_status["connectionStatus"]),
+        "modelProvider": str(gateway_status.get("provider") or "NONE"),
+        "modelName": gateway_status.get("model"),
         "agentRuntime": "MODEL_WITH_RULES_FALLBACK" if gateway_enabled else "RULES_ONLY",
         "storageBackend": settings.storage_backend,
         "agentLevel": "L3_EXPERIMENTAL" if settings.agent_l3_execution_enabled else "L2",
@@ -988,7 +1002,44 @@ async def parse_agent_attachment(
     content = await request.body()
     if len(content) > MAX_ATTACHMENT_BYTES:
         raise ValidationError("attachment exceeds 15 MB limit")
-    return parse_attachment(content, unquote(x_file_name))
+    parsed = parse_attachment(content, unquote(x_file_name))
+    document = document_store.ingest(
+        parsed, content if parsed.get("kind") == "IMAGE_OCR" else None
+    )
+    preview = str(parsed["text"])[:30_000]
+    return {
+        **parsed,
+        **document,
+        "text": preview,
+        "previewCharacterCount": len(preview),
+        "truncated": bool(parsed["truncated"])
+        or len(preview) < int(document["characterCount"]),
+    }
+
+
+class DocumentSearchBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    documentIds: list[str] = Field(min_length=1, max_length=8)
+    query: str = Field(min_length=1, max_length=2000)
+    limit: int = Field(default=8, ge=1, le=20)
+
+
+@app.get("/api/v1/agent/documents/{document_id}")
+def get_agent_document(
+    document_id: str,
+    identity: Annotated[Identity, Depends(current_identity)],
+) -> dict[str, object]:
+    authorize_human(identity, "OPERATOR", "SUPERVISOR", "QUALITY", "PLANNER")
+    return document_store.get(document_id)
+
+
+@app.post("/api/v1/agent/documents/search")
+def search_agent_documents(
+    body: DocumentSearchBody,
+    identity: Annotated[Identity, Depends(current_identity)],
+) -> dict[str, object]:
+    authorize_human(identity, "OPERATOR", "SUPERVISOR", "QUALITY", "PLANNER")
+    return {"chunks": document_store.search(body.documentIds, body.query, limit=body.limit)}
 
 
 @app.get("/", response_class=HTMLResponse, include_in_schema=False)

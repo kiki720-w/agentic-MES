@@ -1,6 +1,6 @@
 # CAPAXION Desktop
 
-CAPAXION 的 Windows 桌面客户端。当前版本提供统一桌面导航、Agent 对话工作区、附件选择与全窗口文件拖放、Core 状态监测，以及原生控制塔、有限产能排产、人员周计划、产能管理和模型设置。文字、CSV/XLSX、DOCX、PDF 和图片 OCR 均在 Core 本机完成；解析结果可随问题进入当前本地模型。
+CAPAXION 的 Windows 桌面客户端。当前版本提供统一桌面导航、Agent 对话工作区、附件选择与全窗口文件拖放、Core 状态监测，以及原生控制塔、有限产能排产、人员周计划、产能管理和模型设置。文字、CSV/XLSX、DOCX、PDF 和图片 OCR 均在 Core 本机完成；问题相关片段可进入本地模型或用户主动配置的 DeepSeek API，回答依据显示在工作台右侧。
 
 ## 本机开发启动
 

@@ -1,8 +1,11 @@
+import tempfile
 import unittest
 from datetime import date
+from pathlib import Path
 from typing import Any
 from unittest.mock import Mock
 
+from autonomous_mes.application.document_store import LocalDocumentStore
 from autonomous_mes.application.model_gateway import ModelGatewayError, NaturalLanguageAnswer
 from autonomous_mes.application.natural_language import NaturalLanguageQueryService
 from autonomous_mes.infrastructure.memory import InMemoryWorkOrderStore
@@ -161,7 +164,7 @@ class NaturalLanguageQueryTests(unittest.TestCase):
         self.assertEqual("Attachment", result["sourceObjects"][-1]["type"])
         scheduling_agent.analyze.assert_not_called()
 
-    def test_attachment_context_uses_summary_and_stays_within_local_model_budget(self) -> None:
+    def test_attachment_context_uses_summary_and_stays_within_model_budget(self) -> None:
         model = Mock()
         model.answer.return_value = NaturalLanguageAnswer("识别到人员能力表。", "FAKE", "local")
         service = NaturalLanguageQueryService(InMemoryWorkOrderStore(), model)
@@ -182,7 +185,56 @@ class NaturalLanguageQueryTests(unittest.TestCase):
         facts = model.answer.call_args.args[1]
         excerpts = [item["extractedText"] for item in facts["attachments"]]
         self.assertTrue(all("摘要" in item for item in excerpts))
-        self.assertLessEqual(sum(len(item) for item in excerpts), 1_900)
+        self.assertLessEqual(sum(len(item) for item in excerpts), 12_100)
+
+    def test_document_id_retrieves_late_section_and_returns_visible_evidence(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            document_store = LocalDocumentStore(Path(directory))
+            metadata = document_store.ingest({
+                "name": "人员能力.xlsx", "kind": "WORKBOOK", "parser": "LOCAL",
+                "sha256": "d" * 64, "status": "PARSED", "summary": "人员能力表",
+                "text": "## 每日计划\n" + "普通工单\n" * 600
+                + "## 人员能力\n王师傅\t数控车削\t8小时160件",
+                "truncated": False, "metadata": {}, "warnings": [],
+            })
+            model = Mock()
+            model.answer.return_value = NaturalLanguageAnswer(
+                "王师傅会数控车削，8 小时产能 160 件。", "FAKE", "cloud"
+            )
+            service = NaturalLanguageQueryService(
+                InMemoryWorkOrderStore(), model, document_store=document_store
+            )
+
+            result = service.ask("谁会数控车削，产能多少？", [{
+                "name": "人员能力.xlsx", "kind": "WORKBOOK", "parser": "LOCAL",
+                "sha256": "d" * 64, "documentId": metadata["documentId"],
+                "summary": "人员能力表", "text": "",
+            }])
+
+            facts = model.answer.call_args.args[1]
+            self.assertIn("王师傅", facts["attachments"][0]["extractedText"])
+            self.assertEqual("人员能力", result["documentEvidence"][0]["location"])
+            self.assertEqual("DocumentChunk", result["sourceObjects"][-1]["type"])
+
+    def test_personnel_capability_lookup_is_filtered_deterministically(self) -> None:
+        model = Mock()
+        model.answer.return_value = NaturalLanguageAnswer("所有人都会做本体。", "FAKE", "small")
+        service = NaturalLanguageQueryService(InMemoryWorkOrderStore(), model)
+        result = service.ask("哪些人员会做本体，他们的8小时产能是多少？", [{
+            "name": "人员.xlsx", "kind": "WORKBOOK", "parser": "LOCAL",
+            "sha256": "e" * 64, "summary": "", "text": (
+                "人员\t加工种类\t8小时工时\t加班3小时工时\n"
+                "王超伟\t本体\t160\t180\n"
+                "杨战勋\t本体\t160\t180\n"
+                "郭涛\t定位法兰\t100\t120"
+            ),
+        }])
+
+        self.assertEqual("RULES", result["source"])
+        self.assertIn("王超伟", result["answer"])
+        self.assertIn("杨战勋", result["answer"])
+        self.assertNotIn("郭涛", result["answer"])
+        model.answer.assert_not_called()
 
     def test_model_failure_returns_deterministic_attachment_summary(self) -> None:
         model = Mock()

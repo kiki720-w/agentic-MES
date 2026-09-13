@@ -43,6 +43,8 @@ class ApiContractTests(unittest.TestCase):
             {
                 "status": "READY",
                 "modelGateway": "DISABLED",
+                "modelProvider": "NONE",
+                "modelName": None,
                 "agentRuntime": "RULES_ONLY",
                 "storageBackend": "memory",
                 "agentLevel": "L2",
@@ -150,6 +152,20 @@ class ApiContractTests(unittest.TestCase):
         self.assertEqual("LOCAL_TEXT", result["parser"])
         self.assertIn("M-08", result["text"])
         self.assertTrue(result["localOnly"])
+        self.assertRegex(result["documentId"], r"^doc_[a-f0-9]{32}$")
+        self.assertGreaterEqual(result["chunkCount"], 1)
+
+        search = self.client.post(
+            "/api/v1/agent/documents/search",
+            headers={"X-Dev-Actor": "demo-planner"},
+            json={
+                "documentIds": [result["documentId"]],
+                "query": "哪台设备发生了什么报警",
+                "limit": 3,
+            },
+        )
+        self.assertEqual(200, search.status_code, search.text)
+        self.assertIn("M-08", search.json()["chunks"][0]["text"])
 
     def test_unified_aps_schedule_lifecycle(self):
         suffix = uuid4().hex[:8]

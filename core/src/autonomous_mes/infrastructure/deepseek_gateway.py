@@ -99,7 +99,7 @@ class OpenAICompatibleDiagnosticModel:
             elif status == "DEGRADED":
                 self._failure_count += 1
 
-    def _request(self, messages: list[dict[str, str]], max_tokens: int) -> dict[str, Any]:
+    def _request(self, messages: list[dict[str, Any]], max_tokens: int) -> dict[str, Any]:
         self._egress_policy.require_model(self._base_url)
         payload: dict[str, Any] = {
             "model": self._model,
@@ -175,6 +175,31 @@ class OpenAICompatibleDiagnosticModel:
 
     def answer(self, question: str, facts: dict[str, Any]) -> NaturalLanguageAnswer:
         try:
+            image_urls = [
+                str(item["imageDataUrl"])
+                for item in facts.get("attachments", [])
+                if isinstance(item, dict) and item.get("imageDataUrl")
+            ]
+            text_facts = {
+                **facts,
+                "attachments": [
+                    {key: value for key, value in item.items() if key != "imageDataUrl"}
+                    if isinstance(item, dict) else item
+                    for item in facts.get("attachments", [])
+                ],
+            } if image_urls else facts
+            grounded = json.dumps(
+                grounded_request(question, text_facts), ensure_ascii=False
+            )
+            user_content: str | list[dict[str, Any]] = grounded
+            if image_urls and ("vision" in self._model.casefold() or self._provider == "OPENAI"):
+                user_content = [
+                    {"type": "text", "text": grounded},
+                    *[
+                        {"type": "image_url", "image_url": {"url": value, "detail": "original"}}
+                        for value in image_urls
+                    ],
+                ]
             result = self._request(
                 [
                     {
@@ -194,12 +219,7 @@ class OpenAICompatibleDiagnosticModel:
                             "事实不足时按问题要求回答无法确定。"
                         ),
                     },
-                    {
-                        "role": "user",
-                        "content": json.dumps(
-                            grounded_request(question, facts), ensure_ascii=False
-                        ),
-                    },
+                    {"role": "user", "content": user_content},
                 ],
                 1536,
             )
@@ -266,7 +286,7 @@ class DeepSeekDiagnosticModel(OpenAICompatibleDiagnosticModel):
     def __init__(
         self,
         api_key: str,
-        model: str = "deepseek-v4-flash",
+        model: str = "deepseek-v4-flash-vision-exp",
         base_url: str = "https://api.deepseek.com",
         timeout_seconds: float = 12.0,
         egress_policy: EgressPolicy | None = None,
@@ -280,7 +300,7 @@ class ConfigurableModelGateway:
     def __init__(
         self,
         api_key: str | None = None,
-        model: str = "deepseek-v4-flash",
+        model: str = "deepseek-v4-flash-vision-exp",
         base_url: str = "https://api.deepseek.com",
         timeout_seconds: float = 12.0,
         provider: str = "DEEPSEEK",

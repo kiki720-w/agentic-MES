@@ -110,6 +110,29 @@ async function main() {
       if (attachment.exceptionDetails || !attachment.result.value?.parsed || attachment.result.value?.misleadingZero) {
         throw new Error("Virtual drag attachment did not parse in desktop UI");
       }
+      if (process.env.CAPAXION_SMOKE_DOCUMENT_QUERY) {
+        const documentQuery = await call("Runtime.evaluate", {
+          expression: `(async()=>{
+            const input=document.querySelector(".composer textarea");
+            const setter=Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,"value").set;
+            setter.call(input,${JSON.stringify(process.env.CAPAXION_SMOKE_DOCUMENT_QUERY)});
+            input.dispatchEvent(new Event("input",{bubbles:true}));
+            await new Promise(resolve=>setTimeout(resolve,100));
+            document.querySelector(".send-button")?.click();
+            for(let i=0;i<240;i++){
+              await new Promise(resolve=>setTimeout(resolve,250));
+              const evidence=document.querySelectorAll(".evidence-list article");
+              if(evidence.length)return {count:evidence.length,text:document.body.innerText};
+            }
+            return {count:0,text:document.body.innerText};
+          })()`,
+          awaitPromise: true,
+          returnByValue: true,
+        });
+        if (documentQuery.exceptionDetails || documentQuery.result.value?.count < 1) {
+          throw new Error("Document query did not render retrieved evidence");
+        }
+      }
     }
     if (pages[index] === "capabilities" && process.env.CAPAXION_SMOKE_BENCHMARK) {
       const evaluate = async (expression) => (await call("Runtime.evaluate", { expression, returnByValue: true })).result.value;

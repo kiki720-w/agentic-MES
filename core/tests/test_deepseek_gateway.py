@@ -7,6 +7,7 @@ from autonomous_mes.application.model_gateway import DiagnosticFacts, ModelGatew
 from autonomous_mes.infrastructure.deepseek_gateway import (
     ConfigurableModelGateway,
     DeepSeekDiagnosticModel,
+    OpenAICompatibleDiagnosticModel,
 )
 from autonomous_mes.infrastructure.egress import EgressPolicy
 
@@ -75,3 +76,26 @@ class DeepSeekGatewayTests(unittest.TestCase):
 
         self.assertEqual("RULES", result.source)
         self.assertIn("DOWN", result.diagnosis)
+
+    @patch("autonomous_mes.infrastructure.deepseek_gateway.httpx.post")
+    def test_vision_model_receives_image_without_copying_base64_into_text(self, post: Mock) -> None:
+        response = Mock()
+        response.json.return_value = {
+            "choices": [{"message": {"content": '{"answer":"图中是车削图纸"}'}}]
+        }
+        post.return_value = response
+        gateway = OpenAICompatibleDiagnosticModel(
+            "secret", "deepseek-v4-flash-vision-exp", "https://api.deepseek.com",
+            provider="DEEPSEEK",
+            egress_policy=EgressPolicy(model_cloud_endpoints=("https://api.deepseek.com",)),
+        )
+
+        gateway.answer("这张图是什么", {"attachments": [{
+            "name": "drawing.png", "imageDataUrl": "data:image/png;base64,ZmFrZQ==",
+            "extractedText": "尺寸 25 mm",
+        }]})
+
+        content = post.call_args.kwargs["json"]["messages"][1]["content"]
+        self.assertIsInstance(content, list)
+        self.assertNotIn("ZmFrZQ==", content[0]["text"])
+        self.assertEqual("data:image/png;base64,ZmFrZQ==", content[1]["image_url"]["url"])

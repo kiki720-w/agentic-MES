@@ -4,6 +4,7 @@ from typing import Any, Protocol
 
 from autonomous_mes.domain.errors import InvalidTransition, NotFound, ValidationError
 
+from .document_store import LocalDocumentStore
 from .equipment import EquipmentApplicationService
 from .manufacturing_grounding import compact_operational_snapshot
 from .model_gateway import (
@@ -41,7 +42,46 @@ ATTACHMENT_SYNC_INTENT = re.compile(
 UNUSABLE_ATTACHMENT_ANSWER = re.compile(
     r"^(?:无法确定|无法从(?:附件|当前|提供的)?(?:内容|信息|数据|证据).{0,20}(?:确定|回答))[。！!]?$"
 )
-MAX_ATTACHMENT_CONTEXT_CHARACTERS = 1_800
+MAX_ATTACHMENT_CONTEXT_CHARACTERS = 12_000
+CAPABILITY_TARGET = re.compile(
+    r"(?:会做|会加工|能做|能加工)(?P<target>[^，。；！？?\s]{1,30})"
+)
+
+
+def _deterministic_capacity_answer(
+    question: str, attachment_facts: list[dict[str, Any]]
+) -> str | None:
+    """Answer a common personnel-capability lookup without trusting model filtering."""
+    target_match = CAPABILITY_TARGET.search(question)
+    if target_match is None or not re.search(r"产能|工时|多少|哪些人|谁", question):
+        return None
+    target = target_match.group("target")
+    rows: list[tuple[str, str, str | None]] = []
+    for item in attachment_facts:
+        header: list[str] | None = None
+        for line in str(item.get("extractedText", "")).splitlines():
+            cells = [cell.strip() for cell in line.split("\t")]
+            if {"人员", "加工种类"}.issubset(cells) and any("8小时" in cell for cell in cells):
+                header = cells
+                continue
+            if header is None or len(cells) < len(header):
+                continue
+            record = dict(zip(header, cells, strict=False))
+            capability = record.get("加工种类", "")
+            person = record.get("人员", "")
+            if person and target in capability:
+                normal = next((record[name] for name in header if "8小时" in name), "未填写")
+                overtime = next((record[name] for name in header if "加班" in name), None)
+                rows.append((person, normal, overtime))
+    unique = list(dict.fromkeys(rows))
+    if not unique:
+        return None
+    details = "；".join(
+        f"{person}：8小时产能 {normal}"
+        + (f"，加班产能 {overtime}" if overtime else "")
+        for person, normal, overtime in unique
+    )
+    return f"根据附件中“加工种类={target}”逐行筛选，共找到 {len(unique)} 名人员：{details}。"
 
 
 def _attachment_excerpt(item: dict[str, Any], character_limit: int) -> str:
@@ -81,6 +121,7 @@ class NaturalLanguageQueryService:
         scheduling_horizon_days: int = 10,
         scheduling_default_minutes_per_unit: float = 30.0,
         scheduling_use_overtime: bool = False,
+        document_store: LocalDocumentStore | None = None,
     ) -> None:
         self._orders = WorkOrderApplicationService(store)
         self._equipment = EquipmentApplicationService(store)
@@ -92,6 +133,7 @@ class NaturalLanguageQueryService:
         self._scheduling_horizon_days = scheduling_horizon_days
         self._scheduling_default_minutes_per_unit = scheduling_default_minutes_per_unit
         self._scheduling_use_overtime = scheduling_use_overtime
+        self._document_store = document_store
 
     def ask(
         self,
@@ -104,6 +146,7 @@ class NaturalLanguageQueryService:
             raise ValidationError("question must contain 1 to 2000 characters")
         attachment_facts: list[dict[str, Any]] = []
         attachment_summaries: list[dict[str, str]] = []
+        document_evidence: list[dict[str, Any]] = []
         conversation_history = [
             {
                 "role": str(item.get("role", "")),
@@ -114,27 +157,56 @@ class NaturalLanguageQueryService:
             and str(item.get("content", "")).strip()
         ]
         selected_attachments = [
-            item for item in (attachments or [])[:8] if str(item.get("text", "")).strip()
+            item for item in (attachments or [])[:8]
+            if str(item.get("text", "")).strip()
+            or str(item.get("documentId", "")).strip()
         ]
         per_attachment_limit = MAX_ATTACHMENT_CONTEXT_CHARACTERS // max(
             1, len(selected_attachments)
         )
         for item in selected_attachments:
             text = str(item.get("text", "")).strip()
-            excerpt = _attachment_excerpt(item, per_attachment_limit)
+            document_id = str(item.get("documentId", "")).strip()
+            retrieved: list[dict[str, Any]] = []
+            if document_id and self._document_store is not None:
+                retrieved = self._document_store.search([document_id], question, limit=4)
+            excerpt = (
+                "\n\n".join(
+                    f"[{chunk['location']}]\n{chunk['text']}" for chunk in retrieved
+                )[:per_attachment_limit]
+                if retrieved
+                else _attachment_excerpt(item, per_attachment_limit)
+            )
             attachment_summaries.append({
                 "name": str(item.get("name", "attachment"))[:255],
                 "deterministicSummary": str(item.get("summary", ""))[:2_500],
             })
+            document_evidence.extend({
+                "documentId": document_id,
+                "documentName": str(item.get("name", "attachment"))[:255],
+                "chunkId": str(chunk["chunkId"]),
+                "location": str(chunk["location"]),
+                "excerpt": str(chunk["text"])[:360],
+                "score": chunk.get("score"),
+            } for chunk in retrieved)
             attachment_facts.append({
                 "name": str(item.get("name", "attachment"))[:255],
                 "kind": str(item.get("kind", "DOCUMENT"))[:40],
                 "parser": str(item.get("parser", "LOCAL"))[:80],
                 "sha256": str(item.get("sha256", ""))[:64],
+                "documentId": document_id,
                 "extractedText": excerpt,
                 "truncated": bool(item.get("truncated")) or len(excerpt) < len(text),
+                "retrievedChunks": [
+                    {"chunkId": chunk["chunkId"], "location": chunk["location"]}
+                    for chunk in retrieved
+                ],
                 "trust": "UNTRUSTED_USER_ATTACHMENT_DATA",
             })
+            if document_id and self._document_store is not None:
+                image_data_url = self._document_store.image_data_url(document_id)
+                if image_data_url:
+                    attachment_facts[-1]["imageDataUrl"] = image_data_url
         as_of = datetime.now(UTC).isoformat()
         if not attachment_facts and SCHEDULE_REPLAN_INTENT.search(question):
             return self._schedule_proposal(as_of)
@@ -210,20 +282,46 @@ class NaturalLanguageQueryService:
                 for x in inspections if str(x["inspectionId"]) in selected_inspection_ids
             ]
             + [
-                {"type": "Attachment", "id": str(item["sha256"])}
-                for item in attachment_facts if item["sha256"]
+                {"type": "Attachment", "id": str(item.get("documentId") or item["sha256"])}
+                for item in attachment_facts if item.get("documentId") or item["sha256"]
+            ]
+            + [
+                {
+                    "type": "DocumentChunk",
+                    "id": str(chunk["chunkId"]),
+                    "location": str(chunk["location"]),
+                }
+                for item in attachment_facts
+                for chunk in item.get("retrievedChunks", [])
             ]
         )
+        deterministic_answer = _deterministic_capacity_answer(question, attachment_facts)
+        if deterministic_answer:
+            return {
+                "answer": deterministic_answer,
+                "source": "RULES",
+                "model": None,
+                "policyDecision": "ALLOW_READ_ONLY",
+                "asOf": as_of,
+                "sourceObjects": objects,
+                "documentEvidence": document_evidence,
+            }
         if self._model is None:
-            return self._fallback(
-                as_of, objects, orders, equipment, inspections, attachment_summaries
+            fallback = self._fallback(
+                as_of, objects, orders, equipment, inspections, attachment_summaries,
+                document_evidence,
             )
+            fallback["documentEvidence"] = document_evidence
+            return fallback
         try:
             result = self._model.answer(question, facts)
             if attachment_summaries and UNUSABLE_ATTACHMENT_ANSWER.match(result.answer.strip()):
-                return self._fallback(
-                    as_of, objects, orders, equipment, inspections, attachment_summaries
+                fallback = self._fallback(
+                    as_of, objects, orders, equipment, inspections, attachment_summaries,
+                    document_evidence,
                 )
+                fallback["documentEvidence"] = document_evidence
+                return fallback
             return {
                 "answer": result.answer,
                 "source": result.source,
@@ -231,11 +329,15 @@ class NaturalLanguageQueryService:
                 "policyDecision": "ALLOW_READ_ONLY",
                 "asOf": as_of,
                 "sourceObjects": objects,
+                "documentEvidence": document_evidence,
             }
         except ModelGatewayError:
-            return self._fallback(
-                as_of, objects, orders, equipment, inspections, attachment_summaries
+            fallback = self._fallback(
+                as_of, objects, orders, equipment, inspections, attachment_summaries,
+                document_evidence,
             )
+            fallback["documentEvidence"] = document_evidence
+            return fallback
 
     def _schedule_proposal(self, as_of: str) -> dict[str, Any]:
         if self._scheduling_agent is None:
@@ -416,19 +518,29 @@ class NaturalLanguageQueryService:
         equipment: list[dict[str, Any]],
         inspections: list[dict[str, Any]],
         attachments: list[dict[str, Any]] | None = None,
+        document_evidence: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
         suspended = sum(x["status"] == "SUSPENDED" for x in orders)
         abnormal = sum(x["state"] in {"DOWN", "ALARM", "OFFLINE"} for x in equipment)
         quarantined = sum(x["status"] == "QUARANTINED" for x in inspections)
         attachment_note = ""
-        if attachments:
+        if document_evidence:
+            evidence_lines = [
+                f"【{item['documentName']} · {item['location']}】\n{item['excerpt']}"
+                for item in document_evidence[:3]
+            ]
+            attachment_note = (
+                "当前模型本次未给出可用答案。本机文档检索已找到以下相关内容：\n"
+                + "\n\n".join(evidence_lines)
+            )
+        elif attachments:
             summaries = []
             for item in attachments:
                 summary = str(item.get("deterministicSummary", "")).strip()
                 name = str(item.get("name", "附件"))
                 summaries.append(f"【{name}】\n{summary or '已提取内容，但没有结构化摘要。'}")
             attachment_note = (
-                "本地模型本次未给出可用答案。以下是本机解析器已确认的内容：\n"
+                "当前模型本次未给出可用答案。以下是本机解析器已确认的内容：\n"
                 + "\n\n".join(summaries)
             )
         return {
