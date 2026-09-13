@@ -137,6 +137,20 @@ class ApiContractTests(unittest.TestCase):
         )
         self.assertEqual(422, spoofed_approval.status_code)
 
+    def test_agent_attachment_parse_returns_local_text_context(self):
+        response = self.client.post(
+            "/api/v1/agent/attachments/parse",
+            headers={"X-Dev-Actor": "demo-planner", "X-File-Name": "shift-note.txt"},
+            content="夜班设备 M-08 报警 E42".encode(),
+        )
+
+        self.assertEqual(200, response.status_code, response.text)
+        result = response.json()
+        self.assertEqual("PARSED", result["status"])
+        self.assertEqual("LOCAL_TEXT", result["parser"])
+        self.assertIn("M-08", result["text"])
+        self.assertTrue(result["localOnly"])
+
     def test_unified_aps_schedule_lifecycle(self):
         suffix = uuid4().hex[:8]
         work_center = f"WC-APS-{suffix}"

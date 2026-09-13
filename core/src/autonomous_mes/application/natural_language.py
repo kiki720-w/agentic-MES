@@ -71,16 +71,35 @@ class NaturalLanguageQueryService:
         self._scheduling_default_minutes_per_unit = scheduling_default_minutes_per_unit
         self._scheduling_use_overtime = scheduling_use_overtime
 
-    def ask(self, question: str) -> dict[str, Any]:
+    def ask(
+        self, question: str, attachments: list[dict[str, Any]] | None = None
+    ) -> dict[str, Any]:
         question = question.strip()
-        if not question or len(question) > 500:
-            raise ValidationError("question must contain 1 to 500 characters")
+        if not question or len(question) > 2000:
+            raise ValidationError("question must contain 1 to 2000 characters")
+        attachment_facts: list[dict[str, Any]] = []
+        remaining_characters = 32_000
+        for item in (attachments or [])[:8]:
+            text = str(item.get("text", "")).strip()
+            if not text or remaining_characters <= 0:
+                continue
+            excerpt = text[:min(12_000, remaining_characters)]
+            remaining_characters -= len(excerpt)
+            attachment_facts.append({
+                "name": str(item.get("name", "attachment"))[:255],
+                "kind": str(item.get("kind", "DOCUMENT"))[:40],
+                "parser": str(item.get("parser", "LOCAL"))[:80],
+                "sha256": str(item.get("sha256", ""))[:64],
+                "extractedText": excerpt,
+                "truncated": bool(item.get("truncated")) or len(excerpt) < len(text),
+                "trust": "UNTRUSTED_USER_ATTACHMENT_DATA",
+            })
         as_of = datetime.now(UTC).isoformat()
-        if SCHEDULE_REPLAN_INTENT.search(question):
+        if not attachment_facts and SCHEDULE_REPLAN_INTENT.search(question):
             return self._schedule_proposal(as_of)
-        if QUALITY_RECOMMENDATION_INTENT.search(question):
+        if not attachment_facts and QUALITY_RECOMMENDATION_INTENT.search(question):
             return self._quality_recommendation(question, as_of)
-        if ANALYZE_INCIDENTS_INTENT.search(question):
+        if not attachment_facts and ANALYZE_INCIDENTS_INTENT.search(question):
             return self._analyze_incidents(as_of)
         if WRITE_INTENT.search(question):
             resume = self._resume_proposal(question, as_of)
@@ -98,19 +117,27 @@ class NaturalLanguageQueryService:
         orders = self._orders.list(500)
         equipment = self._equipment.list(500)
         inspections = self._quality.list(500)
-        facts = {"asOf": as_of, **compact_operational_snapshot(
-            question, orders, equipment, inspections
-        )}
+        facts: dict[str, Any]
+        if attachment_facts:
+            facts = {
+                "asOf": as_of,
+                "attachments": attachment_facts,
+                "scope": "USER_ATTACHMENTS_ONLY",
+            }
+        else:
+            facts = {"asOf": as_of, **compact_operational_snapshot(
+                question, orders, equipment, inspections
+            )}
         selected_order_ids = {
-            str(item["workOrderId"]) for item in facts["workOrders"]
+            str(item["workOrderId"]) for item in facts.get("workOrders", [])
             if item.get("workOrderId")
         }
         selected_equipment_ids = {
-            str(item["equipmentId"]) for item in facts["equipment"]
+            str(item["equipmentId"]) for item in facts.get("equipment", [])
             if item.get("equipmentId")
         }
         selected_inspection_ids = {
-            str(item["inspectionId"]) for item in facts["qualityInspections"]
+            str(item["inspectionId"]) for item in facts.get("qualityInspections", [])
             if item.get("inspectionId")
         }
         objects = (
@@ -122,9 +149,15 @@ class NaturalLanguageQueryService:
                 {"type": "QualityInspection", "id": str(x["inspectionId"])}
                 for x in inspections if str(x["inspectionId"]) in selected_inspection_ids
             ]
+            + [
+                {"type": "Attachment", "id": str(item["sha256"])}
+                for item in attachment_facts if item["sha256"]
+            ]
         )
         if self._model is None:
-            return self._fallback(as_of, objects, orders, equipment, inspections)
+            return self._fallback(
+                as_of, objects, orders, equipment, inspections, attachment_facts
+            )
         try:
             result = self._model.answer(question, facts)
             return {
@@ -136,7 +169,9 @@ class NaturalLanguageQueryService:
                 "sourceObjects": objects,
             }
         except ModelGatewayError:
-            return self._fallback(as_of, objects, orders, equipment, inspections)
+            return self._fallback(
+                as_of, objects, orders, equipment, inspections, attachment_facts
+            )
 
     def _schedule_proposal(self, as_of: str) -> dict[str, Any]:
         if self._scheduling_agent is None:
@@ -316,12 +351,17 @@ class NaturalLanguageQueryService:
         orders: list[dict[str, Any]],
         equipment: list[dict[str, Any]],
         inspections: list[dict[str, Any]],
+        attachments: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
         suspended = sum(x["status"] == "SUSPENDED" for x in orders)
         abnormal = sum(x["state"] in {"DOWN", "ALARM", "OFFLINE"} for x in equipment)
         quarantined = sum(x["status"] == "QUARANTINED" for x in inspections)
+        attachment_note = (
+            f"已在本机解析 {len(attachments)} 个附件，但当前模型不可用，暂时不能解释附件内容。"
+            if attachments else ""
+        )
         return {
-            "answer": f"当前共有 {len(orders)} 个工单，其中 {suspended} 个暂停；{len(equipment)} 台设备中 {abnormal} 台异常；质量隔离 {quarantined} 项。模型不可用，以上为规则汇总。",
+            "answer": attachment_note or f"当前共有 {len(orders)} 个工单，其中 {suspended} 个暂停；{len(equipment)} 台设备中 {abnormal} 台异常；质量隔离 {quarantined} 项。模型不可用，以上为规则汇总。",
             "source": "RULES",
             "model": None,
             "policyDecision": "ALLOW_READ_ONLY",

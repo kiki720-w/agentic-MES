@@ -48,6 +48,7 @@ export default function App() {
   const [actor, setActor] = useState("demo-planner");
   const [profiles, setProfiles] = useState([{ subjectId: "demo-planner", displayName: "Demo Planner" }]);
   const [zoom, setZoom] = useState(110);
+  const [incomingDrop, setIncomingDrop] = useState(null);
   const item = navItems.find((candidate) => candidate.id === active) || navItems[0];
 
   useEffect(() => {
@@ -63,11 +64,19 @@ export default function App() {
     return () => { mounted = false; clearInterval(timer); };
   }, []);
 
+  useEffect(() => {
+    desktop.files.onDrop?.((files, error) => {
+      setIncomingDrop({ id: `${Date.now()}-${Math.random()}`, files, error });
+      setActive("workspace");
+    });
+    return () => desktop.files.offDrop?.();
+  }, []);
+
   const pageProps = { actor, onNavigate: setActive };
   return <ErrorBoundary><div className="app-shell">
     <Sidebar active={active} onChange={setActive} online={health.online} agentLevel={health.detail?.schedulingAgentLevel} actor={actor} profiles={profiles} onActorChange={setActor} />
     <section className="app-main"><header className="titlebar drag-region"><div><span>{item.label}</span><small>{item.hint}</small></div><div className="titlebar-actions no-drag"><div className="zoom-control" title="界面缩放"><button disabled={zoom <= 100} onClick={async () => setZoom(await desktop.window.zoom(-0.1))}>A−</button><span>{zoom}%</span><button disabled={zoom >= 140} onClick={async () => setZoom(await desktop.window.zoom(0.1))}>A＋</button></div><span className="environment"><i />LOCAL FACTORY</span><WindowControls /></div></header><div className="content-area">
-      {active === "workspace" && <AgentWorkspace health={health} {...pageProps} />}
+      {active === "workspace" && <AgentWorkspace health={health} incomingDrop={incomingDrop} onDropHandled={(id) => setIncomingDrop((current) => current?.id === id ? null : current)} {...pageProps} />}
       {active === "tower" && <ControlTower {...pageProps} />}
       {active === "planning" && <PlanningCenter {...pageProps} />}
       {active === "results" && <PlanningResults {...pageProps} />}

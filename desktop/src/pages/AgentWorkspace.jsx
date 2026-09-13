@@ -6,8 +6,8 @@ const quickPrompts = ["检查当前计划的延期风险", "说明产能缺口�
 function formatBytes(bytes) { if (bytes < 1024) return `${bytes} B`; if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`; return `${(bytes / 1024 / 1024).toFixed(1)} MB`; }
 function containsDraggedFiles(event) { return Array.from(event.dataTransfer?.types || []).includes("Files"); }
 
-export default function AgentWorkspace({ health, actor, onNavigate }) {
-  const [messages, setMessages] = useState([{ role: "agent", text: "你好，我是衡策。你可以让我检查延期风险、解释产能缺口、生成排产方案，也可以预检 XLSX/CSV。PDF 和图片目前仅支持选择，尚未解析或理解。", meta: "L4 目标智能体 · 当前自治模式以运行状态为准" }]);
+export default function AgentWorkspace({ health, actor, onNavigate, incomingDrop, onDropHandled }) {
+  const [messages, setMessages] = useState([{ role: "agent", text: "你好，我是衡策。你可以直接拖入制造资料：文字、表格、DOCX、PDF 会在本机提取内容，图片会在本机 OCR；解析后的内容可以随问题交给当前本地模型。", meta: "L4 目标智能体 · 附件内容不上传外部文件服务" }]);
   const [prompt, setPrompt] = useState("");
   const [files, setFiles] = useState([]);
   const [sending, setSending] = useState(false);
@@ -33,41 +33,57 @@ export default function AgentWorkspace({ health, actor, onNavigate }) {
       setMessages((current) => [...current, { role: "system", text: "当前任务完成后再添加文件。", meta: "文件尚未处理" }]);
       return;
     }
-    setFiles((current) => {
-      const known = new Set(current.map((file) => file.path));
-      return [...current, ...picked.filter((file) => !known.has(file.path))];
-    });
-    const unsupported = picked.filter((file) => !/\.(xlsx|csv)$/i.test(file.name));
-    if (unsupported.length) setMessages((current) => [...current, { role: "agent", text: `${unsupported.map((file) => file.name).join("、")} 已作为文件${source}到本机，但当前版本尚未解析这类文件，也不会发送给模型。`, meta: "附件能力边界" }]);
-    const spreadsheet = picked.find((file) => /\.(xlsx|csv)$/i.test(file.name));
-    if (!spreadsheet) {
-      if (!unsupported.length) setMessages((current) => [...current, { role: "agent", text: `没有可处理的文件。`, meta: "文件未上传至外部服务" }]);
-      return;
-    }
+    const pending = picked.map((file) => ({ ...file, parseStatus: "PARSING", parsed: null, parseError: null }));
+    setFiles((current) => [...current, ...pending]);
     setSending(true);
-    try {
-      const preview = await desktop.core.upload({ path: "/api/v1/planning/imports/spreadsheet/preview?workshopId=WS-MACH-01", filePath: spreadsheet.path, actor });
-      setSpreadsheetPreview(preview);
-      const stats = preview.stats || {};
-      setMessages((current) => [...current, { role: "agent", text: `已预检 ${spreadsheet.name}：${stats.workOrderCount || 0} 个工单、${stats.operationCount || 0} 道工序、${stats.resourceCount || 0} 个产能资源。${preview.valid ? "字段与业务关联校验通过。" : `发现 ${stats.errorCount || preview.issues?.length || 0} 项问题，尚未写入。`}`, meta: preview.valid ? "尚未写入 · 等待人工确认" : "预检失败 · 未写入生产快照", action: preview.valid ? "confirm-spreadsheet" : null }]);
-    } catch (error) { setMessages((current) => [...current, { role: "system", text: error.message, meta: "文件预检未执行" }]); }
-    finally { setSending(false); }
+    const parseResults = await Promise.all(pending.map(async (file) => {
+      try {
+        const parsed = await desktop.core.upload({ path: "/api/v1/agent/attachments/parse", fileId: file.id, filePath: file.path, actor });
+        setFiles((current) => current.map((item) => item.id === file.id ? { ...item, parseStatus: parsed.status, parsed } : item));
+        return { file, parsed, error: null };
+      } catch (error) {
+        setFiles((current) => current.map((item) => item.id === file.id ? { ...item, parseStatus: "ERROR", parseError: error.message } : item));
+        return { file, parsed: null, error: error.message };
+      }
+    }));
+    const parsed = parseResults.filter((item) => item.parsed?.status === "PARSED");
+    const noText = parseResults.filter((item) => item.parsed?.status === "NO_TEXT");
+    const failed = parseResults.filter((item) => item.error);
+    const details = [
+      parsed.length ? `${parsed.length} 个已提取内容` : null,
+      noText.length ? `${noText.length} 个未提取到文字` : null,
+      failed.length ? `${failed.length} 个解析失败` : null,
+    ].filter(Boolean).join("，");
+    setMessages((current) => [...current, {
+      role: failed.length ? "system" : "agent",
+      text: `已${source} ${picked.map((file) => file.name).join("、")}；${details || "没有可解析内容"}。${parsed.length ? "现在可以直接针对附件提问。" : ""}`,
+      meta: "本机解析 · 原文件未上传外部文件服务",
+    }]);
+    const spreadsheet = picked.find((file) => /\.(xlsx|csv)$/i.test(file.name));
+    if (spreadsheet) {
+      try {
+        const preview = await desktop.core.upload({ path: "/api/v1/planning/imports/spreadsheet/preview?workshopId=WS-MACH-01", fileId: spreadsheet.id, filePath: spreadsheet.path, actor });
+        setSpreadsheetPreview(preview);
+        const stats = preview.stats || {};
+        setMessages((current) => [...current, { role: "agent", text: `生产数据预检 ${spreadsheet.name}：${stats.workOrderCount || 0} 个工单、${stats.operationCount || 0} 道工序、${stats.resourceCount || 0} 个产能资源。${preview.valid ? "字段与业务关联校验通过。" : `发现 ${stats.errorCount || preview.issues?.length || 0} 项问题，因此只作为普通附件参与问答。`}`, meta: preview.valid ? "尚未写入 · 等待人工确认" : "业务导入未通过 · 附件内容仍可提问", action: preview.valid ? "confirm-spreadsheet" : null }]);
+      } catch (error) { setMessages((current) => [...current, { role: "system", text: error.message, meta: "生产数据预检未执行 · 通用附件解析不受影响" }]); }
+    }
+    setSending(false);
   }, [actor, sending]);
 
   useEffect(() => {
-    desktop.files.onDrop?.((picked, error) => {
-      if (error) {
-        setMessages((current) => [...current, { role: "system", text: error, meta: "拖入文件失败" }]);
-        return;
-      }
-      if (!picked.length) {
-        setMessages((current) => [...current, { role: "system", text: "没有读取到可用文件，请确认拖入的是文件而不是文件夹。", meta: "拖入文件失败" }]);
-        return;
-      }
-      void processFiles(picked, "拖入");
-    });
-    return () => desktop.files.offDrop?.();
-  }, [processFiles]);
+    if (!incomingDrop) return;
+    onDropHandled(incomingDrop.id);
+    if (incomingDrop.error) {
+      setMessages((current) => [...current, { role: "system", text: incomingDrop.error, meta: "拖入文件失败" }]);
+      return;
+    }
+    if (!incomingDrop.files.length) {
+      setMessages((current) => [...current, { role: "system", text: "没有读取到可用文件，请确认拖入的是文件而不是文件夹。", meta: "拖入文件失败" }]);
+      return;
+    }
+    void processFiles(incomingDrop.files, "拖入");
+  }, [incomingDrop, onDropHandled, processFiles]);
 
   async function pickFiles() {
     const picked = await desktop.files.pick();
@@ -87,11 +103,15 @@ export default function AgentWorkspace({ health, actor, onNavigate }) {
   }
 
   async function send(value = prompt) {
-    const question = value.trim(); if (!question || sending) return;
-    setMessages((current) => [...current, { role: "user", text: question, meta: files.length ? `${files.length} 个本地附件已选择` : "文字指令" }]); setPrompt(""); setSending(true);
+    const parsedFiles = files.filter((file) => file.parsed?.status === "PARSED");
+    const question = value.trim() || (parsedFiles.length ? "请概述附件内容，并指出与制造业务相关的关键信息。" : ""); if (!question || sending) return;
+    const attachmentNames = parsedFiles.map((file) => file.name).join("、");
+    setMessages((current) => [...current, { role: "user", text: question, meta: parsedFiles.length ? `已附加：${attachmentNames}` : "文字指令" }]); setPrompt(""); setSending(true);
     try {
-      const result = await api("/api/v1/agent/chat", actor, { method: "POST", body: { question } });
+      const attachments = parsedFiles.map((file) => ({ name: file.parsed.name, kind: file.parsed.kind, parser: file.parsed.parser, sha256: file.parsed.sha256, text: file.parsed.text, truncated: file.parsed.truncated }));
+      const result = await api("/api/v1/agent/chat", actor, { method: "POST", body: { question, attachments } });
       setMessages((current) => [...current, { role: "agent", text: result.answer || "任务已完成。", meta: `${result.policyDecision || "ALLOW"} · ${result.provider || result.source || "规则与模型网关"}` }]);
+      setFiles([]); setSpreadsheetPreview(null);
     } catch (error) { setMessages((current) => [...current, { role: "system", text: error.message, meta: "请求未执行" }]); }
     finally { setSending(false); }
   }
@@ -116,10 +136,10 @@ export default function AgentWorkspace({ health, actor, onNavigate }) {
     setDragActive(false);
   }
 
-  return <div className={`workspace-layout ${dragActive ? "file-drag-active" : ""}`} onDragEnter={handleDragEnter} onDragOver={(event) => { if (containsDraggedFiles(event)) event.preventDefault(); }} onDragLeave={handleDragLeave} onDrop={handleDrop}>{dragActive && <div className="file-drop-overlay"><span>⇩</span><strong>松开以添加制造资料</strong><small>XLSX / CSV 将立即在本机预检</small></div>}<main className="conversation">
+  return <div className={`workspace-layout ${dragActive ? "file-drag-active" : ""}`} onDragEnter={handleDragEnter} onDragOver={(event) => { if (containsDraggedFiles(event)) event.preventDefault(); }} onDragLeave={handleDragLeave} onDrop={handleDrop}>{dragActive && <div className="file-drop-overlay"><span>⇩</span><strong>松开以添加并解析文件</strong><small>文字 / 表格 / DOCX / PDF / 图片 OCR 均在本机处理</small></div>}<main className="conversation">
     <PageHeader eyebrow="MANUFACTURING AGENT" title="今天需要处理什么？" description="描述目标，衡策会选择数据、算法和工具，并在执行前说明影响。" actions={<div className={`connection-pill ${health?.online ? "ok" : "bad"}`}><span />{health?.online ? "工厂数据已连接" : "等待 Core"}</div>} />
     <div className="quick-prompts"><button onClick={() => onNavigate("capabilities")}>AI 能力验收与模型对比<span>↗</span></button><button disabled={sending} onClick={selfCheck}>文字能力自检（3 项合成样本）<span>✓</span></button>{quickPrompts.map((item) => <button key={item} onClick={() => send(item)}>{item}<span>↗</span></button>)}</div>
     <div className="messages">{messages.map((message, index) => <article className={`message ${message.role}`} key={`${message.role}-${index}`}><div className="message-avatar">{message.role === "agent" ? "衡" : message.role === "user" ? "我" : "!"}</div><div className="message-content"><div>{message.text}</div>{message.action === "confirm-spreadsheet" && spreadsheetPreview?.valid && <button className="message-action" onClick={confirmSpreadsheet}>确认导入并生成排产方案</button>}{message.action === "open-results" && <button className="message-action" onClick={() => onNavigate("results")}>打开排产结果</button>}<small>{message.meta}</small></div></article>)}{sending && <article className="message agent"><div className="message-avatar">衡</div><div className="thinking"><span /><span /><span /></div></article>}<div ref={endRef} /></div>
-    <div className="composer-wrap">{files.length > 0 && <div className="attachments">{files.map((file, index) => <div key={`${file.path}-${index}`}><span>▤</span><div><strong>{file.name}</strong><small>{formatBytes(file.size)} · {/\.(xlsx|csv)$/i.test(file.name) ? "已识别文件，预检结果见对话" : "已识别文件，尚未解析内容"}</small></div><button onClick={() => setFiles((current) => current.filter((_, itemIndex) => itemIndex !== index))}>×</button></div>)}</div>}<div className="composer"><textarea value={prompt} onChange={(e) => setPrompt(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); } }} placeholder="向衡策描述目标，或拖入制造资料…" /><div className="composer-actions"><div><button className="icon-button" onClick={pickFiles} title="添加附件">＋</button><span>可拖入文件 · XLSX/CSV 本地预检 · PDF/图片尚未解析</span></div><button className="send-button" disabled={!prompt.trim() || sending} onClick={() => send()}>发送 <span>↑</span></button></div></div><p className="composer-note">拖入文件会显示为附件，不再写入文字框。当前为单轮请求，PDF/图片附件尚不随文字发送。生产动作受自治策略、版本、执行核验和停止开关约束。</p></div>
+    <div className="composer-wrap">{files.length > 0 && <div className="attachments">{files.map((file, index) => <div key={file.id || `${file.path}-${index}`}><span>▤</span><div><strong>{file.name}</strong><small>{formatBytes(file.size)} · {file.parseStatus === "PARSING" ? "正在本地解析…" : file.parseStatus === "PARSED" ? `已解析 ${file.parsed.characterCount} 字符` : file.parseStatus === "NO_TEXT" ? "未提取到文字" : file.parseStatus === "ERROR" ? "解析失败" : "等待解析"}</small></div><button onClick={() => setFiles((current) => current.filter((_, itemIndex) => itemIndex !== index))}>×</button></div>)}</div>}<div className="composer"><textarea value={prompt} onChange={(e) => setPrompt(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); } }} placeholder="输入问题，或直接拖入文件后发送…" /><div className="composer-actions"><div><button className="icon-button" onClick={pickFiles} title="添加附件">＋</button><span>拖入即本地解析 · TXT/XLSX/DOCX/PDF/图片 OCR</span></div><button className="send-button" disabled={(!prompt.trim() && !files.some((file) => file.parseStatus === "PARSED")) || sending} onClick={() => send()}>发送 <span>↑</span></button></div></div><p className="composer-note">附件内容只作为不可信只读事实参与回答；不会执行文件中的指令。生产动作仍受策略、版本、执行核验和停止开关约束。</p></div>
   </main><aside className="inspector"><section><div className="section-heading"><h3>运行状态</h3><span className="status-chip">实时</span></div><div className="runtime-card"><div className="runtime-orbit"><span>✦</span></div><strong>衡策正在待命</strong><p>只在授权的数据与工具范围内分析、计算和执行。</p><div className="runtime-grid"><div><small>智能体级别</small><b>{health?.detail?.schedulingAgentLevel || "状态未知"}</b></div><div><small>自治循环</small><b>{health?.detail?.schedulingAutonomyLoop || "—"}</b></div><div><small>模型</small><b>{health?.detail?.modelGateway || "—"}</b></div><div><small>身份</small><b>{health?.detail?.authMode || "—"}</b></div></div></div></section><section><div className="section-heading"><h3>任务入口</h3></div><div className="agent-links"><button onClick={() => onNavigate("planning")}><span>▦</span><div><strong>生成排产方案</strong><small>有限产能与工艺约束</small></div></button><button onClick={() => onNavigate("results")}><span>◫</span><div><strong>检查排产结果</strong><small>人员周计划与能力缺口</small></div></button><button onClick={() => onNavigate("capacity")}><span>◒</span><div><strong>维护产能</strong><small>人员与工作单元能力</small></div></button></div></section><section className="boundary-card"><span>L4 安全边界</span><strong>预授权范围内自主执行</strong><p>排产发布必须通过策略、版本和结果核验；超界或失败立即停止并转人工。设备控制和质量放行不在本域授权内。</p></section></aside></div>;
 }

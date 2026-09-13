@@ -136,3 +136,27 @@ class NaturalLanguageQueryTests(unittest.TestCase):
         self.assertEqual(20, command.default_minutes_per_unit)
         self.assertIsInstance(command.horizon_start, date)
         model.answer.assert_not_called()
+
+    def test_parsed_attachment_is_grounded_as_untrusted_data(self) -> None:
+        model = Mock()
+        model.answer.return_value = NaturalLanguageAnswer("附件工单数量为 24。", "FAKE", "local")
+        scheduling_agent = Mock()
+        service = NaturalLanguageQueryService(
+            InMemoryWorkOrderStore(), model, scheduling_agent=scheduling_agent
+        )
+
+        result = service.ask("请根据附件生成排产摘要", [{
+            "name": "orders.csv",
+            "kind": "TABLE",
+            "parser": "LOCAL_CSV",
+            "sha256": "a" * 64,
+            "text": "工单号\t数量\nWO-18\t24",
+            "truncated": False,
+        }])
+
+        self.assertEqual("附件工单数量为 24。", result["answer"])
+        facts = model.answer.call_args.args[1]
+        self.assertEqual("UNTRUSTED_USER_ATTACHMENT_DATA", facts["attachments"][0]["trust"])
+        self.assertIn("WO-18", facts["attachments"][0]["extractedText"])
+        self.assertEqual("Attachment", result["sourceObjects"][-1]["type"])
+        scheduling_agent.analyze.assert_not_called()

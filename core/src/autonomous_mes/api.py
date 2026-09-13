@@ -23,6 +23,10 @@ from autonomous_mes.application.agent_tools import (
     ListQualityCandidatesTool,
     ToolContext,
 )
+from autonomous_mes.application.attachment_parser import (
+    MAX_ATTACHMENT_BYTES,
+    parse_attachment,
+)
 from autonomous_mes.application.capability_benchmark import CapabilityBenchmarks, capability_catalog
 from autonomous_mes.application.capability_check import run_text_check
 from autonomous_mes.application.connector_security import HmacConnectorAuthenticator
@@ -312,9 +316,20 @@ class ReworkApprovalBody(BaseModel):
     route: list[str]
 
 
+class AttachmentContextBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    name: str = Field(min_length=1, max_length=255)
+    kind: str = Field(min_length=1, max_length=40)
+    parser: str = Field(min_length=1, max_length=80)
+    sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
+    text: str = Field(min_length=1, max_length=30_000)
+    truncated: bool = False
+
+
 class NaturalLanguageBody(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    question: str = Field(min_length=1, max_length=500)
+    question: str = Field(min_length=1, max_length=2000)
+    attachments: list[AttachmentContextBody] = Field(default_factory=list, max_length=8)
 
 
 class ModelGatewayConfigurationBody(BaseModel):
@@ -928,7 +943,22 @@ def agent_chat(
     identity: Annotated[Identity, Depends(current_identity)],
 ) -> dict[str, object]:
     authorize_human(identity, "OPERATOR", "SUPERVISOR", "QUALITY", "PLANNER")
-    return natural_language_service.ask(body.question)
+    return natural_language_service.ask(
+        body.question, [attachment.model_dump() for attachment in body.attachments]
+    )
+
+
+@app.post("/api/v1/agent/attachments/parse")
+async def parse_agent_attachment(
+    request: Request,
+    identity: Annotated[Identity, Depends(current_identity)],
+    x_file_name: str = Header(default="attachment.txt", alias="X-File-Name"),
+) -> dict[str, object]:
+    authorize_human(identity, "OPERATOR", "SUPERVISOR", "QUALITY", "PLANNER")
+    content = await request.body()
+    if len(content) > MAX_ATTACHMENT_BYTES:
+        raise ValidationError("attachment exceeds 15 MB limit")
+    return parse_attachment(content, unquote(x_file_name))
 
 
 @app.get("/", response_class=HTMLResponse, include_in_schema=False)

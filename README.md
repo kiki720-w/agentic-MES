@@ -6,7 +6,9 @@
 
 ## L4 排产自治运行时（2026-09-13）
 
-桌面 0.3.1 与 Core 已实现排产域第一条 L4 目标闭环：观察、计划、策略授权、幂等执行、回读核验、失败回滚和停止开关。默认处于 SHADOW、循环关闭、执行目标为空；真实验证会拒绝演示投影、缺工艺标准、能力缺口和非原子计划替换。模拟适配器只用于自动测试，尚未接入真实 MES 写回，因此当前声明为 `L4_RUNTIME_IMPLEMENTED_NOT_PRODUCTION_VALIDATED`。详见 [L4 排产运行时说明](docs/l4-scheduling-runtime.md)。
+桌面 0.4.0 与 Core 已实现排产域第一条 L4 目标闭环：观察、计划、策略授权、幂等执行、回读核验、失败回滚和停止开关。默认处于 SHADOW、循环关闭、执行目标为空；真实验证会拒绝演示投影、缺工艺标准、能力缺口和非原子计划替换。模拟适配器只用于自动测试，尚未接入真实 MES 写回，因此当前声明为 `L4_RUNTIME_IMPLEMENTED_NOT_PRODUCTION_VALIDATED`。详见 [L4 排产运行时说明](docs/l4-scheduling-runtime.md)。
+
+Agent 工作台已完成 Codex 式附件链路：全窗口拖入、本机解析、附件随问题进入当前本地模型并返回有依据的回答。支持常见文字文件、CSV/XLSX、DOCX、文本或扫描 PDF，以及 PNG/JPG 本地 OCR；详见 [本地附件拖放与理解](docs/local-attachment-understanding.md)。
 
 早期自建 MES 流程仍保留为离线模拟器和回归测试夹具，不再作为正式产品入口或权威生产数据源。
 
@@ -26,7 +28,7 @@
 - Agent：产品目标为分域 L4；排产自治运行时已实现第一版，当前默认影子运行，尚未通过真实 MES 和工厂现场验收
 - 推理：DeepSeek、Kimi 或其他 OpenAI 兼容 API，经可热切换模型网关调用
 - 部署：本地优先；支持厂内模型服务器，云模型仅由客户主动选择
-- 人工输入：Agent 工作台支持文字、按钮选取和文件拖入；拖入文件保持为附件，XLSX/CSV 经预检、指纹确认后生成标准快照
+- 人工输入：Agent 工作台支持文字、按钮选取和全窗口文件拖入；文字、表格、DOCX、PDF 和图片 OCR 均在本机解析，XLSX/CSV 还可经预检、指纹确认后生成标准快照
 - 工时模型：工序需求 = 准备工时 + 剩余数量 × 单件工时，缺失时才使用排产回退值
 - 大样本界面：输入、产能、计算与全宽结果分离，长表按搜索和分页查看
 
@@ -93,6 +95,7 @@
 - `docs/step-38-person-centric-scheduling-acceptance.md`：全页面 Agent 入口、真实输入摘要及人员日/周排程验收记录
 - `docs/step-39-provider-neutral-model-gateway-acceptance.md`：供应商中立模型网关、管理员 BYOK 设置与安全回退验收记录
 - `docs/desktop-client-foundation.md`：Windows 桌面客户端、安全 IPC、文件预检和本机打包验收记录
+- `docs/local-attachment-understanding.md`：全窗口拖放、本地文件解析、OCR、附件问答边界与实测证据
 - `GET /workspace`：自然语言、XLSX/CSV 预检与衡策任务工作台
 - `GET /capacity`：版本化人员与工作单元产能维护
 - `GET /planning/results`：标明人工/虚拟员工身份的全宽排产结果

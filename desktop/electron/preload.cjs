@@ -17,11 +17,16 @@ window.addEventListener("dragover", (event) => {
 window.addEventListener("drop", async (event) => {
   if (!containsFiles(event)) return;
   event.preventDefault();
-  const filePaths = Array.from(event.dataTransfer.files || [])
-    .map((file) => webUtils.getPathForFile(file))
-    .filter(Boolean);
   try {
-    const files = await ipcRenderer.invoke("files:register-drop", filePaths);
+    const entries = await Promise.all(Array.from(event.dataTransfer.files || []).slice(0, 8).map(async (file) => {
+      const filePath = webUtils.getPathForFile(file);
+      if (filePath) return { path: filePath };
+      return {
+        name: file.name,
+        bytes: new Uint8Array(await file.arrayBuffer()),
+      };
+    }));
+    const files = await ipcRenderer.invoke("files:register-drop", entries);
     droppedFilesHandler?.(files, null);
   } catch (error) {
     droppedFilesHandler?.([], error?.message || "无法读取拖入的文件");

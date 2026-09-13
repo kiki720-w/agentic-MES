@@ -52,8 +52,8 @@ def capability_catalog() -> list[dict[str, str]]:
     return [
         {"id": "text", "name": "文字理解", "status": "READY_TO_TEST", "detail": "9 道制造合成题；逐题查看答案、依据与耗时。"},
         {"id": "spreadsheet", "name": "XLSX / CSV", "status": "IMPLEMENTED_NOT_BENCHMARKED", "detail": "现有本地确定性解析与预检；本中心尚未建立多样文件准确率样本集。"},
-        {"id": "pdf", "name": "PDF", "status": "NOT_INTEGRATED", "detail": "仅选择，尚无文本、表格或扫描件理解。"},
-        {"id": "image", "name": "图片", "status": "NOT_INTEGRATED", "detail": "仅选择/预览，尚无 OCR、图纸、仪表或缺陷识别。"},
+        {"id": "pdf", "name": "PDF", "status": "IMPLEMENTED_NOT_BENCHMARKED", "detail": "本地文本提取；无文本页尝试对内嵌图片执行 OCR，尚未建立准确率样本集。"},
+        {"id": "image", "name": "图片", "status": "IMPLEMENTED_NOT_BENCHMARKED", "detail": "本地 RapidOCR 已接入；可提取中英文文字，尚不判断外观缺陷或图纸几何。"},
         {"id": "conversation", "name": "连续会话", "status": "NOT_INTEGRATED", "detail": "当前仅发送本轮问题，不能验收多轮上下文。"},
         {"id": "safety", "name": "真实执行安全", "status": "NOT_BENCHMARKED", "detail": "已有确定性权限和审批回归测试；本中心不调用生产动作，文字拒绝不能证明系统安全。"},
     ]

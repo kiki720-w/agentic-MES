@@ -1,5 +1,6 @@
 const { app, BrowserWindow, dialog, ipcMain } = require("electron");
 const { spawn } = require("node:child_process");
+const { randomUUID } = require("node:crypto");
 const fs = require("node:fs");
 const path = require("node:path");
 
@@ -8,25 +9,44 @@ const CORE_ENDPOINT = new URL(CORE_URL);
 let mainWindow;
 let coreProcess;
 let coreStartedByDesktop = false;
-const selectedFiles = new Set();
+const selectedFiles = new Map();
 let desktopZoomFactor = 1.1;
+
+function rememberSelectedFile(record) {
+  const id = randomUUID();
+  selectedFiles.set(id, record);
+  while (selectedFiles.size > 100) selectedFiles.delete(selectedFiles.keys().next().value);
+  return { id, path: record.path || null, name: record.name, size: record.size };
+}
 
 function registerSelectedFiles(filePaths) {
   const files = [];
-  for (const filePath of [...new Set(filePaths)].slice(0, 20)) {
+  for (const filePath of [...new Set(filePaths)].slice(0, 8)) {
     try {
       const resolved = path.resolve(String(filePath || ""));
       const stat = fs.statSync(resolved);
       if (!stat.isFile()) continue;
-      selectedFiles.add(resolved);
-      files.push({
+      files.push(rememberSelectedFile({
         path: resolved,
         name: path.basename(resolved),
         size: stat.size,
-      });
+      }));
     } catch {
       // Ignore missing files and folders. The renderer reports an empty drop when none remain.
     }
+  }
+  return files;
+}
+
+function registerDroppedFiles(entries) {
+  const files = [];
+  const paths = entries.filter((entry) => entry?.path).map((entry) => entry.path);
+  files.push(...registerSelectedFiles(paths));
+  for (const entry of entries.filter((item) => !item?.path).slice(0, 8 - files.length)) {
+    const name = path.basename(String(entry?.name || ""));
+    const content = Buffer.from(entry?.bytes || []);
+    if (!name || !content.length || content.length > 15 * 1024 * 1024) continue;
+    files.push(rememberSelectedFile({ name, size: content.length, content }));
   }
   return files;
 }
@@ -157,25 +177,32 @@ function registerIpc() {
   });
   ipcMain.handle("core:upload", async (_event, request = {}) => {
     const apiPath = validateCorePath(request.path);
-    const filePath = path.resolve(String(request.filePath || ""));
-    if (!selectedFiles.has(filePath)) throw new Error("File was not selected in CAPAXION");
-    const extension = path.extname(filePath).toLowerCase();
-    if (![".xlsx", ".csv"].includes(extension)) {
-      throw new Error("Only selected XLSX and CSV files can enter spreadsheet preview");
+    let selected = selectedFiles.get(String(request.fileId || ""));
+    if (!selected && request.filePath) {
+      const requestedPath = path.resolve(String(request.filePath));
+      selected = [...selectedFiles.values()].find((item) => item.path === requestedPath);
     }
-    const stat = fs.statSync(filePath);
-    if (!stat.isFile() || stat.size > 5 * 1024 * 1024) {
-      throw new Error("Spreadsheet must be a file no larger than 5 MB");
+    if (!selected) throw new Error("File was not selected or dropped in CAPAXION");
+    const extension = path.extname(selected.name).toLowerCase();
+    const content = selected.content || fs.readFileSync(selected.path);
+    if (apiPath === "/api/v1/planning/imports/spreadsheet/preview") {
+      if (![".xlsx", ".csv"].includes(extension) || content.length > 5 * 1024 * 1024) {
+        throw new Error("Spreadsheet must be XLSX or CSV and no larger than 5 MB");
+      }
+    } else if (apiPath === "/api/v1/agent/attachments/parse") {
+      if (content.length > 15 * 1024 * 1024) throw new Error("Attachment exceeds 15 MB");
+    } else {
+      throw new Error("File upload path is outside the desktop attachment boundary");
     }
     const headers = new Headers(request.headers || {});
     headers.set("Content-Type", "application/octet-stream");
-    headers.set("X-File-Name", encodeURIComponent(path.basename(filePath)));
+    headers.set("X-File-Name", encodeURIComponent(selected.name));
     headers.set("X-Dev-Actor", request.actor || "demo-planner");
     const response = await fetch(`${CORE_URL}${apiPath}`, {
       method: "POST",
       headers,
-      body: fs.readFileSync(filePath),
-      signal: AbortSignal.timeout(30000),
+      body: content,
+      signal: AbortSignal.timeout(apiPath === "/api/v1/agent/attachments/parse" ? 120000 : 30000),
     });
     const payload = await response.json().catch(() => null);
     if (!response.ok) {
@@ -189,16 +216,16 @@ function registerIpc() {
       title: "添加制造资料",
       properties: ["openFile", "multiSelections"],
       filters: [
-        { name: "制造资料", extensions: ["xlsx", "csv", "pdf", "png", "jpg", "jpeg"] },
+        { name: "可解析资料", extensions: ["xlsx", "csv", "docx", "pdf", "txt", "md", "log", "json", "yaml", "yml", "xml", "png", "jpg", "jpeg"] },
         { name: "全部文件", extensions: ["*"] },
       ],
     });
     if (result.canceled) return [];
     return registerSelectedFiles(result.filePaths);
   });
-  ipcMain.handle("files:register-drop", (_event, filePaths = []) => {
-    if (!Array.isArray(filePaths)) throw new Error("Invalid dropped file list");
-    return registerSelectedFiles(filePaths);
+  ipcMain.handle("files:register-drop", (_event, entries = []) => {
+    if (!Array.isArray(entries)) throw new Error("Invalid dropped file list");
+    return registerDroppedFiles(entries);
   });
 }
 

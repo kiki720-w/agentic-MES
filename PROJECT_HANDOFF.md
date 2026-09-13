@@ -14,7 +14,7 @@ GitHub：https://github.com/kiki720-w/capaxion
 
 ## L4 排产自治运行时（2026-09-13）
 
-产品终点已明确为 L4 Agent。桌面 0.3.1 与 Core 新增排产域观察—计划—策略—执行—核验—回滚闭环、快照二次版本校验、幂等键、停止开关和三种模式。默认 SHADOW、循环关闭、执行目标 NONE；模拟执行器仅可在 simulator mode 使用，真实 MES 写回尚未接入。当前只能声明 `L4_RUNTIME_IMPLEMENTED_NOT_PRODUCTION_VALIDATED`。详见 [L4 运行时说明](docs/l4-scheduling-runtime.md)。
+产品终点已明确为 L4 Agent。桌面 0.4.0 与 Core 新增排产域观察—计划—策略—执行—核验—回滚闭环、快照二次版本校验、幂等键、停止开关和三种模式。默认 SHADOW、循环关闭、执行目标 NONE；模拟执行器仅可在 simulator mode 使用，真实 MES 写回尚未接入。当前只能声明 `L4_RUNTIME_IMPLEMENTED_NOT_PRODUCTION_VALIDATED`。详见 [L4 运行时说明](docs/l4-scheduling-runtime.md)。
 
 ## 新对话先读这里
 
@@ -64,7 +64,7 @@ GitHub：https://github.com/kiki720-w/capaxion
 - 可治理质量风险策略、历史影响仿真、maker-checker 审批和回滚草稿。
 - 统一 APS 快照、有限产能排产、资源能力、标准工时、计划状态机和人工移动排产结果。
 - 人员日排程和固定六工作日周计划；大表支持搜索、分页与横向滚动。
-- Agent 工作台支持自然语言、文件按钮和系统拖放；拖入文件不再落成输入框文字，XLSX/CSV 自动进入本地预检，图片和 PDF 只登记为本地附件，尚未解析或发送给模型。
+- Agent 工作台支持自然语言、文件按钮和全窗口系统拖放；TXT/Markdown/JSON/CSV/XLSX/DOCX/PDF/PNG/JPG 在 Core 本机解析，扫描 PDF 与图片使用本地 OCR，解析内容可随问题进入当前本地模型。
 - 排产域 L4 目标运行时可观察、计划、策略授权、执行、核验和回滚；当前默认影子模式，人工排产入口仍保留原 L3 提交流程。
 - 供应商中立模型网关，可热切换 DeepSeek、Kimi、OpenAI 或自定义 OpenAI Chat Completions 兼容接口。
 - 模型设置页面：/settings/models。预设服务直接选择，只有自定义服务显示 Base URL 输入。
@@ -158,7 +158,7 @@ DeepSeek 当前官方视觉路线需要单独的视觉模型，例如 `deepseek-
 - 本地候选走独立无 Key、禁用环境代理的字面量回环地址适配器，不切换当前网关、不携带云密钥或云端回退。
 - 本机 RTX 4060 Laptop GPU 8GB 已运行 llama.cpp b10936 Vulkan + Qwen3-4B-Instruct-2507 Q4_K_M。原始模型三轮均 6/9；规则辅助任务路径连续两轮 9/9、零请求失败。只能宣称固定任务路径成绩提高，不能宣称 4B 模型本身达到 DeepSeek 或已通过生产验收。
 - 本地服务为 http://127.0.0.1:11434/v1，模型 ID qwen3-4b-instruct-2507-q4_k_m；以 --offline 启动，当前 Core 使用本地模型且云模型出口关闭。脚本 core/scripts/start-local-benchmark.ps1 / stop-local-benchmark.ps1 管理本次进程；权重与运行时保留于 .local-models/（Git 忽略），非系统服务或开机自启。
-- PDF/图片仍未接入；XLSX/CSV 仍为本地确定性解析，本中心尚未建立多样文件准确率样本集。
+- PDF 与图片现已接入本地文字提取/OCR，XLSX/CSV/DOCX/文本文件也可进入附件问答；能力中心仍未建立多样文件准确率样本集，因此只能标记为已实现、待测评。
 - 后台一次一轮测评，逐题原子保存，启动时将未完成任务标记中断；报告位于 core/.capaxion/benchmarks/，不进入 Git。
 
 ## 接下来推荐的开发顺序
@@ -168,7 +168,7 @@ DeepSeek 当前官方视觉路线需要单独的视觉模型，例如 `deepseek-
 - 已加固 DeepSeek 输出协议与解析，保留安全规则降级；历史 ValueError 没有原始响应证据，不能断言唯一根因。
 - 已区分 `CONFIGURED`、`VERIFIED`、`DEGRADED` 和 `DISABLED`，记录最近成功时间与失败次数；VERIFIED 表示请求结构验证成功，不代表生产事实全部正确。
 - 桌面与网页 Agent 工作台已加入三项合成文字自检。报告保存在 `core/.capaxion/capability-checks/`（Git 忽略），含运行 ID、操作者、版本、输入与回答指纹、判定及耗时。报告不保存回答原文，不是防篡改审计。
-- 已修正附件提示：XLSX/CSV 本地预检；PDF/图片仅选择/预览，未解析；文字请求不发送附件或历史。
+- 已完成全窗口拖放、本地路径与虚拟文件接收、通用文件提取、图片/扫描 PDF OCR，以及解析内容随本轮问题进入本地模型；仍未实现多轮附件记忆。
 - 在这一步通过前，不对外宣传完整的多模态制造 Agent。
 
 ### 第 40 步：生产身份收口
