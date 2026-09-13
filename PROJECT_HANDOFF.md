@@ -14,7 +14,7 @@ GitHub：https://github.com/kiki720-w/capaxion
 
 ## L4 排产自治运行时（2026-09-13）
 
-产品终点已明确为 L4 Agent。桌面 0.4.0 与 Core 新增排产域观察—计划—策略—执行—核验—回滚闭环、快照二次版本校验、幂等键、停止开关和三种模式。默认 SHADOW、循环关闭、执行目标 NONE；模拟执行器仅可在 simulator mode 使用，真实 MES 写回尚未接入。当前只能声明 `L4_RUNTIME_IMPLEMENTED_NOT_PRODUCTION_VALIDATED`。详见 [L4 运行时说明](docs/l4-scheduling-runtime.md)。
+产品终点已明确为 L4 Agent。桌面 0.4.1 与 Core 新增排产域观察—计划—策略—执行—核验—回滚闭环、快照二次版本校验、幂等键、停止开关和三种模式。默认 SHADOW、循环关闭、执行目标 NONE；模拟执行器仅可在 simulator mode 使用，真实 MES 写回尚未接入。当前只能声明 `L4_RUNTIME_IMPLEMENTED_NOT_PRODUCTION_VALIDATED`。详见 [L4 运行时说明](docs/l4-scheduling-runtime.md)。
 
 ## 新对话先读这里
 

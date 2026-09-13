@@ -1,5 +1,6 @@
 const fs = require("node:fs");
 const path = require("node:path");
+const packageVersion = require("../package.json").version;
 
 const port = process.argv[2] || "9224";
 const outputRoot = process.argv[3] || path.join(__dirname, "..", "release", "ui-smoke");
@@ -71,6 +72,28 @@ async function main() {
         throw new Error("Live synthetic capability check failed in desktop UI");
       }
     }
+    if (pages[index] === "workspace" && process.env.CAPAXION_SMOKE_ATTACHMENT === "1") {
+      const attachment = await call("Runtime.evaluate", {
+        expression: `(async()=>{
+          const transfer=new DataTransfer();
+          transfer.items.add(new File(["工单编号：WO-UI-401，计划数量：41件。"],"ui-smoke.txt",{type:"text/plain"}));
+          window.dispatchEvent(new DragEvent("drop",{dataTransfer:transfer,bubbles:true,cancelable:true}));
+          for(let i=0;i<80;i++){
+            await new Promise(resolve=>setTimeout(resolve,250));
+            const attachment=document.querySelector(".attachments");
+            if(attachment?.textContent.includes("ui-smoke.txt")&&attachment.textContent.includes("已解析")){
+              return {parsed:true,text:attachment.textContent};
+            }
+          }
+          return {parsed:false,text:document.body.innerText};
+        })()`,
+        awaitPromise: true,
+        returnByValue: true,
+      });
+      if (attachment.exceptionDetails || !attachment.result.value?.parsed) {
+        throw new Error("Virtual drag attachment did not parse in desktop UI");
+      }
+    }
     if (pages[index] === "capabilities" && process.env.CAPAXION_SMOKE_BENCHMARK) {
       const evaluate = async (expression) => (await call("Runtime.evaluate", { expression, returnByValue: true })).result.value;
       const waitFor = async (expression) => {
@@ -115,7 +138,7 @@ async function main() {
       fs.writeFileSync(path.join(outputRoot, "comparison.png"), Buffer.from(evidenceScreenshot.data, "base64"));
     }
     const state = await call("Runtime.evaluate", {
-      expression: `(()=>{const page=document.querySelector(".native-page");const content=document.querySelector(".content-area");const rect=page?.getBoundingClientRect();return {title:document.querySelector(".page-header h1")?.textContent||document.querySelector(".conversation h1")?.textContent||"",textLength:document.body.innerText.length,fatal:Boolean(document.querySelector(".fatal-error")),loadError:Boolean(document.querySelector(".error-state")),viewportHeight:document.documentElement.clientHeight,contentHeight:content?.clientHeight||0,pageClientHeight:page?.clientHeight||0,pageScrollHeight:page?.scrollHeight||0,scrollable:Boolean(page&&page.scrollHeight>page.clientHeight+1),scrollPoint:rect?{x:Math.round(rect.left+rect.width/2),y:Math.round(rect.top+Math.min(rect.height/2,240))}:null}})()`,
+      expression: `(()=>{const page=document.querySelector(".native-page");const content=document.querySelector(".content-area");const rect=page?.getBoundingClientRect();return {title:document.querySelector(".page-header h1")?.textContent||document.querySelector(".conversation h1")?.textContent||"",version:document.querySelector(".brand em")?.textContent||"",filePickerVisible:${JSON.stringify(pages[index] === "workspace")}?Boolean(document.querySelector(".file-picker-banner")):null,textLength:document.body.innerText.length,fatal:Boolean(document.querySelector(".fatal-error")),loadError:Boolean(document.querySelector(".error-state")),viewportHeight:document.documentElement.clientHeight,contentHeight:content?.clientHeight||0,pageClientHeight:page?.clientHeight||0,pageScrollHeight:page?.scrollHeight||0,scrollable:Boolean(page&&page.scrollHeight>page.clientHeight+1),scrollPoint:rect?{x:Math.round(rect.left+rect.width/2),y:Math.round(rect.top+Math.min(rect.height/2,240))}:null}})()`,
       returnByValue: true,
     });
     const value = state.result.value;
@@ -137,7 +160,7 @@ async function main() {
   }
   socket.close();
   process.stdout.write(`${JSON.stringify({ results, exceptions }, null, 2)}\n`);
-  if (exceptions.length || results.some((result) => result.fatal || result.loadError || result.textLength < 100 || result.contentHeight >= result.viewportHeight || (result.scrollable && result.scrollWorked !== true))) process.exitCode = 1;
+  if (exceptions.length || results.some((result) => result.fatal || result.loadError || result.version !== `v${packageVersion}` || result.filePickerVisible === false || result.textLength < 100 || result.contentHeight >= result.viewportHeight || (result.scrollable && result.scrollWorked !== true))) process.exitCode = 1;
 }
 
 main().catch((error) => {

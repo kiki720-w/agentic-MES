@@ -1,5 +1,6 @@
 import { Component, useEffect, useState } from "react";
 import appIcon from "../assets/capaxion-icon.png";
+import packageInfo from "../package.json";
 import AgentWorkspace from "./pages/AgentWorkspace";
 import CapabilityCenter from "./pages/CapabilityCenter";
 import CapacityCenter from "./pages/CapacityCenter";
@@ -35,7 +36,7 @@ function WindowControls() {
 
 function Sidebar({ active, onChange, online, agentLevel, actor, profiles, onActorChange }) {
   return <aside className="sidebar">
-    <div className="brand drag-region"><img src={appIcon} alt="" /><div><strong>CAPAXION</strong><small>MANUFACTURING DECISION OS</small></div></div>
+    <div className="brand drag-region"><img src={appIcon} alt="" /><div><strong>CAPAXION <em>v{packageInfo.version}</em></strong><small>MANUFACTURING DECISION OS</small></div></div>
     <div className="workspace-switcher"><span className="factory-avatar">01</span><div><strong>演示工厂</strong><small>机械加工中心</small></div><span className="chevron">⌄</span></div>
     <nav><div className="nav-caption">工作空间</div>{navItems.map((item) => <button key={item.id} className={active === item.id ? "active" : ""} onClick={() => onChange(item.id)}><span className="nav-icon">{item.icon}</span><span><strong>{item.label}</strong><small>{item.hint}</small></span></button>)}</nav>
     <div className="sidebar-bottom"><div className="agent-level"><span className="pulse" />衡策 · {agentLevel || "状态未知"}</div><div className="core-state"><span className={online ? "online" : "offline"} />{online ? "Core 已连接" : "Core 未连接"}</div><label className="profile"><span>{actor === "demo-supervisor" ? "DS" : actor === "demo-quality" ? "DQ" : "DP"}</span><div><strong>当前演示身份</strong><select value={actor} onChange={(e) => onActorChange(e.target.value)}>{profiles.map((profile) => <option key={profile.subjectId} value={profile.subjectId}>{profile.displayName}</option>)}</select></div></label></div>

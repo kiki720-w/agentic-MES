@@ -1,6 +1,6 @@
 {
   "name": "capaxion-desktop",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "private": true,
   "author": "kiki720-w",
   "description": "CAPAXION Manufacturing Decision OS desktop client",
@@ -41,6 +41,7 @@
     ],
     "win": {
       "icon": "assets/capaxion-icon.ico",
+      "requestedExecutionLevel": "asInvoker",
       "target": [
         "portable"
       ]
