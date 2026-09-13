@@ -1,6 +1,6 @@
 # 制造业务 AI 能力验收中心
 
-日期：2026-09-13。桌面版本：0.2.3。
+日期：2026-09-13。桌面版本：0.4.5。
 
 新增原生侧栏“AI 能力验收”及工作台入口。将文字、XLSX/CSV、PDF、图片、连续会话、真实执行安全分别展示，明确区分可测评、已接入但本中心未测、未接入。没有将文字成绩解释成文件或视觉能力。
 
@@ -20,14 +20,14 @@
 
 本机为 NVIDIA GeForce RTX 4060 Laptop GPU（8188 MiB，驱动 576.52）。最初无本地模型服务；本次已下载并 SHA256 校验 [Qwen3-4B-Instruct-2507](https://huggingface.co/Qwen/Qwen3-4B-Instruct-2507) 的 [bartowski Q4_K_M 量化权重](https://huggingface.co/bartowski/Qwen_Qwen3-4B-Instruct-2507-GGUF)，以及官方 llama.cpp b10936 Windows Vulkan 运行时。量化包为社区发布，不是 Qwen 官方量化包。精确版本、地址与 SHA256 固定在 setup-local-benchmark.py。
 
-本机服务采用 Vulkan0（RTX 4060）、全部层 GPU offload、4096 上下文、单并发、--offline、--no-webui、--log-disable，只绑定 127.0.0.1:11434。启动不加载云端密钥，当前 Core 也已切换为本地模型并关闭云模型出口。未安装系统服务或开机启动项。该本地模型仅用于文字，不提供图像理解。
+当前本机服务采用官方 Qwen3 8B Q4_K_M、Vulkan0（RTX 4060）、全部层 GPU offload、8192 上下文、单并发和非思考模式，只绑定 `127.0.0.1:11434`，并启用 `--offline`、`--no-webui`、`--log-disable`。模型约占 6 GB 显存；启动不加载云端密钥，Core 也已关闭云模型出口。未安装系统服务或开机启动项。该模型用于文字理解；图片文字仍由本地 OCR 提取。
 
 运行方法（在仓库根目录）：
 
     core/.venv/Scripts/python.exe core/scripts/setup-local-benchmark.py
     ./core/scripts/start-local-benchmark.ps1
 
-桌面本地候选地址填写 http://127.0.0.1:11434/v1，模型 ID 填写 qwen3-4b-instruct-2507-q4_k_m。停止用 ./core/scripts/stop-local-benchmark.ps1；该脚本核对记录 PID 的可执行文件路径后才停止，不删除模型。权重及运行时位于 .local-models/，被 Git 忽略。下载总计约 2.53 GB，只发生于显式执行安装脚本；桌面测评按钮本身不会下载模型。
+桌面本地候选地址填写 `http://127.0.0.1:11434/v1`，模型 ID 填写 `qwen3-8b-q4_k_m`。停止用 `./core/scripts/stop-local-benchmark.ps1`；该脚本核对记录 PID 的可执行文件路径后才停止，不删除模型。权重及运行时位于 `.local-models/`，被 Git 忽略。8B Q4_K_M 权重约 5.03 GB；桌面测评按钮本身不会下载模型。
 
 ## 运行与证据
 
@@ -70,5 +70,7 @@ Qwen3 4B Q4_K_M 两轮均 6/9（66.7%），没有请求失败：
 因此原始本地候选在这套基础试卷上未达到 DeepSeek。0.2.3 加入 `manufacturing-grounding-v1`，将工时、单位、冲突和权限转为可追溯的确定性证据；同一 4B 模型组成的新版任务路径连续两次 9/9、零请求失败，中位耗时 340 ms 与 370 ms。运行编号为 `5a74eed0-7a72-4dc8-a3e4-7062e5b5b297` 和 `c1f59d19-4347-40b3-b0fc-b3e9f8bab4e4`。这是系统路径成绩，不是模型原始成绩，也不能推广为生产准确率。详见 [准确率优化记录](manufacturing-accuracy.md)。
 
 推理后抽样全 GPU 已用显存约 4241 MiB（包含桌面等其他进程），不冒充模型独占或峰值显存。下载结束后以离线标志运行；尚未完成整个产品的数据零出站认证。
+
+0.4.5 将工作台模型升级为 Qwen3 8B，并增加最近 10 轮会话上下文和待补充订单状态。在 `manufacturing-task-v2` 规则辅助路径中，运行 `88299652-101e-4d39-9b22-0f0ece0756b8` 通过 9/9，零请求失败，中位耗时 472 ms。另用代词追问验证从上一轮取回物料编码成功。连续会话尚未建立统计样本集，因此能力中心标记为“已接入 · 本中心未测”，不把单例验证当成准确率。
 
 本地与 DeepSeek 逐题对照截图位于 desktop/release/ui-local-comparison/comparison.png（本机保留）。CAPAXION_SMOKE_BENCHMARK=existing 可仅验证已有报告对比，不再次调用模型。

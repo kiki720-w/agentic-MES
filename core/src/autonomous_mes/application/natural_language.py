@@ -94,13 +94,25 @@ class NaturalLanguageQueryService:
         self._scheduling_use_overtime = scheduling_use_overtime
 
     def ask(
-        self, question: str, attachments: list[dict[str, Any]] | None = None
+        self,
+        question: str,
+        attachments: list[dict[str, Any]] | None = None,
+        history: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
         question = question.strip()
         if not question or len(question) > 2000:
             raise ValidationError("question must contain 1 to 2000 characters")
         attachment_facts: list[dict[str, Any]] = []
         attachment_summaries: list[dict[str, str]] = []
+        conversation_history = [
+            {
+                "role": str(item.get("role", "")),
+                "content": str(item.get("content", "")).strip()[:2_000],
+            }
+            for item in (history or [])[-12:]
+            if item.get("role") in {"user", "assistant"}
+            and str(item.get("content", "")).strip()
+        ]
         selected_attachments = [
             item for item in (attachments or [])[:8] if str(item.get("text", "")).strip()
         ]
@@ -168,12 +180,14 @@ class NaturalLanguageQueryService:
             facts = {
                 "asOf": as_of,
                 "attachments": attachment_facts,
+                "conversationHistory": conversation_history,
                 "scope": "USER_ATTACHMENTS_ONLY",
             }
         else:
             facts = {"asOf": as_of, **compact_operational_snapshot(
                 question, orders, equipment, inspections
             )}
+            facts["conversationHistory"] = conversation_history
         selected_order_ids = {
             str(item["workOrderId"]) for item in facts.get("workOrders", [])
             if item.get("workOrderId")

@@ -85,6 +85,36 @@ class ManufacturingAgentTests(unittest.TestCase):
         self.assertEqual("LOCAL_RULE_FALLBACK", result["parser"])
         self.assertEqual("MAT-200", result["order"]["revisions"]["productRevisionId"])
 
+    def test_follow_up_fields_complete_a_pending_order_task(self) -> None:
+        agent = ManufacturingAgentService(self.orders, self.scheduling, FailingActionModel())
+        first = "新增工单，物料编码 MAT-300，车工"
+
+        pending = agent.execute(first, "demo-planner")
+        completed = agent.execute(
+            first + "\n用户补充：数量 4，交期 2099-09-20，单件工时 12",
+            "demo-planner",
+        )
+
+        self.assertEqual("NEEDS_INFORMATION", pending["status"])
+        self.assertEqual("EXECUTED_AND_VERIFIED", completed["status"])
+        self.assertEqual(4, completed["order"]["quantity"])
+
+    def test_operator_name_stops_before_spoken_do_phrase(self) -> None:
+        person = self.scheduling.register_resource(RegisterPlanningResourceCommand(
+            "PERSON-ZHANG", "张师傅", "PERSON", "WS-MACH-01", "WC-LATHE-01",
+            480, 600, ["TURN"], "demo-planner", str(uuid4()),
+        ))
+        agent = ManufacturingAgentService(self.orders, self.scheduling, FailingActionModel())
+
+        result = agent.execute(
+            "新增工单，物料编码 AXLE-8B，数量 2 件，交期 2099-09-20，"
+            "安排张师傅做车削加工",
+            "demo-planner",
+        )
+
+        self.assertEqual("EXECUTED_AND_VERIFIED", result["status"])
+        self.assertEqual(person["resourceId"], result["orderAssignments"][0]["resourceId"])
+
 
 if __name__ == "__main__":
     unittest.main()

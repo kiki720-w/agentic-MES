@@ -234,3 +234,20 @@ class NaturalLanguageQueryTests(unittest.TestCase):
         self.assertEqual("REQUIRE_FIELD_MAPPING", result["policyDecision"])
         self.assertIn("尚未写入", result["answer"])
         model.answer.assert_not_called()
+
+    def test_recent_conversation_is_forwarded_for_follow_up_understanding(self) -> None:
+        model = Mock()
+        model.answer.return_value = NaturalLanguageAnswer("它仍在等待。", "FAKE", "fake")
+        service = NaturalLanguageQueryService(InMemoryWorkOrderStore(), model)
+
+        result = service.ask(
+            "那它现在怎么样？",
+            history=[
+                {"role": "user", "content": "WO-100 当前状态是什么？"},
+                {"role": "assistant", "content": "WO-100 当前是草稿。"},
+            ],
+        )
+
+        facts = model.answer.call_args.args[1]
+        self.assertEqual("它仍在等待。", result["answer"])
+        self.assertEqual("WO-100 当前状态是什么？", facts["conversationHistory"][0]["content"])

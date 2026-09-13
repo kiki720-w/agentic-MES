@@ -333,10 +333,17 @@ class AttachmentContextBody(BaseModel):
     truncated: bool = False
 
 
+class ConversationTurnBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    role: Literal["user", "assistant"]
+    content: str = Field(min_length=1, max_length=2000)
+
+
 class NaturalLanguageBody(BaseModel):
     model_config = ConfigDict(extra="forbid")
     question: str = Field(min_length=1, max_length=2000)
     attachments: list[AttachmentContextBody] = Field(default_factory=list, max_length=8)
+    history: list[ConversationTurnBody] = Field(default_factory=list, max_length=12)
 
 
 class ConfirmAgentCapacityImportBody(BaseModel):
@@ -965,7 +972,9 @@ def agent_chat(
 ) -> dict[str, object]:
     authorize_human(identity, "OPERATOR", "SUPERVISOR", "QUALITY", "PLANNER")
     return natural_language_service.ask(
-        body.question, [attachment.model_dump() for attachment in body.attachments]
+        body.question,
+        [attachment.model_dump() for attachment in body.attachments],
+        [turn.model_dump() for turn in body.history],
     )
 
 

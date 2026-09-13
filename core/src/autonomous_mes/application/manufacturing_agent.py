@@ -252,19 +252,26 @@ def _deterministic_order_plan(instruction: str) -> dict[str, Any]:
     if not ORDER_INTENT.search(instruction):
         return {"action": "UNSUPPORTED", "order": {}}
     def match(pattern: str) -> str | None:
-        found = re.search(pattern, instruction, re.IGNORECASE)
-        return found.group(1).strip() if found else None
+        found = list(re.finditer(pattern, instruction, re.IGNORECASE))
+        return found[-1].group(1).strip() if found else None
 
-    material = match(r"(?:物料(?:编码)?|料号|工件(?:编码)?)\s*[：:]?\s*([A-Za-z0-9._/-]+)")
-    quantity = match(r"(?:数量|共|生产)\s*[：:]?\s*(\d+)") or match(
+    material = match(
+        r"(?:物料(?:编码)?|料号|工件(?:编码)?)\s*(?:改为|是|为)?\s*[：:]?\s*([A-Za-z0-9._/-]+)"
+    )
+    quantity = match(r"(?:数量|共|生产)\s*(?:改为|是|为)?\s*[：:]?\s*(\d+)") or match(
         r"(?:^|[，,；;\s])\s*(\d+)\s*(?:件|个|套)"
     )
-    due_at = match(r"(?:交期|交货|完成日期|要求日期)\s*[：:]?\s*(\d{4}[-/.年]\d{1,2}[-/.月]\d{1,2})")
+    due_at = match(
+        r"(?:交期|交货|完成日期|要求日期)\s*(?:改为|是|为)?\s*[：:]?\s*"
+        r"(\d{4}[-/.年]\d{1,2}[-/.月]\d{1,2})"
+    )
     if due_at:
         due_at = due_at.replace("年", "-").replace("月", "-").replace("日", "")
         due_at = due_at.replace("/", ".").replace(".", "-")
-    minutes = match(r"(?:单件工时|每件|节拍)\s*[：:]?\s*(\d+(?:\.\d+)?)")
-    operator = match(r"(?:由|安排|指定)\s*([\u4e00-\u9fff]{2,8})\s*(?:来做|加工|负责)")
+    minutes = match(
+        r"(?:单件工时|每件|节拍)\s*(?:改为|是|为)?\s*[：:]?\s*(\d+(?:\.\d+)?)"
+    )
+    operator = match(r"(?:由|安排|指定)\s*([\u4e00-\u9fff]{2,8}?)\s*(?:来做|做|加工|负责)")
     operation = "TURN" if re.search(r"车工|车削|车床", instruction) else None
     return {
         "action": "CREATE_ORDER_AND_SCHEDULE",

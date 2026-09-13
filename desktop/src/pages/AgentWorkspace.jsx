@@ -19,6 +19,7 @@ export default function AgentWorkspace({ health, actor, onNavigate, incomingDrop
   const [dragActive, setDragActive] = useState(false);
   const [spreadsheetPreview, setSpreadsheetPreview] = useState(null);
   const [capacityPreview, setCapacityPreview] = useState(null);
+  const [pendingOrderInstruction, setPendingOrderInstruction] = useState("");
   const endRef = useRef(null);
   const dragDepth = useRef(0);
   useEffect(() => { endRef.current?.scrollIntoView({ behavior: "smooth" }); }, [messages, sending]);
@@ -141,6 +142,11 @@ export default function AgentWorkspace({ health, actor, onNavigate, incomingDrop
     const attachmentNames = parsedFiles.map((file) => file.name).join("、");
     setMessages((current) => [...current, { role: "user", text: question, meta: parsedFiles.length ? `已附加：${attachmentNames}` : "文字指令" }]); setPrompt(""); setSending(true);
     try {
+      if (pendingOrderInstruction && /^(?:取消|不用了|放弃|停止)(?:这个|该)?(?:订单|工单|任务)?[。！!]?$/i.test(question)) {
+        setPendingOrderInstruction("");
+        setMessages((current) => [...current, { role: "agent", text: "已取消尚未写入的订单任务。", meta: "PENDING_TASK_CANCELLED · 未写入生产数据" }]);
+        return;
+      }
       const capacityWriteIntent = /(?:同步|导入|写入|更新).{0,16}(?:人员|能力|产能)|(?:人员|能力|产能).{0,16}(?:同步|导入|写入|更新)/i.test(question);
       if (capacityWriteIntent && capacityPreview?.valid) {
         const result = await api("/api/v1/agent/imports/capacity/execute", actor, { method: "POST", body: { previewFingerprint: capacityPreview.previewFingerprint, plan: capacityPreview } });
@@ -151,13 +157,16 @@ export default function AgentWorkspace({ health, actor, onNavigate, incomingDrop
         return;
       }
       const orderWriteIntent = /(?:新增|新建|加入|添加|创建|录入).{0,10}(?:订单|工单)|(?:订单|工单).{0,10}(?:新增|新建|加入|添加|创建|录入)/i.test(question);
-      if (orderWriteIntent && !parsedFiles.length) {
-        const result = await api("/api/v1/agent/tasks/execute", actor, { method: "POST", body: { instruction: question } });
+      if ((orderWriteIntent || pendingOrderInstruction) && !parsedFiles.length) {
+        const instruction = pendingOrderInstruction ? `${pendingOrderInstruction}\n用户补充：${question}` : question;
+        const result = await api("/api/v1/agent/tasks/execute", actor, { method: "POST", body: { instruction } });
         setMessages((current) => [...current, { role: result.status === "EXECUTED_AND_VERIFIED" ? "agent" : "system", text: `${result.answer || "任务未完成"}${(result.assumptions || []).length ? `\n\n${result.assumptions.map((item) => `• ${item}`).join("\n")}` : ""}`, meta: `${result.status} · ${result.parser || "本地任务解析器"}`, action: result.status === "EXECUTED_AND_VERIFIED" ? "open-results" : null }]);
+        setPendingOrderInstruction(result.status === "NEEDS_INFORMATION" ? instruction : "");
         return;
       }
       const attachments = parsedFiles.map((file) => ({ name: file.parsed.name, kind: file.parsed.kind, parser: file.parsed.parser, sha256: file.parsed.sha256, text: file.parsed.text, summary: file.parsed.summary || "", truncated: file.parsed.truncated }));
-      const result = await api("/api/v1/agent/chat", actor, { method: "POST", body: { question, attachments } });
+      const history = messages.filter((item) => item.role === "user" || item.role === "agent").slice(-10).map((item) => ({ role: item.role === "agent" ? "assistant" : "user", content: item.text.slice(0, 2000) }));
+      const result = await api("/api/v1/agent/chat", actor, { method: "POST", body: { question, attachments, history } });
       setMessages((current) => [...current, { role: "agent", text: result.answer || "任务已完成。", meta: `${result.policyDecision || "ALLOW"} · ${result.provider || result.source || "规则与模型网关"}` }]);
     } catch (error) { setMessages((current) => [...current, { role: "system", text: error.message, meta: "请求未执行" }]); }
     finally { setSending(false); }
