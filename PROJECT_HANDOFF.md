@@ -14,7 +14,7 @@ GitHub：https://github.com/kiki720-w/capaxion
 
 ## L4 排产自治运行时（2026-09-13）
 
-产品终点已明确为 L4 Agent。桌面 0.3.0 与 Core 新增排产域观察—计划—策略—执行—核验—回滚闭环、快照二次版本校验、幂等键、停止开关和三种模式。默认 SHADOW、循环关闭、执行目标 NONE；模拟执行器仅可在 simulator mode 使用，真实 MES 写回尚未接入。当前只能声明 `L4_RUNTIME_IMPLEMENTED_NOT_PRODUCTION_VALIDATED`。详见 [L4 运行时说明](docs/l4-scheduling-runtime.md)。
+产品终点已明确为 L4 Agent。桌面 0.3.1 与 Core 新增排产域观察—计划—策略—执行—核验—回滚闭环、快照二次版本校验、幂等键、停止开关和三种模式。默认 SHADOW、循环关闭、执行目标 NONE；模拟执行器仅可在 simulator mode 使用，真实 MES 写回尚未接入。当前只能声明 `L4_RUNTIME_IMPLEMENTED_NOT_PRODUCTION_VALIDATED`。详见 [L4 运行时说明](docs/l4-scheduling-runtime.md)。
 
 ## 新对话先读这里
 
@@ -64,13 +64,13 @@ GitHub：https://github.com/kiki720-w/capaxion
 - 可治理质量风险策略、历史影响仿真、maker-checker 审批和回滚草稿。
 - 统一 APS 快照、有限产能排产、资源能力、标准工时、计划状态机和人工移动排产结果。
 - 人员日排程和固定六工作日周计划；大表支持搜索、分页与横向滚动。
-- Agent 工作台支持自然语言和 XLSX / CSV 预检；图片和 PDF 目前只有本地附件选择入口，尚未解析、识别或发送给模型。
+- Agent 工作台支持自然语言、文件按钮和系统拖放；拖入文件不再落成输入框文字，XLSX/CSV 自动进入本地预检，图片和 PDF 只登记为本地附件，尚未解析或发送给模型。
 - 排产域 L4 目标运行时可观察、计划、策略授权、执行、核验和回滚；当前默认影子模式，人工排产入口仍保留原 L3 提交流程。
 - 供应商中立模型网关，可热切换 DeepSeek、Kimi、OpenAI 或自定义 OpenAI Chat Completions 兼容接口。
 - 模型设置页面：/settings/models。预设服务直接选择，只有自定义服务显示 Base URL 输入。
 - API Key 不通过状态接口回显、不进入浏览器存储；连接测试失败不会覆盖当前模型。
 - Agent 工作台入口已放入控制塔、排产中心、产能管理和排产结果等主要页面。
-- 已增加 `desktop/` Windows 客户端：WorkBuddy 式 Agent 主工作区、桌面导航、附件选择、Core 状态与安全边界检查。
+- 已增加 `desktop/` Windows 客户端：WorkBuddy 式 Agent 主工作区、桌面导航、附件选择与拖放、Core 状态与安全边界检查。
 - 本机便携版路径为 `D:\mes\desktop\release\CAPAXION-0.2.1-x64.exe`；控制塔、排产、结果、产能和模型设置均已原生 React 化，不再通过 iframe 承载旧页面。
 - 桌面壳的高度约束和滚动容器已经修复；控制塔、排产中心、排产结果、产能管理和模型设置均通过真实鼠标滚轮自动验收。
 

@@ -11,6 +11,26 @@ let coreStartedByDesktop = false;
 const selectedFiles = new Set();
 let desktopZoomFactor = 1.1;
 
+function registerSelectedFiles(filePaths) {
+  const files = [];
+  for (const filePath of [...new Set(filePaths)].slice(0, 20)) {
+    try {
+      const resolved = path.resolve(String(filePath || ""));
+      const stat = fs.statSync(resolved);
+      if (!stat.isFile()) continue;
+      selectedFiles.add(resolved);
+      files.push({
+        path: resolved,
+        name: path.basename(resolved),
+        size: stat.size,
+      });
+    } catch {
+      // Ignore missing files and folders. The renderer reports an empty drop when none remain.
+    }
+  }
+  return files;
+}
+
 async function coreHealth() {
   try {
     const response = await fetch(`${CORE_URL}/health/ready`, {
@@ -174,15 +194,11 @@ function registerIpc() {
       ],
     });
     if (result.canceled) return [];
-    return result.filePaths.map((filePath) => {
-      const resolved = path.resolve(filePath);
-      selectedFiles.add(resolved);
-      return {
-        path: resolved,
-        name: path.basename(resolved),
-        size: fs.statSync(resolved).size,
-      };
-    });
+    return registerSelectedFiles(result.filePaths);
+  });
+  ipcMain.handle("files:register-drop", (_event, filePaths = []) => {
+    if (!Array.isArray(filePaths)) throw new Error("Invalid dropped file list");
+    return registerSelectedFiles(filePaths);
   });
 }
 

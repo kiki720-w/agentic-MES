@@ -30,7 +30,7 @@ const browserFallback = {
       throw new Error("文件预检仅在 CAPAXION 桌面客户端中可用");
     },
   },
-  files: { async pick() { return []; } },
+  files: { async pick() { return []; }, onDrop() {}, offDrop() {} },
 };
 
 export const desktop = window.capaxion || browserFallback;
