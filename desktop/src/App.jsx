@@ -1,6 +1,7 @@
 import { Component, useEffect, useState } from "react";
 import appIcon from "../assets/capaxion-icon.png";
 import AgentWorkspace from "./pages/AgentWorkspace";
+import CapabilityCenter from "./pages/CapabilityCenter";
 import CapacityCenter from "./pages/CapacityCenter";
 import ControlTower from "./pages/ControlTower";
 import ModelSettings from "./pages/ModelSettings";
@@ -15,6 +16,7 @@ const navItems = [
   { id: "results", label: "排产结果", hint: "人员日程与证据", icon: "◫" },
   { id: "capacity", label: "产能管理", hint: "人员与工作单元", icon: "◒" },
   { id: "models", label: "模型与数据边界", hint: "本地或云端", icon: "⌘" },
+  { id: "capabilities", label: "AI 能力验收", hint: "实测、证据与模型对比", icon: "✓" },
 ];
 
 class ErrorBoundary extends Component {
@@ -71,6 +73,7 @@ export default function App() {
       {active === "results" && <PlanningResults {...pageProps} />}
       {active === "capacity" && <CapacityCenter {...pageProps} />}
       {active === "models" && <ModelSettings {...pageProps} />}
+      {active === "capabilities" && <CapabilityCenter {...pageProps} />}
     </div></section>
   </div></ErrorBoundary>;
 }

@@ -73,13 +73,17 @@ class OpenAICompatibleDiagnosticModel:
                 "provider": self._provider,
                 "model": self._model,
                 "baseUrl": self._base_url,
-                "apiKeyConfigured": True,
+                "apiKeyConfigured": bool(self._api_key),
                 "connectionStatus": self._connection_status,
                 "lastCheckedAt": self._last_checked_at,
                 "lastError": self._last_error,
                 "lastSuccessAt": self._last_success_at,
                 "failureCount": self._failure_count,
+                "timeoutSeconds": self._timeout,
             }
+
+    def redact(self, text: str) -> str:
+        return text.replace(self._api_key, "[REDACTED]") if self._api_key else text
 
     def _record_status(self, status: str, error: str | None = None) -> None:
         with self._status_lock:
@@ -103,9 +107,10 @@ class OpenAICompatibleDiagnosticModel:
             payload["response_format"] = {"type": "json_object"}
         response = httpx.post(
             f"{self._base_url}/chat/completions",
-            headers={"Authorization": f"Bearer {self._api_key}"},
+            headers={"Authorization": f"Bearer {self._api_key}"} if self._api_key else {},
             json=payload,
             timeout=self._timeout,
+            trust_env=self._provider != "LOCAL_BENCHMARK",
         )
         response.raise_for_status()
         body: dict[str, Any] = response.json()
@@ -290,6 +295,14 @@ class ConfigurableModelGateway:
                 "failureCount": 0,
             }
         return {**adapter.status(), "configurationSource": source}
+
+    def evaluation_adapter(self) -> OpenAICompatibleDiagnosticModel:
+        """Capture one adapter so a benchmark cannot mix runtime model configurations."""
+        with self._lock:
+            adapter = self._adapter
+        if adapter is None:
+            raise ModelGatewayError("当前模型未配置，无法开始测评。")
+        return adapter
 
     def verify(self) -> dict[str, object]:
         with self._lock:

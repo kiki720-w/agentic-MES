@@ -63,7 +63,7 @@ GitHub：https://github.com/kiki720-w/capaxion
 - API Key 不通过状态接口回显、不进入浏览器存储；连接测试失败不会覆盖当前模型。
 - Agent 工作台入口已放入控制塔、排产中心、产能管理和排产结果等主要页面。
 - 已增加 `desktop/` Windows 客户端：WorkBuddy 式 Agent 主工作区、桌面导航、附件选择、Core 状态与安全边界检查。
-- 本机便携版路径为 `D:\mes\desktop\release\CAPAXION-0.2.0-x64.exe`；控制塔、排产、结果、产能和模型设置均已原生 React 化，不再通过 iframe 承载旧页面。
+- 本机便携版路径为 `D:\mes\desktop\release\CAPAXION-0.2.1-x64.exe`；控制塔、排产、结果、产能和模型设置均已原生 React 化，不再通过 iframe 承载旧页面。
 - 桌面壳的高度约束和滚动容器已经修复；控制塔、排产中心、排产结果、产能管理和模型设置均通过真实鼠标滚轮自动验收。
 
 ## 当前页面
@@ -142,6 +142,17 @@ DeepSeek 当前官方视觉路线需要单独的视觉模型，例如 `deepseek-
 
 当前最高优先级仍是生产级身份与权限体系，因为没有可信身份就不能安全开放模型配置、审批或未来 L4。
 
+## 制造能力验收中心（本次新增）
+
+- 原生桌面新增“AI 能力验收”侧栏，详见 docs/capability-benchmark-center.md。
+- manufacturing-text-v1 九道合成文字题，展示标准/实际答案、事实依据、耗时、历史与同版对比，支持 JSON 导出。
+- 首轮真实 DeepSeek 9/9 通过；这不是生产准确率或多模态验收。
+- 本地候选走独立无 Key、禁用环境代理的字面量回环地址适配器，不切换当前网关、不携带云密钥或云端回退。
+- 本机 RTX 4060 Laptop GPU 8GB 已运行 llama.cpp b10936 Vulkan + Qwen3-4B-Instruct-2507 Q4_K_M，固定来源与校验和见 setup-local-benchmark.py。两轮本地实测均 6/9，剩余工时、单位换算和来源冲突题错误；DeepSeek 三轮均 9/9。不能宣称此本地候选已达到 DeepSeek 效果。
+- 本地服务为 http://127.0.0.1:11434/v1，模型 ID qwen3-4b-instruct-2507-q4_k_m；以 --offline 启动，当前 DeepSeek 配置未切换。脚本 core/scripts/start-local-benchmark.ps1 / stop-local-benchmark.ps1 管理本次进程；权重与运行时保留于 .local-models/（Git 忽略），非系统服务或开机自启。
+- PDF/图片仍未接入；XLSX/CSV 仍为本地确定性解析，本中心尚未建立多样文件准确率样本集。
+- 后台一次一轮测评，逐题原子保存，启动时将未完成任务标记中断；报告位于 core/.capaxion/benchmarks/，不进入 Git。
+
 ## 接下来推荐的开发顺序
 
 ### 当前最小验收门：把“已配置”变成“已验证”（本次已完成最小实现与实测）
@@ -205,8 +216,8 @@ DeepSeek 当前官方视觉路线需要单独的视觉模型，例如 `deepseek-
 - Python 3.12、FastAPI、PostgreSQL、SQLAlchemy、Alembic。
 - 开发 API 地址：http://127.0.0.1:8000
 - 当前模型网关：由服务器环境变量决定；不要在续接文档中写入密钥。
-- 最近完整回归：101 passed，5 skipped；Ruff 和 mypy 通过。
-- 桌面六页最终 EXE 验收：页面加载无异常；五个长页面的真实滚轮滚动全部通过。
+- 最近完整回归：112 passed，5 skipped；Ruff 和 mypy 通过。
+- 桌面七页最终 EXE 验收：页面加载无异常；六个长页面的真实滚轮滚动全部通过。
 - 本地 D 盘启动脚本：core/scripts/start-api-postgres.ps1
 - 核心代码：core/src/autonomous_mes
 - 关键模型网关：core/src/autonomous_mes/infrastructure/deepseek_gateway.py

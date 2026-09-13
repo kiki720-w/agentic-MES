@@ -3,6 +3,8 @@ import binascii
 import csv
 import io
 import json
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from datetime import date, datetime
 from pathlib import Path
 from typing import Annotated, Literal
@@ -21,6 +23,7 @@ from autonomous_mes.application.agent_tools import (
     ListQualityCandidatesTool,
     ToolContext,
 )
+from autonomous_mes.application.capability_benchmark import CapabilityBenchmarks, capability_catalog
 from autonomous_mes.application.capability_check import run_text_check
 from autonomous_mes.application.connector_security import HmacConnectorAuthenticator
 from autonomous_mes.application.equipment import (
@@ -86,7 +89,10 @@ from autonomous_mes.application.work_orders import (
 from autonomous_mes.config import Settings
 from autonomous_mes.domain.errors import DomainError, Forbidden, NotFound, ValidationError
 from autonomous_mes.infrastructure.database import build_engine, build_session_factory
-from autonomous_mes.infrastructure.deepseek_gateway import ConfigurableModelGateway
+from autonomous_mes.infrastructure.deepseek_gateway import (
+    ConfigurableModelGateway,
+    OpenAICompatibleDiagnosticModel,
+)
 from autonomous_mes.infrastructure.memory import InMemoryWorkOrderStore, ScopedReadPolicy
 from autonomous_mes.infrastructure.sqlalchemy_store import SqlAlchemyWorkOrderStore
 
@@ -633,7 +639,13 @@ policy = ScopedReadPolicy({"demo-planner": {"WS-MACH-01"}})
 get_work_order_tool = GetWorkOrderTool(store, policy, store)
 get_product_genealogy_tool = GetProductGenealogyTool(store, policy)
 list_quality_candidates_tool = ListQualityCandidatesTool(store, policy)
-app = FastAPI(title="Autonomous MES Core", version="0.1.0")
+@asynccontextmanager
+async def lifespan(_: FastAPI) -> AsyncIterator[None]:
+    capability_benchmarks.recover_interrupted()
+    yield
+
+
+app = FastAPI(title="Autonomous MES Core", version="0.1.0", lifespan=lifespan)
 control_tower_path = Path(__file__).parent / "static" / "control_tower.html"
 simulator_path = Path(__file__).parent / "static" / "dashboard.html"
 planning_path = Path(__file__).parent / "static" / "planning.html"
@@ -761,6 +773,73 @@ def disable_model_gateway_configuration(
 ) -> dict[str, object]:
     authorize_human(identity, "SUPERVISOR", "MASTER_DATA_ADMIN")
     return model_gateway.disable()
+
+
+capability_benchmarks = CapabilityBenchmarks(
+    Path(__file__).resolve().parents[2] / ".capaxion" / "benchmarks"
+)
+
+
+class CapabilityRunBody(BaseModel):
+    target: Literal["ACTIVE", "LOCAL"] = "ACTIVE"
+    baseUrl: str = Field(default="http://127.0.0.1:11434/v1", max_length=200)
+    model: str = Field(default="", max_length=120)
+
+
+def capability_access(identity: Identity) -> None:
+    authorize_human(identity, "SUPERVISOR", "PLANNER", "QUALITY", "OPERATOR")
+
+
+@app.get("/api/v1/agent/capabilities")
+def agent_capabilities(identity: Annotated[Identity, Depends(current_identity)]) -> dict[str, object]:
+    capability_access(identity)
+    return {"capabilities": capability_catalog(), "modelStatus": model_gateway.status(),
+            "runs": capability_benchmarks.list()}
+
+
+@app.post("/api/v1/agent/capability-runs")
+def start_capability_run(
+    body: CapabilityRunBody, identity: Annotated[Identity, Depends(current_identity)],
+) -> dict[str, object]:
+    capability_access(identity)
+    try:
+        if body.target == "LOCAL":
+            endpoint = urlsplit(body.baseUrl)
+            if (endpoint.scheme != "http" or endpoint.hostname != "127.0.0.1"
+                or endpoint.username or endpoint.password or endpoint.query or endpoint.fragment
+                or endpoint.path.rstrip("/") != "/v1" or endpoint.port is None
+                or not 1024 <= endpoint.port <= 65535 or not body.model.strip()):
+                raise ValueError("本地测评须使用 http://127.0.0.1:端口/v1 并填写模型 ID；不接受公网或含凭据地址。")
+            adapter = OpenAICompatibleDiagnosticModel(
+                "", body.model.strip(), body.baseUrl, 30, "LOCAL_BENCHMARK"
+            )
+        else:
+            adapter = model_gateway.evaluation_adapter()
+        return capability_benchmarks.start(adapter, identity.subject_id, body.target)
+    except (ValueError, ModelGatewayError) as exc:
+        raise ValidationError(str(exc)) from exc
+
+
+@app.get("/api/v1/agent/capability-runs/compare")
+def compare_capability_runs(
+    left: str, right: str, identity: Annotated[Identity, Depends(current_identity)],
+) -> dict[str, object]:
+    capability_access(identity)
+    try:
+        return capability_benchmarks.compare(left, right)
+    except (ValueError, OSError) as exc:
+        raise ValidationError("测评编号无效或报告不存在。") from exc
+
+
+@app.get("/api/v1/agent/capability-runs/{run_id}")
+def get_capability_run(
+    run_id: str, identity: Annotated[Identity, Depends(current_identity)],
+) -> dict[str, object]:
+    capability_access(identity)
+    try:
+        return capability_benchmarks.get(run_id)
+    except (ValueError, OSError) as exc:
+        raise ValidationError("测评编号无效或报告不存在。") from exc
 
 
 @app.post("/api/v1/agent/capability-check")

@@ -37,3 +37,6 @@ docx_render_v2/
 docx_render_v3/
 docx_render_v4/
 docx_render_v5/
+
+# Local benchmark runtime and downloaded model weights
+.local-models/

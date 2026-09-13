@@ -3,7 +3,7 @@ const path = require("node:path");
 
 const port = process.argv[2] || "9224";
 const outputRoot = process.argv[3] || path.join(__dirname, "..", "release", "ui-smoke");
-const pages = ["workspace", "tower", "planning", "results", "capacity", "models"];
+const pages = ["workspace", "tower", "planning", "results", "capacity", "models", "capabilities"];
 
 function wait(milliseconds) {
   return new Promise((resolve) => setTimeout(resolve, milliseconds));
@@ -35,12 +35,18 @@ async function main() {
   function call(method, params = {}) {
     const id = nextId++;
     socket.send(JSON.stringify({ id, method, params }));
-    return new Promise((resolve, reject) => pending.set(id, { resolve, reject }));
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => { pending.delete(id); reject(new Error(`DevTools timed out: ${method}`)); }, params.awaitPromise ? 180000 : 20000);
+      pending.set(id, { resolve: (value) => { clearTimeout(timer); resolve(value); }, reject: (error) => { clearTimeout(timer); reject(error); } });
+    });
   }
   await call("Runtime.enable");
   await call("Page.enable");
+  await call("Page.bringToFront");
+  await call("Emulation.setFocusEmulationEnabled", { enabled: true });
   const results = [];
   for (let index = 0; index < pages.length; index += 1) {
+    if (process.env.CAPAXION_SMOKE_PAGE && pages[index] !== process.env.CAPAXION_SMOKE_PAGE) continue;
     await call("Runtime.evaluate", {
       expression: `document.querySelectorAll(".sidebar nav button")[${index}]?.click()`,
     });
@@ -65,6 +71,49 @@ async function main() {
         throw new Error("Live synthetic capability check failed in desktop UI");
       }
     }
+    if (pages[index] === "capabilities" && process.env.CAPAXION_SMOKE_BENCHMARK) {
+      const evaluate = async (expression) => (await call("Runtime.evaluate", { expression, returnByValue: true })).result.value;
+      const waitFor = async (expression) => {
+        for (let attempt = 0; attempt < 40; attempt += 1) {
+          if (await evaluate(expression)) return;
+          await wait(500);
+        }
+        throw new Error("Desktop benchmark UI state did not arrive");
+      };
+      if (process.env.CAPAXION_SMOKE_BENCHMARK === "1") {
+        const summaries = async () => (await call("Runtime.evaluate", {
+          expression: `window.capaxion.core.request({path:"/api/v1/agent/capabilities"})`,
+          awaitPromise: true, returnByValue: true,
+        })).result.value.runs;
+        const before = (await summaries())[0]?.runId;
+        const started = await evaluate(`(()=>{const b=[...document.querySelectorAll("button")].find(b=>b.textContent==="开始当前模型测评");if(!b||b.disabled)return false;b.click();return true})()`);
+        if (!started) throw new Error("Benchmark start unavailable");
+        let complete = false;
+        for (let attempt = 0; attempt < 150; attempt += 1) {
+          await wait(1000);
+          const latest = (await summaries())[0];
+          if (latest?.runId !== before && latest?.status === "COMPLETED") { complete = true; break; }
+          if (latest?.runId !== before && latest?.status === "FAILED") throw new Error("Benchmark failed");
+        }
+        if (!complete) throw new Error("Benchmark did not complete");
+        await evaluate(`document.querySelectorAll(".sidebar nav button")[0].click()`);
+        await wait(100);
+        await evaluate(`document.querySelectorAll(".sidebar nav button")[6].click()`);
+      }
+      await waitFor(`document.querySelectorAll(".benchmark-table tbody tr").length>=2`);
+      await evaluate(`document.querySelector(".benchmark-table tbody button").click()`);
+      await waitFor(`document.querySelectorAll(".benchmark-case").length===9`);
+      for (let side = 0; side < 2; side += 1) {
+        await evaluate(`(()=>{const s=document.querySelectorAll(".benchmark-compare select")[${side}];const options=[...s.options].slice(1);s.value=(options.find(o=>o.textContent.includes(${side === 0 ? '"DEEPSEEK"' : '"本地"'}))||options[${side}]).value;s.dispatchEvent(new Event("change",{bubbles:true}));})()`);
+        await wait(100);
+      }
+      await evaluate(`document.querySelector(".benchmark-compare button").click()`);
+      await waitFor(`document.querySelectorAll(".benchmark-comparison tbody tr").length===9`);
+      await evaluate(`document.querySelector(".benchmark-case").open=true`);
+      await evaluate(`document.querySelector(".benchmark-comparison").scrollIntoView({block:"start"})`);
+      const evidenceScreenshot = await call("Page.captureScreenshot", { format: "png", fromSurface: false });
+      fs.writeFileSync(path.join(outputRoot, "comparison.png"), Buffer.from(evidenceScreenshot.data, "base64"));
+    }
     const state = await call("Runtime.evaluate", {
       expression: `(()=>{const page=document.querySelector(".native-page");const content=document.querySelector(".content-area");const rect=page?.getBoundingClientRect();return {title:document.querySelector(".page-header h1")?.textContent||document.querySelector(".conversation h1")?.textContent||"",textLength:document.body.innerText.length,fatal:Boolean(document.querySelector(".fatal-error")),loadError:Boolean(document.querySelector(".error-state")),viewportHeight:document.documentElement.clientHeight,contentHeight:content?.clientHeight||0,pageClientHeight:page?.clientHeight||0,pageScrollHeight:page?.scrollHeight||0,scrollable:Boolean(page&&page.scrollHeight>page.clientHeight+1),scrollPoint:rect?{x:Math.round(rect.left+rect.width/2),y:Math.round(rect.top+Math.min(rect.height/2,240))}:null}})()`,
       returnByValue: true,
@@ -82,7 +131,7 @@ async function main() {
       });
       scrollWorked = scrolled.result.value > 0;
     }
-    const screenshot = await call("Page.captureScreenshot", { format: "png" });
+    const screenshot = await call("Page.captureScreenshot", { format: "png", fromSurface: false });
     fs.writeFileSync(path.join(outputRoot, `${index + 1}-${pages[index]}.png`), Buffer.from(screenshot.data, "base64"));
     results.push({ page: pages[index], ...value, scrollWorked });
   }
@@ -93,5 +142,5 @@ async function main() {
 
 main().catch((error) => {
   process.stderr.write(`${error.stack}\n`);
-  process.exitCode = 1;
+  process.exit(1);
 });
